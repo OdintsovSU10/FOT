@@ -7,7 +7,7 @@ import { EmployeeLayout } from './components/layout/EmployeeLayout';
 import { useTheme } from './hooks/useTheme';
 
 // Auth pages
-import { LoginPage, RegisterPage, TwoFactorPage, PendingApprovalPage } from './pages/auth';
+import { LoginPage, RegisterPage, TwoFactorPage, PendingApprovalPage, ForgotPasswordPage, ResetPasswordPage } from './pages/auth';
 
 // Dashboard
 import { DashboardPage } from './pages/DashboardPage';
@@ -68,6 +68,22 @@ const AppRoutes = () => {
       />
       <Route path="/verify-2fa" element={<TwoFactorPage />} />
       <Route path="/pending-approval" element={<PendingApprovalPage />} />
+      <Route
+        path="/forgot-password"
+        element={
+          <PublicRoute>
+            <ForgotPasswordPage />
+          </PublicRoute>
+        }
+      />
+      <Route
+        path="/reset-password"
+        element={
+          <PublicRoute>
+            <ResetPasswordPage />
+          </PublicRoute>
+        }
+      />
 
       {/* Root redirect based on position */}
       <Route element={<ProtectedRoute />}>

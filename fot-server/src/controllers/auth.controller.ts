@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import { Request, Response } from 'express';
 import jwt from 'jsonwebtoken';
 import { z } from 'zod';
@@ -28,6 +29,15 @@ const verify2FASchema = z.object({
 
 const recoveryCodeSchema = z.object({
   code: z.string().min(8).max(9), // XXXX-XXXX или XXXXXXXX
+});
+
+const forgotPasswordSchema = z.object({
+  email: z.string().email(),
+});
+
+const resetPasswordSchema = z.object({
+  token: z.string().min(1),
+  password: z.string().min(8),
 });
 
 /**
@@ -339,6 +349,148 @@ export const authController = {
       }
       console.error('Recovery code error:', error);
       res.status(500).json({ success: false, error: 'Recovery failed' });
+    }
+  },
+
+  /**
+   * POST /api/auth/forgot-password
+   * Запрос на сброс пароля
+   */
+  async forgotPassword(req: Request, res: Response): Promise<void> {
+    try {
+      const { email } = forgotPasswordSchema.parse(req.body);
+
+      // Ищем пользователя в Supabase Auth
+      const { data: usersData, error: listError } = await supabase.auth.admin.listUsers();
+
+      if (listError) {
+        console.error('List users error:', listError);
+        // Не раскрываем детали ошибки
+        res.json({
+          success: true,
+          message: 'Если аккаунт с таким email существует, инструкции по сбросу пароля будут отправлены.',
+        });
+        return;
+      }
+
+      const user = usersData.users.find(u => u.email === email);
+
+      if (!user) {
+        // Не раскрываем, что пользователя нет — для безопасности
+        res.json({
+          success: true,
+          message: 'Если аккаунт с таким email существует, инструкции по сбросу пароля будут отправлены.',
+        });
+        return;
+      }
+
+      // Генерируем токен сброса
+      const resetToken = crypto.randomBytes(32).toString('hex');
+      const resetTokenExpires = new Date(Date.now() + 60 * 60 * 1000).toISOString(); // 1 час
+
+      // Сохраняем токен в профиле
+      const { error: updateError } = await supabase
+        .from('user_profiles')
+        .update({
+          reset_token: resetToken,
+          reset_token_expires: resetTokenExpires,
+        })
+        .eq('id', user.id);
+
+      if (updateError) {
+        console.error('Update reset token error:', updateError);
+        res.status(500).json({ success: false, error: 'Не удалось создать запрос на сброс пароля' });
+        return;
+      }
+
+      await auditService.logFromRequest(req, user.id, 'PASSWORD_RESET_REQUESTED' as any, {
+        details: { email },
+      });
+
+      // В production здесь будет отправка email
+      // Для разработки логируем токен в консоль
+      console.log(`[Password Reset] Token for ${email}: ${resetToken}`);
+
+      res.json({
+        success: true,
+        message: 'Если аккаунт с таким email существует, инструкции по сбросу пароля будут отправлены.',
+        // В development режиме возвращаем токен (убрать в production)
+        ...(env.NODE_ENV === 'development' && { reset_token: resetToken }),
+      });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        res.status(400).json({ success: false, error: error.errors[0].message });
+        return;
+      }
+      console.error('Forgot password error:', error);
+      res.status(500).json({ success: false, error: 'Ошибка при запросе сброса пароля' });
+    }
+  },
+
+  /**
+   * POST /api/auth/reset-password
+   * Сброс пароля по токену
+   */
+  async resetPassword(req: Request, res: Response): Promise<void> {
+    try {
+      const { token, password } = resetPasswordSchema.parse(req.body);
+
+      // Ищем профиль с таким токеном
+      const { data: profile, error: profileError } = await supabase
+        .from('user_profiles')
+        .select('id, reset_token, reset_token_expires')
+        .eq('reset_token', token)
+        .single();
+
+      if (profileError || !profile) {
+        res.status(400).json({ success: false, error: 'Недействительная или просроченная ссылка для сброса пароля' });
+        return;
+      }
+
+      // Проверяем срок действия
+      if (!profile.reset_token_expires || new Date(profile.reset_token_expires) < new Date()) {
+        // Очищаем просроченный токен
+        await supabase
+          .from('user_profiles')
+          .update({ reset_token: null, reset_token_expires: null })
+          .eq('id', profile.id);
+
+        res.status(400).json({ success: false, error: 'Ссылка для сброса пароля истекла. Запросите новую.' });
+        return;
+      }
+
+      // Обновляем пароль через Supabase Admin API
+      const { error: updateError } = await supabase.auth.admin.updateUserById(profile.id, {
+        password,
+      });
+
+      if (updateError) {
+        console.error('Password update error:', updateError);
+        res.status(500).json({ success: false, error: 'Не удалось обновить пароль' });
+        return;
+      }
+
+      // Очищаем токен сброса
+      await supabase
+        .from('user_profiles')
+        .update({ reset_token: null, reset_token_expires: null })
+        .eq('id', profile.id);
+
+      await auditService.logFromRequest(req, profile.id, 'PASSWORD_RESET_COMPLETED' as any, {
+        details: { method: 'reset_token' },
+      });
+
+      res.json({
+        success: true,
+        message: 'Пароль успешно изменён. Теперь вы можете войти с новым паролем.',
+      });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        res.status(400).json({ success: false, error: error.errors[0].message });
+        return;
+      }
+      console.error('Reset password error:', error);
+      res.status(500).json({ success: false, error: 'Ошибка при сбросе пароля' });
     }
   },
 

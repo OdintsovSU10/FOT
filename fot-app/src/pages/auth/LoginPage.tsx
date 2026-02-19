@@ -173,7 +173,7 @@ export const LoginPage: React.FC = () => {
                 </div>
                 <span className={styles.checkboxLabel}>Запомнить меня</span>
               </div>
-              <Link to="#" className={styles.forgotLink}>Забыли пароль?</Link>
+              <Link to="/forgot-password" className={styles.forgotLink}>Забыли пароль?</Link>
             </div>
 
             <button type="submit" className={styles.submitBtn} disabled={loading}>

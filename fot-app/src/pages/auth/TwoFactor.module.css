@@ -281,6 +281,165 @@
   height: 16px;
 }
 
+/* Группа формы */
+.formGroup {
+  margin-bottom: 20px;
+}
+
+.formLabel {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+}
+
+.formInput {
+  width: 100%;
+  height: 48px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0 16px;
+  font-size: 14px;
+  font-family: inherit;
+  color: var(--text-primary);
+  outline: none;
+  transition: all 0.15s ease;
+  box-sizing: border-box;
+}
+
+.formInput::placeholder {
+  color: var(--text-tertiary);
+}
+
+.formInput:hover {
+  border-color: var(--border-hover, #3f3f46);
+}
+
+.formInput:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-muted);
+  background: var(--bg-secondary);
+}
+
+.formInput:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.formInput.error {
+  border-color: var(--error);
+  box-shadow: 0 0 0 3px var(--error-muted);
+}
+
+/* Обёртка для инпута с иконкой */
+.inputWrapper {
+  position: relative;
+}
+
+.inputWrapper .formInput {
+  padding-right: 48px;
+}
+
+.inputIcon {
+  position: absolute;
+  right: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  cursor: pointer;
+  color: var(--text-tertiary);
+  transition: color 0.15s ease;
+  display: flex;
+  align-items: center;
+}
+
+.inputIcon:hover {
+  color: var(--text-secondary);
+}
+
+.inputIcon svg {
+  width: 18px;
+  height: 18px;
+}
+
+/* Информационный блок */
+.infoBox {
+  background: var(--accent-muted);
+  border: 1px solid rgba(59, 130, 246, 0.2);
+  border-radius: 10px;
+  padding: 12px 16px;
+  margin-bottom: 4px;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.infoBox svg {
+  width: 18px;
+  height: 18px;
+  color: var(--accent);
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.infoBox span {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+/* Сообщение об успехе */
+.successMessage {
+  background: var(--success-muted);
+  border: 1px solid rgba(34, 197, 94, 0.2);
+  border-radius: 10px;
+  padding: 12px 16px;
+  margin-bottom: 20px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.successMessage svg {
+  width: 18px;
+  height: 18px;
+  color: var(--success);
+  flex-shrink: 0;
+}
+
+.successMessage span {
+  font-size: 13px;
+  color: var(--success);
+}
+
+/* Требования к паролю */
+.passwordRequirements {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.requirement {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-tertiary);
+  transition: color 0.15s ease;
+}
+
+.requirement.met {
+  color: var(--success);
+}
+
+.requirement svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
 /* Футер */
 .footer {
   text-align: center;
