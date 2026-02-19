@@ -3,6 +3,10 @@ import { z } from 'zod';
 
 dotenv.config();
 
+// Преобразует пустые строки и undefined в undefined (для optional полей)
+const optionalString = z.preprocess(v => (v === '' || v === undefined) ? undefined : v, z.string().optional());
+const optionalUrl = z.preprocess(v => (v === '' || v === undefined) ? undefined : v, z.string().url().optional());
+
 const envSchema = z.object({
   SUPABASE_URL: z.string().url(),
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(1),
@@ -13,6 +17,16 @@ const envSchema = z.object({
   PORT: z.string().default('3000'),
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   CORS_ORIGIN: z.string().default('http://localhost:5173'),
+
+  // Sigur REST API — внутренний доступ (для разработки)
+  SIGUR_INTERNAL_URL: optionalUrl,
+  SIGUR_INTERNAL_USERNAME: optionalString,
+  SIGUR_INTERNAL_PASSWORD: optionalString,
+
+  // Sigur REST API — внешний доступ (добавится позже)
+  SIGUR_EXTERNAL_URL: optionalUrl,
+  SIGUR_EXTERNAL_USERNAME: optionalString,
+  SIGUR_EXTERNAL_PASSWORD: optionalString,
 });
 
 const parsed = envSchema.safeParse(process.env);

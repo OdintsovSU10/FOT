@@ -11,6 +11,7 @@ import adminRoutes from './routes/admin.routes.js';
 import skudRoutes from './routes/skud.routes.js';
 import structureRoutes from './routes/structure.routes.js';
 import auditRoutes from './routes/audit.routes.js';
+import sigurRoutes from './routes/sigur.routes.js';
 
 const app = express();
 
@@ -40,6 +41,7 @@ app.use('/api/admin', adminRoutes);
 app.use('/api/skud', skudRoutes);
 app.use('/api/structure', structureRoutes);
 app.use('/api/audit', auditRoutes);
+app.use('/api/sigur', sigurRoutes);
 
 // 404 handler
 app.use((_req, res) => {
