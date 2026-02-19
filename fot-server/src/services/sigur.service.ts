@@ -178,8 +178,14 @@ class SigurService {
   async fetchAllPaginated<T>(endpoint: string, params?: Record<string, any>, connection?: ConnectionType): Promise<T[]> {
     const allItems: T[] = [];
     let offset = 0;
+    let page = 0;
+
+    console.log(`[sigur paginate] start: ${endpoint}`, params);
 
     while (true) {
+      page++;
+      console.log(`[sigur paginate] page ${page}, offset ${offset}`);
+
       const response = await this.request<any>(endpoint, {
         ...params,
         limit: PAGE_SIZE,
@@ -187,6 +193,7 @@ class SigurService {
       }, connection);
 
       const items = response?.data || response || [];
+      console.log(`[sigur paginate] page ${page} got ${Array.isArray(items) ? items.length : 'non-array'} items`);
 
       if (!Array.isArray(items) || items.length === 0) {
         break;
@@ -201,6 +208,7 @@ class SigurService {
       offset += PAGE_SIZE;
     }
 
+    console.log(`[sigur paginate] done: ${allItems.length} total items in ${page} pages`);
     return allItems;
   }
 
@@ -258,6 +266,16 @@ class SigurService {
     if (startTime) params.startTime = startTime;
     if (endTime) params.endTime = endTime;
     return this.fetchAllPaginated('/api/v1/events/parsed', params, connection);
+  }
+
+  /** Получить ограниченное кол-во событий (для preview) */
+  async getEventsLimited(startTime?: string, endTime?: string, maxItems = 200, connection?: ConnectionType) {
+    const params: Record<string, any> = { limit: maxItems };
+    if (startTime) params.startTime = startTime;
+    if (endTime) params.endTime = endTime;
+    const response = await this.request<any>('/api/v1/events/parsed', params, connection);
+    const items = response?.data || response || [];
+    return Array.isArray(items) ? items.slice(0, maxItems) : [];
   }
 
   /** Получить коды событий */

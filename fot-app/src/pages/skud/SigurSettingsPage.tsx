@@ -93,9 +93,15 @@ export const SigurSettingsPage = () => {
     try {
       const startTime = `${previewStart}T00:00:00`;
       const endTime = `${previewEnd}T23:59:59`;
+      console.log('[preview] calling with:', { startTime, endTime });
       const data = await sigurService.preview(startTime, endTime);
+      console.log('[preview] result:', data);
+      console.log('[preview] data.data:', data?.data);
+      console.log('[preview] data.sampleFields:', data?.sampleFields);
+      console.log('[preview] data.totalFetched:', data?.totalFetched);
       setPreviewData(data);
-    } catch {
+    } catch (err) {
+      console.error('[preview] error:', err);
       setError('Ошибка загрузки данных предпросмотра');
     } finally {
       setPreviewLoading(false);

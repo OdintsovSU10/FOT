@@ -225,11 +225,17 @@ export const sigurController = {
       const { startTime, endTime, connection: conn } = req.query;
       const connection = (conn as 'external' | 'internal') || undefined;
 
-      const rawData = await sigurService.getEvents(
+      console.log('[sigur preview] fetching events (limited):', { startTime, endTime, connection });
+
+      // Для preview берём только 200 событий вместо всех
+      const rawData = await sigurService.getEventsLimited(
         startTime as string | undefined,
         endTime as string | undefined,
+        200,
         connection,
       );
+
+      console.log('[sigur preview] rawData count:', rawData.length);
 
       // Маппим для показа плоских полей
       const mapped = rawData

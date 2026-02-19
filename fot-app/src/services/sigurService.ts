@@ -17,6 +17,7 @@ interface ISigurPreviewResult {
   data: Record<string, unknown>[];
   sampleFields: string[];
   totalFetched: number;
+  mappedCount?: number;
 }
 
 interface ISigurSyncResult {
@@ -33,10 +34,12 @@ export const sigurService = {
   },
 
   async preview(startTime: string, endTime: string): Promise<ISigurPreviewResult> {
-    const response = await apiClient.get<ApiResponse<ISigurPreviewResult>>(
+    console.log('[sigur] preview request:', { startTime, endTime });
+    const result = await apiClient.get<ISigurPreviewResult>(
       `/sigur/preview?startTime=${encodeURIComponent(startTime)}&endTime=${encodeURIComponent(endTime)}`
     );
-    return response.data;
+    console.log('[sigur] preview response:', result);
+    return result;
   },
 
   async sync(startDate: string, endDate: string): Promise<ISigurSyncResult> {
