@@ -16,8 +16,30 @@
   overflow-y: auto;
 }
 
+.overlay {
+  display: none;
+}
+
 @media (max-width: 768px) {
   .main {
     margin-left: 0;
+  }
+
+  .overlay {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 99;
+  }
+
+  .content {
+    padding: 16px;
+  }
+}
+
+@media (max-width: 430px) {
+  .content {
+    padding: 12px;
   }
 }

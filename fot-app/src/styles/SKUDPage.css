@@ -849,3 +849,17 @@
     flex-wrap: wrap;
   }
 }
+
+@media (max-width: 430px) {
+  .skud-page {
+    padding: 0.5rem;
+  }
+
+  .skud-header {
+    gap: 0.5rem;
+  }
+
+  .skud-cards-list {
+    max-height: 160px;
+  }
+}

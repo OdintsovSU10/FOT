@@ -149,7 +149,12 @@ const navGroups: INavGroup[] = [
   },
 ];
 
-export const EmployeeSidebar: FC = () => {
+interface IEmployeeSidebarProps {
+  isOpen?: boolean;
+  onClose?: () => void;
+}
+
+export const EmployeeSidebar: FC<IEmployeeSidebarProps> = ({ isOpen, onClose }) => {
   const navigate = useNavigate();
   const location = useLocation();
   const { profile, logout } = useAuth();
@@ -176,6 +181,7 @@ export const EmployeeSidebar: FC = () => {
 
   const handleItemClick = (path: string) => {
     navigate(path);
+    onClose?.();
   };
 
   const handleLogout = () => {
@@ -193,7 +199,7 @@ export const EmployeeSidebar: FC = () => {
   };
 
   return (
-    <aside className={styles.sidebar}>
+    <aside className={`${styles.sidebar} ${isOpen ? styles.open : ''}`}>
       <div className={styles.logo}>
         <img src={logoSrc} alt="FOT" className={styles.logoImage} />
       </div>

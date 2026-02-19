@@ -541,6 +541,26 @@
   }
 }
 
+@media (max-width: 430px) {
+  .skud-analysis-page {
+    padding: 0.5rem;
+  }
+
+  .skud-analysis-header {
+    gap: 0.5rem;
+  }
+
+  .skud-analysis-controls h2 {
+    font-size: 0.875rem;
+    min-width: auto;
+  }
+
+  .employee-card {
+    min-width: 160px;
+    padding: 0.5rem;
+  }
+}
+
 /* Overlay для загрузки */
 .modal-overlay {
   position: fixed;

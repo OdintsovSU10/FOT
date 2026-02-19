@@ -645,3 +645,50 @@
   border: 4px solid white;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 }
+
+/* Mobile: 2FA and auth card */
+@media (max-width: 430px) {
+  .authCard {
+    padding: 24px 20px;
+  }
+
+  .twoFactorCode input {
+    width: 40px;
+    height: 48px;
+    font-size: 20px;
+  }
+
+  .twoFactorCode {
+    gap: 6px;
+  }
+
+  .pendingIcon {
+    width: 64px;
+    height: 64px;
+  }
+
+  .pendingIcon svg {
+    width: 32px;
+    height: 32px;
+  }
+
+  .authPanel {
+    padding: 24px 16px;
+  }
+}
+
+@media (max-width: 390px) {
+  .twoFactorCode input {
+    width: 36px;
+    height: 44px;
+    font-size: 18px;
+  }
+
+  .twoFactorCode {
+    gap: 4px;
+  }
+
+  .authCard {
+    padding: 20px 16px;
+  }
+}

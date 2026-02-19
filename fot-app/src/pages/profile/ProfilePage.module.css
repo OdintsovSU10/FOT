@@ -455,6 +455,28 @@
 }
 
 /* Responsive */
+@media (max-width: 768px) {
+  .infoSection {
+    grid-template-columns: 1fr;
+  }
+
+  .modalOverlay {
+    padding: 12px;
+  }
+
+  .modal {
+    max-width: calc(100% - 24px);
+  }
+
+  .modalHeader {
+    padding: 16px;
+  }
+
+  .modalContent {
+    padding: 16px;
+  }
+}
+
 @media (max-width: 600px) {
   .container {
     padding: 16px;

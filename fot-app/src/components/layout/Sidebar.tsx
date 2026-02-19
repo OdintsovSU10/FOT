@@ -56,9 +56,11 @@ const navGroups: INavGroup[] = [
 
 interface ISidebarProps {
   theme?: 'light' | 'dark';
+  isOpen?: boolean;
+  onClose?: () => void;
 }
 
-export const Sidebar: FC<ISidebarProps> = ({ theme = 'dark' }) => {
+export const Sidebar: FC<ISidebarProps> = ({ theme = 'dark', isOpen, onClose }) => {
   const navigate = useNavigate();
   const location = useLocation();
   const { profile, logout, hasPosition } = useAuth();
@@ -94,6 +96,7 @@ export const Sidebar: FC<ISidebarProps> = ({ theme = 'dark' }) => {
 
   const handleItemClick = (path: string) => {
     navigate(path);
+    onClose?.();
   };
 
   const handleLogout = () => {
@@ -125,7 +128,7 @@ export const Sidebar: FC<ISidebarProps> = ({ theme = 'dark' }) => {
   };
 
   return (
-    <aside className={styles.sidebar}>
+    <aside className={`${styles.sidebar} ${isOpen ? styles.open : ''}`}>
       <div className={styles.logo}>
         <img src={logoSrc} alt="FOT" className={styles.logoImage} />
       </div>

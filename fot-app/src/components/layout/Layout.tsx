@@ -2,6 +2,7 @@ import type { FC, ReactNode } from 'react';
 import styles from './Layout.module.css';
 import { Sidebar } from './Sidebar';
 import { Header } from './Header';
+import { useMobileMenu } from '../../hooks/useMobileMenu';
 
 interface ILayoutProps {
   children: ReactNode;
@@ -11,11 +12,14 @@ interface ILayoutProps {
 }
 
 export const Layout: FC<ILayoutProps> = ({ children, title, theme, onToggleTheme }) => {
+  const { isOpen, open, close } = useMobileMenu();
+
   return (
     <div className={styles.app}>
-      <Sidebar theme={theme} />
+      {isOpen && <div className={styles.overlay} onClick={close} />}
+      <Sidebar theme={theme} isOpen={isOpen} onClose={close} />
       <main className={styles.main}>
-        <Header title={title} theme={theme} onToggleTheme={onToggleTheme} />
+        <Header title={title} theme={theme} onToggleTheme={onToggleTheme} onMenuOpen={open} />
         <div className={styles.content}>
           {children}
         </div>

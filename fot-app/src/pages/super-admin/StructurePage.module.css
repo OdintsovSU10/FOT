@@ -314,3 +314,51 @@
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+/* Responsive */
+@media (max-width: 768px) {
+  .container {
+    padding: 16px;
+  }
+
+  .header {
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .nodeChildren {
+    margin-left: 12px;
+    padding-left: 4px;
+  }
+
+  .nodeActions {
+    opacity: 1;
+  }
+
+  .modalOverlay {
+    padding: 16px;
+  }
+
+  .modal {
+    max-width: calc(100% - 32px);
+  }
+}
+
+@media (max-width: 430px) {
+  .container {
+    padding: 12px;
+  }
+
+  .title {
+    font-size: 20px;
+  }
+
+  .nodeHeader {
+    padding: 8px 10px;
+    font-size: 13px;
+  }
+
+  .modal {
+    padding: 16px;
+  }
+}

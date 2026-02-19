@@ -142,3 +142,16 @@ body {
 ::-webkit-scrollbar-thumb:hover {
   background: var(--text-tertiary);
 }
+
+/* Mobile layout overrides */
+@media (max-width: 768px) {
+  :root {
+    --sidebar-width: 0px;
+  }
+}
+
+@media (max-width: 430px) {
+  :root {
+    --header-height: 52px;
+  }
+}

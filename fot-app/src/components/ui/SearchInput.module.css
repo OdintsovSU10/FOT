@@ -41,6 +41,13 @@
 
 @media (max-width: 768px) {
   .input {
-    width: 200px;
+    width: 160px;
+  }
+}
+
+@media (max-width: 430px) {
+  .input {
+    width: 120px;
+    font-size: 12px;
   }
 }

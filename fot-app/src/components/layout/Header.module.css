@@ -27,3 +27,62 @@
   align-items: center;
   gap: 8px;
 }
+
+.menuBtn {
+  display: none;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg-tertiary);
+  cursor: pointer;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+  flex-shrink: 0;
+}
+
+.menuBtn:hover {
+  background: var(--bg-elevated);
+}
+
+.menuBtn svg {
+  color: var(--text-secondary);
+}
+
+@media (max-width: 768px) {
+  .header {
+    padding: 0 16px;
+    gap: 8px;
+  }
+
+  .menuBtn {
+    display: flex;
+  }
+
+  .title {
+    font-size: 14px;
+  }
+
+  .left {
+    gap: 10px;
+  }
+}
+
+@media (max-width: 430px) {
+  .right {
+    gap: 4px;
+  }
+
+  .left {
+    gap: 6px;
+    overflow: hidden;
+  }
+
+  .title {
+    font-size: 13px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+}
