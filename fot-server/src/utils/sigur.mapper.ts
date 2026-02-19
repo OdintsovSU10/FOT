@@ -20,6 +20,9 @@ export interface IMappedSigurEvent {
   eventTime: string;     // HH:MM:SS
   accessPoint: string | null;
   direction: 'entry' | 'exit' | null;
+  employeeId: number | null;
+  blocked: boolean | null;
+  department: string | null;
 }
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -31,8 +34,9 @@ export const mapSigurEvent = (raw: Record<string, unknown>): IMappedSigurEvent |
   const data = raw.data as Record<string, any> | undefined;
   const additional = raw.additionalData as Record<string, any> | undefined;
 
-  // ФИО сотрудника
-  const personName = additional?.accessObject?.data?.name;
+  // Данные сотрудника
+  const personData = additional?.accessObject?.data;
+  const personName = personData?.name;
   if (typeof personName !== 'string' || !personName.trim()) return null;
 
   // Дата и время из timestamp
@@ -57,6 +61,13 @@ export const mapSigurEvent = (raw: Record<string, unknown>): IMappedSigurEvent |
   const apName = additional?.accessPoint?.name;
   const accessPoint = typeof apName === 'string' && apName.trim() ? apName.trim() : null;
 
+  // ID сотрудника в Sigur (для обогащения данными)
+  const employeeId = data?.employeeId ?? personData?.id ?? null;
+
+  // Статус сотрудника (AVAILABLE = не заблокирован)
+  const status = personData?.status;
+  const blocked = typeof status === 'string' ? status !== 'AVAILABLE' : null;
+
   return {
     physicalPerson: personName.trim(),
     cardNumber,
@@ -64,6 +75,9 @@ export const mapSigurEvent = (raw: Record<string, unknown>): IMappedSigurEvent |
     eventTime: time,
     accessPoint,
     direction,
+    employeeId: typeof employeeId === 'number' ? employeeId : null,
+    blocked,
+    department: null,
   };
 };
 
@@ -77,7 +91,7 @@ const parseTimestamp = (ts: string): { date: string | null; time: string | null 
 
     // Извлекаем локальное время из ISO-строки (до +/Z)
     // "2026-02-02T10:23:23+03:00" → date="2026-02-02", time="10:23:23"
-    const match = ts.match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}:\d{2})/);
+    const match = ts.match(/(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}:\d{2})/);
     if (match) {
       return { date: match[1], time: match[2] };
     }

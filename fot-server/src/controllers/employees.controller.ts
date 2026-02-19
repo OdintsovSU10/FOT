@@ -7,6 +7,7 @@ import { auditService } from '../services/audit.service.js';
 import { structureController } from './structure.controller.js';
 import { safeDecrypt } from '../utils/crypto.utils.js';
 import { parseDate, isValidDate, formatDateToISO } from '../utils/date.utils.js';
+import { parseFIO } from '../utils/fio.utils.js';
 import type { AuthenticatedRequest, Employee, EmployeeEncrypted } from '../types/index.js';
 
 // Интерфейс для запроса с файлом
@@ -80,6 +81,9 @@ function decryptEmployee(encrypted: EmployeeEncrypted, structureCache: Structure
     id: encrypted.id,
     organization_id: encrypted.organization_id,
     full_name: encryptionService.decrypt(encrypted.full_name_encrypted),
+    last_name: safeDecrypt(encrypted.last_name_encrypted),
+    first_name: safeDecrypt(encrypted.first_name_encrypted),
+    middle_name: safeDecrypt(encrypted.middle_name_encrypted),
     position: encryptionService.decrypt(encrypted.position_encrypted),
     current_salary: encrypted.current_salary_encrypted
       ? parseFloat(encryptionService.decrypt(encrypted.current_salary_encrypted))
@@ -205,10 +209,16 @@ export const employeesController = {
         return;
       }
 
+      // Парсим ФИО на части
+      const fio = parseFIO(validated.full_name);
+
       // Шифруем данные
       const encryptedData = {
         organization_id: organizationId,
         full_name_encrypted: encryptionService.encrypt(validated.full_name),
+        last_name_encrypted: encryptionService.encrypt(fio.lastName),
+        first_name_encrypted: fio.firstName ? encryptionService.encrypt(fio.firstName) : null,
+        middle_name_encrypted: fio.middleName ? encryptionService.encrypt(fio.middleName) : null,
         position_encrypted: encryptionService.encrypt(validated.position),
         current_salary_encrypted: validated.current_salary
           ? encryptionService.encrypt(String(validated.current_salary))
@@ -303,6 +313,10 @@ export const employeesController = {
 
       if (validated.full_name !== undefined) {
         updateData.full_name_encrypted = encryptionService.encrypt(validated.full_name);
+        const fio = parseFIO(validated.full_name);
+        updateData.last_name_encrypted = encryptionService.encrypt(fio.lastName);
+        updateData.first_name_encrypted = fio.firstName ? encryptionService.encrypt(fio.firstName) : null;
+        updateData.middle_name_encrypted = fio.middleName ? encryptionService.encrypt(fio.middleName) : null;
       }
       if (validated.position !== undefined) {
         updateData.position_encrypted = encryptionService.encrypt(validated.position);
@@ -597,6 +611,9 @@ export const employeesController = {
       const employeesToInsert: {
         organization_id: string;
         full_name_encrypted: string;
+        last_name_encrypted: string;
+        first_name_encrypted: string | null;
+        middle_name_encrypted: string | null;
         position_encrypted: string;
         hire_date_encrypted: string;
         birth_date_encrypted: string | null;
@@ -719,10 +736,16 @@ export const employeesController = {
           }
         }
 
+        // Парсим ФИО на части
+        const fio = parseFIO(fullName);
+
         // Добавляем сотрудника (только ссылки на справочники, без дублирования текста)
         employeesToInsert.push({
           organization_id: organizationId,
           full_name_encrypted: encryptionService.encrypt(fullName),
+          last_name_encrypted: encryptionService.encrypt(fio.lastName),
+          first_name_encrypted: fio.firstName ? encryptionService.encrypt(fio.firstName) : null,
+          middle_name_encrypted: fio.middleName ? encryptionService.encrypt(fio.middleName) : null,
           position_encrypted: encryptionService.encrypt(position),
           hire_date_encrypted: encryptionService.encrypt(hireDate),
           birth_date_encrypted: birthDate ? encryptionService.encrypt(birthDate) : null,

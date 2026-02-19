@@ -434,6 +434,9 @@ CREATE TABLE IF NOT EXISTS public.employees (
     id integer NOT NULL DEFAULT nextval('employees_id_seq'::regclass),
     organization_id uuid NOT NULL,
     full_name_encrypted text NOT NULL,
+    last_name_encrypted text,
+    first_name_encrypted text,
+    middle_name_encrypted text,
     position_encrypted text NOT NULL,
     current_salary_encrypted text,
     birth_date_encrypted text,
@@ -457,6 +460,9 @@ CREATE TABLE IF NOT EXISTS public.employees (
     CONSTRAINT tender_employees_organization_id_fkey FOREIGN KEY (organization_id) REFERENCES public.organizations(id)
 );
 COMMENT ON TABLE public.employees IS 'Таблица сотрудников организации (с шифрованием персональных данных)';
+COMMENT ON COLUMN public.employees.last_name_encrypted IS 'Фамилия (зашифровано)';
+COMMENT ON COLUMN public.employees.first_name_encrypted IS 'Имя (зашифровано)';
+COMMENT ON COLUMN public.employees.middle_name_encrypted IS 'Отчество (зашифровано)';
 COMMENT ON COLUMN public.employees.country_encrypted IS 'Страна гражданства (зашифровано)';
 COMMENT ON COLUMN public.employees.pension_number_encrypted IS 'СНИЛС - страховой номер ПФР (зашифровано)';
 COMMENT ON COLUMN public.employees.patent_issue_date_encrypted IS 'Дата выдачи патента на работу (зашифровано)';

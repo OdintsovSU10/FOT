@@ -1,12 +1,11 @@
 import { Router } from 'express';
 import { sigurController } from '../controllers/sigur.controller.js';
-import { authenticate, requireRole, requireOrganization } from '../middleware/auth.js';
+import { authenticate, requireRole } from '../middleware/auth.js';
 
 const router = Router();
 
-// Все роуты требуют аутентификации, организации и роли admin/super_admin
+// Все роуты требуют аутентификации и роли admin/super_admin
 router.use(authenticate as any);
-router.use(requireOrganization as any);
 router.use(requireRole('admin', 'owner', 'super_admin') as any);
 
 // GET /api/sigur/test — проверка подключения

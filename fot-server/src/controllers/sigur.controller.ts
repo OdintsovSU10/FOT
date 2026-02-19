@@ -231,18 +231,24 @@ export const sigurController = {
 
       console.log('[sigur preview] fetching events (paginated):', { startTime, endTime, connection });
 
-      // Забираем все события с пагинацией (как при синхронизации)
-      const rawData = await sigurService.getEvents(
+      // Забираем ограниченное кол-во событий для предпросмотра
+      const rawData = await sigurService.getEventsLimited(
         startTime as string | undefined,
         endTime as string | undefined,
+        500,
         connection,
       );
 
       console.log('[sigur preview] rawData count:', rawData.length);
 
+      if (rawData.length > 0) {
+        console.log('[sigur preview] RAW event sample:', JSON.stringify(rawData[0], null, 2));
+      }
+
       // Маппим и фильтруем по дате
       const startDateStr = (startTime as string)?.split('T')[0];
       const endDateStr = (endTime as string)?.split('T')[0];
+      console.log('[sigur preview] date filter:', { startDateStr, endDateStr });
 
       const mapped = rawData
         .map((raw: unknown) => mapSigurEvent(raw as Record<string, unknown>))
@@ -251,9 +257,35 @@ export const sigurController = {
           if (!startDateStr || !endDateStr) return true;
           return evt!.eventDate >= startDateStr && evt!.eventDate <= endDateStr;
         })
-        .slice(0, 20);
+        .slice(0, 20) as import('../utils/sigur.mapper.js').IMappedSigurEvent[];
 
-      const sampleFields = ['physicalPerson', 'eventDate', 'eventTime', 'direction', 'accessPoint', 'cardNumber'];
+      // Обогащаем данными из /employees (department, isBlocked)
+      if (mapped.length > 0) {
+        try {
+          const employees = await sigurService.getEmployees(undefined, connection) as Record<string, unknown>[];
+          const empMap = new Map<number, { departmentName: string | null; isBlocked: boolean }>();
+          for (const emp of employees) {
+            const id = emp.id as number;
+            if (typeof id === 'number') {
+              empMap.set(id, {
+                departmentName: (emp.departmentName as string) || null,
+                isBlocked: !!(emp.isBlocked),
+              });
+            }
+          }
+          for (const evt of mapped) {
+            if (evt.employeeId && empMap.has(evt.employeeId)) {
+              const info = empMap.get(evt.employeeId)!;
+              evt.department = info.departmentName;
+              evt.blocked = info.isBlocked;
+            }
+          }
+        } catch (e) {
+          console.warn('[sigur preview] failed to enrich with employee data:', e);
+        }
+      }
+
+      const sampleFields = ['physicalPerson', 'eventDate', 'eventTime', 'direction', 'accessPoint', 'cardNumber', 'department', 'blocked'];
 
       res.json({
         success: true,
@@ -280,10 +312,19 @@ export const sigurController = {
         return;
       }
 
-      const organizationId = req.user.organization_id;
+      let organizationId = req.user.organization_id;
       if (!organizationId) {
-        res.status(400).json({ success: false, error: 'Organization required' });
-        return;
+        // super_admin без привязки к организации — берём единственную
+        const { data: orgs } = await supabase.from('organizations').select('id').limit(2);
+        if (!orgs || orgs.length === 0) {
+          res.status(400).json({ success: false, error: 'Нет организаций в системе' });
+          return;
+        }
+        if (orgs.length > 1) {
+          res.status(400).json({ success: false, error: 'Укажите organization_id — в системе несколько организаций' });
+          return;
+        }
+        organizationId = orgs[0].id;
       }
 
       const { startDate, endDate } = req.body;

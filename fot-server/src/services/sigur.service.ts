@@ -260,19 +260,28 @@ class SigurService {
     return this.fetchAllPaginated('/api/v1/zones', undefined, connection);
   }
 
+  /**
+   * Добавляет таймзону +03:00 если она отсутствует.
+   * Sigur API игнорирует startTime/endTime без таймзоны.
+   */
+  private ensureTimezone(time: string): string {
+    if (/[+-]\d{2}:\d{2}$/.test(time) || time.endsWith('Z')) return time;
+    return `${time}+03:00`;
+  }
+
   /** Получить события (расширенные) с фильтрами по времени */
   async getEvents(startTime?: string, endTime?: string, connection?: ConnectionType) {
     const params: Record<string, any> = {};
-    if (startTime) params.startTime = startTime;
-    if (endTime) params.endTime = endTime;
+    if (startTime) params.startTime = this.ensureTimezone(startTime);
+    if (endTime) params.endTime = this.ensureTimezone(endTime);
     return this.fetchAllPaginated('/api/v1/events/parsed', params, connection);
   }
 
   /** Получить ограниченное кол-во событий (для preview) */
   async getEventsLimited(startTime?: string, endTime?: string, maxItems = 200, connection?: ConnectionType) {
     const params: Record<string, any> = { limit: maxItems };
-    if (startTime) params.startTime = startTime;
-    if (endTime) params.endTime = endTime;
+    if (startTime) params.startTime = this.ensureTimezone(startTime);
+    if (endTime) params.endTime = this.ensureTimezone(endTime);
     const response = await this.request<any>('/api/v1/events/parsed', params, connection);
     const items = response?.data || response || [];
     return Array.isArray(items) ? items.slice(0, maxItems) : [];

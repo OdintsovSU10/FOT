@@ -88,6 +88,11 @@ export const Button: FC<IButtonProps> = ({ label, onClick, disabled = false }) =
 - Не перечисляй, «что было сделано», если прямо не попросили.
 - Если нужен текст — не более 5 пунктов, каждый ≤ 12 слов.
 
+## Сервер (fot-server)
+
+- При изменении файлов в `fot-server/src/` — перезапустить сервер: `npx kill-port 3000 && cd fot-server && npx tsx watch src/index.ts &`
+- Фронтенд (fot-app) перезапускать не нужно — Vite подхватывает изменения автоматически
+
 ## .env
 
 - НИКОГДА не изменять `.env` файлы (`frontend/.env`, `backend/.env`)

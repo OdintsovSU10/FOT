@@ -110,6 +110,9 @@ export interface Employee {
   id: number;
   organization_id: string;
   full_name: string;
+  last_name: string | null;
+  first_name: string | null;
+  middle_name: string | null;
   position: string;
   hire_date: string;
   birth_date: string | null;

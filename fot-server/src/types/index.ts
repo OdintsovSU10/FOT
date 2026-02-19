@@ -59,6 +59,9 @@ export interface EmployeeEncrypted {
   id: number;
   organization_id: string;
   full_name_encrypted: string;
+  last_name_encrypted: string | null;
+  first_name_encrypted: string | null;
+  middle_name_encrypted: string | null;
   position_encrypted: string;
   current_salary_encrypted: string | null;
   birth_date_encrypted: string | null;
@@ -83,6 +86,9 @@ export interface Employee {
   id: number;
   organization_id: string;
   full_name: string;
+  last_name: string | null;
+  first_name: string | null;
+  middle_name: string | null;
   position: string;
   current_salary: number | null;
   birth_date: string | null;

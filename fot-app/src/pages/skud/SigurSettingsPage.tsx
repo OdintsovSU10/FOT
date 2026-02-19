@@ -25,6 +25,8 @@ const FIELD_LABELS: Record<string, string> = {
   direction: 'Направление',
   accessPoint: 'Точка доступа',
   cardNumber: 'Карта',
+  department: 'Отдел',
+  blocked: 'Заблокирован',
 };
 
 const DIRECTION_LABELS: Record<string, string> = {
@@ -230,7 +232,9 @@ export const SigurSettingsPage = () => {
                             ? (DIRECTION_LABELS[val] || val)
                             : f === 'eventDate' && typeof val === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(val)
                               ? val.split('-').reverse().join('.')
-                              : String(val ?? '—');
+                              : f === 'blocked' && typeof val === 'boolean'
+                                ? (val ? 'Да' : 'Нет')
+                                : String(val ?? '—');
                           return (
                             <td key={f} title={display}>
                               {display}
