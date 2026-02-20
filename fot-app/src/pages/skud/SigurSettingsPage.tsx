@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Settings, Wifi, WifiOff, RefreshCw, Eye, Download, Building2, Users, Trash2, Search, FolderTree, Briefcase } from 'lucide-react';
+import { Settings, Wifi, WifiOff, RefreshCw, Eye, Download, Search } from 'lucide-react';
 import { sigurService } from '../../services/sigurService';
 import '../../styles/SigurSettingsPage.css';
 
@@ -18,6 +18,15 @@ interface IPreviewData {
   mappedCount?: number;
 }
 
+interface ISyncAllStep {
+  id: number;
+  name: string;
+  label: string;
+  status: 'pending' | 'running' | 'done' | 'error';
+  result?: Record<string, unknown>;
+  error?: string;
+}
+
 const FIELD_LABELS: Record<string, string> = {
   physicalPerson: 'ФИО',
   eventDate: 'Дата',
@@ -34,6 +43,31 @@ const DIRECTION_LABELS: Record<string, string> = {
   exit: 'Выход',
 };
 
+const INITIAL_STEPS: ISyncAllStep[] = [
+  { id: 1, name: 'organizations', label: 'Организации', status: 'pending' },
+  { id: 2, name: 'clean-duplicates', label: 'Очистка дублей', status: 'pending' },
+  { id: 3, name: 'departments', label: 'Отделы (иерархия)', status: 'pending' },
+  { id: 4, name: 'positions', label: 'Должности', status: 'pending' },
+  { id: 5, name: 'employees', label: 'Сотрудники', status: 'pending' },
+];
+
+const renderStepResult = (name: string, result: Record<string, unknown>) => {
+  switch (name) {
+    case 'organizations':
+      return `Импорт: ${result.imported}, пропущено: ${result.skipped}`;
+    case 'clean-duplicates':
+      return `Удалено дублей: ${result.duplicatesRemoved}`;
+    case 'departments':
+      return `Новых: ${result.imported}, обновлено: ${result.updated}, связей: ${result.parentLinksSet}`;
+    case 'positions':
+      return `Из Sigur: ${result.imported}, обновлено: ${result.updated}, seed: ${result.seeded ?? 0}`;
+    case 'employees':
+      return `Импорт: ${result.imported}, обновлено: ${result.updated}, пропущено: ${result.skipped}`;
+    default:
+      return JSON.stringify(result);
+  }
+};
+
 export const SigurSettingsPage = () => {
   // Подключение
   const [connected, setConnected] = useState<boolean | null>(null);
@@ -41,42 +75,27 @@ export const SigurSettingsPage = () => {
   const [connectionType, setConnectionType] = useState('');
   const [error, setError] = useState('');
 
+  // Полная синхронизация структуры
+  const [syncAllRunning, setSyncAllRunning] = useState(false);
+  const [syncAllSteps, setSyncAllSteps] = useState<ISyncAllStep[]>(INITIAL_STEPS);
+  const [syncAllDone, setSyncAllDone] = useState(false);
+
   // Предпросмотр
   const [previewData, setPreviewData] = useState<IPreviewData | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewStart, setPreviewStart] = useState('');
   const [previewEnd, setPreviewEnd] = useState('');
 
-  // Организации
-  const [syncingOrgs, setSyncingOrgs] = useState(false);
-  const [orgResult, setOrgResult] = useState<{ imported: number; skipped: number; total: number } | null>(null);
+  // Discover
+  const [discovering, setDiscovering] = useState(false);
+  const [discoverData, setDiscoverData] = useState<Record<string, unknown> | null>(null);
 
-  // Очистка дублей
-  const [cleaningDups, setCleaningDups] = useState(false);
-  const [dupResult, setDupResult] = useState<{ totalBefore: number; totalAfter: number; duplicatesRemoved: number } | null>(null);
-
-  // Сотрудники
-  const [syncingEmps, setSyncingEmps] = useState(false);
-  const [empResult, setEmpResult] = useState<{ imported: number; skipped: number; total: number; errors: string[] } | null>(null);
-
-  // Синхронизация
+  // Синхронизация событий
   const [syncStartDate, setSyncStartDate] = useState('');
   const [syncEndDate, setSyncEndDate] = useState('');
   const [syncing, setSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState<ISyncResult | null>(null);
   const [syncProgress, setSyncProgress] = useState<{ percent: number; day: string; message: string } | null>(null);
-
-  // Discover
-  const [discovering, setDiscovering] = useState(false);
-  const [discoverData, setDiscoverData] = useState<Record<string, unknown> | null>(null);
-
-  // Отделы
-  const [syncingDepts, setSyncingDepts] = useState(false);
-  const [deptResult, setDeptResult] = useState<{ imported: number; updated: number; skipped: number; filtered: number; total: number; parentLinksSet: number } | null>(null);
-
-  // Должности
-  const [seedingPositions, setSeedingPositions] = useState(false);
-  const [posResult, setPosResult] = useState<{ created: number; skipped: number; total: number } | null>(null);
 
   // Инициализация дат текущим месяцем
   useEffect(() => {
@@ -108,10 +127,68 @@ export const SigurSettingsPage = () => {
     }
   }, []);
 
-  // Проверяем подключение при загрузке
   useEffect(() => {
     checkConnection();
   }, [checkConnection]);
+
+  const handleSyncAll = async () => {
+    setSyncAllRunning(true);
+    setSyncAllDone(false);
+    setError('');
+    setSyncAllSteps(INITIAL_STEPS.map(s => ({ ...s, status: 'pending', result: undefined, error: undefined })));
+
+    try {
+      const token = localStorage.getItem('access_token');
+      const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
+      const response = await fetch(`${apiUrl}/sigur/sync-all`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({}),
+      });
+
+      if (!response.ok || !response.body) {
+        throw new Error('Ошибка синхронизации');
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          try {
+            const data = JSON.parse(line.slice(6));
+            if (data.type === 'step') {
+              setSyncAllSteps(prev => prev.map(s =>
+                s.id === data.step
+                  ? { ...s, status: data.status, result: data.result, error: data.error }
+                  : s
+              ));
+            } else if (data.type === 'done') {
+              setSyncAllDone(true);
+            } else if (data.type === 'error') {
+              setError(data.message);
+            }
+          } catch { /* skip parse errors */ }
+        }
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Ошибка синхронизации');
+    } finally {
+      setSyncAllRunning(false);
+    }
+  };
 
   const handlePreview = async () => {
     if (!previewStart || !previewEnd) return;
@@ -120,60 +197,12 @@ export const SigurSettingsPage = () => {
     try {
       const startTime = `${previewStart}T00:00:00`;
       const endTime = `${previewEnd}T23:59:59`;
-      console.log('[preview] calling with:', { startTime, endTime });
       const data = await sigurService.preview(startTime, endTime);
-      console.log('[preview] result:', data);
-      console.log('[preview] data.data:', data?.data);
-      console.log('[preview] data.sampleFields:', data?.sampleFields);
-      console.log('[preview] data.totalFetched:', data?.totalFetched);
       setPreviewData(data);
-    } catch (err) {
-      console.error('[preview] error:', err);
+    } catch {
       setError('Ошибка загрузки данных предпросмотра');
     } finally {
       setPreviewLoading(false);
-    }
-  };
-
-  const handleSyncOrganizations = async () => {
-    setSyncingOrgs(true);
-    setOrgResult(null);
-    setError('');
-    try {
-      const result = await sigurService.syncOrganizations();
-      setOrgResult(result);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Ошибка импорта организаций');
-    } finally {
-      setSyncingOrgs(false);
-    }
-  };
-
-  const handleCleanDuplicates = async () => {
-    setCleaningDups(true);
-    setDupResult(null);
-    setError('');
-    try {
-      const result = await sigurService.cleanDuplicateOrganizations();
-      setDupResult(result);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Ошибка очистки дублей');
-    } finally {
-      setCleaningDups(false);
-    }
-  };
-
-  const handleSyncEmployees = async () => {
-    setSyncingEmps(true);
-    setEmpResult(null);
-    setError('');
-    try {
-      const result = await sigurService.syncEmployees();
-      setEmpResult(result);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Ошибка импорта сотрудников');
-    } finally {
-      setSyncingEmps(false);
     }
   };
 
@@ -191,34 +220,6 @@ export const SigurSettingsPage = () => {
     }
   };
 
-  const handleSyncDepartments = async () => {
-    setSyncingDepts(true);
-    setDeptResult(null);
-    setError('');
-    try {
-      const result = await sigurService.syncDepartments('');
-      setDeptResult(result);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Ошибка импорта отделов');
-    } finally {
-      setSyncingDepts(false);
-    }
-  };
-
-  const handleSeedPositions = async () => {
-    setSeedingPositions(true);
-    setPosResult(null);
-    setError('');
-    try {
-      const result = await sigurService.seedPositions('');
-      setPosResult(result);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Ошибка создания справочника');
-    } finally {
-      setSeedingPositions(false);
-    }
-  };
-
   const handleSync = async () => {
     if (!syncStartDate || !syncEndDate) return;
     setSyncing(true);
@@ -226,7 +227,7 @@ export const SigurSettingsPage = () => {
     setSyncProgress(null);
     setError('');
     try {
-      const token = localStorage.getItem('token');
+      const token = localStorage.getItem('access_token');
       const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
       const response = await fetch(`${apiUrl}/sigur/sync`, {
         method: 'POST',
@@ -333,147 +334,54 @@ export const SigurSettingsPage = () => {
         </div>
       </div>
 
-      {/* Секция 2: Организации */}
+      {/* Секция 2: Полная синхронизация структуры */}
       <div className="sigur-section">
         <h2 className="sigur-section-title">
-          <Building2 size={18} />
-          Импорт организаций из Sigur
+          <RefreshCw size={18} />
+          Полная синхронизация структуры
         </h2>
         <div className="sigur-connection-row">
           <button
             className="sigur-btn sigur-btn-primary"
-            onClick={handleSyncOrganizations}
-            disabled={syncingOrgs || !connected}
+            onClick={handleSyncAll}
+            disabled={syncAllRunning || !connected}
           >
-            <Building2 size={14} />
-            {syncingOrgs ? 'Импорт...' : 'Импортировать отделы как организации'}
-          </button>
-          <button
-            className="sigur-btn"
-            onClick={handleCleanDuplicates}
-            disabled={cleaningDups}
-          >
-            <Trash2 size={14} />
-            {cleaningDups ? 'Очистка...' : 'Удалить дубли организаций'}
+            <RefreshCw size={14} className={syncAllRunning ? 'sigur-spin' : ''} />
+            {syncAllRunning ? 'Синхронизация...' : 'Полная синхронизация'}
           </button>
         </div>
-        {orgResult && (
-          <div className="sigur-sync-result">
-            <div className="sigur-sync-stats">
-              <span className="sigur-sync-stat">Всего отделов в Sigur: <strong>{orgResult.total}</strong></span>
-              <span className="sigur-sync-stat success">Новых импортировано: <strong>{orgResult.imported}</strong></span>
-              <span className="sigur-sync-stat skipped">Уже в базе: <strong>{orgResult.skipped}</strong></span>
-            </div>
-            {orgResult.imported === 0 && orgResult.skipped > 0 && (
-              <div style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)', marginTop: '0.5rem' }}>
-                Все отделы уже импортированы. Если видите дубли — нажмите «Удалить дубли организаций».
+
+        {(syncAllRunning || syncAllDone) && (
+          <div className="sigur-stepper">
+            {syncAllSteps.map(step => (
+              <div key={step.id} className={`sigur-step sigur-step--${step.status}`}>
+                <div className="sigur-step-indicator">
+                  {step.status === 'done' && <span>&#10003;</span>}
+                  {step.status === 'running' && <span className="sigur-step-spinner" />}
+                  {step.status === 'error' && <span>&#10007;</span>}
+                  {step.status === 'pending' && <span className="sigur-step-number">{step.id}</span>}
+                </div>
+                <div className="sigur-step-content">
+                  <div className="sigur-step-label">{step.label}</div>
+                  {step.status === 'running' && (
+                    <div className="sigur-step-status">Выполняется...</div>
+                  )}
+                  {step.status === 'done' && step.result && (
+                    <div className="sigur-step-result">
+                      {renderStepResult(step.name, step.result)}
+                    </div>
+                  )}
+                  {step.status === 'error' && step.error && (
+                    <div className="sigur-step-error">{step.error}</div>
+                  )}
+                </div>
               </div>
-            )}
-          </div>
-        )}
-        {dupResult && (
-          <div className="sigur-sync-result">
-            <div className="sigur-sync-stats">
-              <span className="sigur-sync-stat">Было: <strong>{dupResult.totalBefore}</strong></span>
-              <span className="sigur-sync-stat success">Удалено дублей: <strong>{dupResult.duplicatesRemoved}</strong></span>
-              <span className="sigur-sync-stat">Осталось: <strong>{dupResult.totalAfter}</strong></span>
-            </div>
+            ))}
           </div>
         )}
       </div>
 
-      {/* Секция 3: Сотрудники */}
-      <div className="sigur-section">
-        <h2 className="sigur-section-title">
-          <Users size={18} />
-          Импорт сотрудников из Sigur
-        </h2>
-        <div className="sigur-connection-row">
-          <button
-            className="sigur-btn sigur-btn-primary"
-            onClick={handleSyncEmployees}
-            disabled={syncingEmps || !connected}
-          >
-            <Users size={14} />
-            {syncingEmps ? 'Импорт...' : 'Импортировать сотрудников'}
-          </button>
-        </div>
-        {empResult && (
-          <div className="sigur-sync-result">
-            <div className="sigur-sync-stats">
-              <span className="sigur-sync-stat">Всего в Sigur: <strong>{empResult.total}</strong></span>
-              <span className="sigur-sync-stat success">Импортировано: <strong>{empResult.imported}</strong></span>
-              <span className="sigur-sync-stat skipped">Пропущено: <strong>{empResult.skipped}</strong></span>
-            </div>
-            {empResult.errors.length > 0 && (
-              <details className="sigur-sync-errors">
-                <summary>Ошибки ({empResult.errors.length})</summary>
-                <ul>
-                  {empResult.errors.slice(0, 20).map((e, i) => <li key={i}>{e}</li>)}
-                </ul>
-              </details>
-            )}
-          </div>
-        )}
-      </div>
-
-      {/* Секция 4: Отделы */}
-      <div className="sigur-section">
-        <h2 className="sigur-section-title">
-          <FolderTree size={18} />
-          Импорт отделов из Sigur (с иерархией)
-        </h2>
-        <div className="sigur-connection-row">
-          <button
-            className="sigur-btn sigur-btn-primary"
-            onClick={handleSyncDepartments}
-            disabled={syncingDepts || !connected}
-          >
-            <FolderTree size={14} />
-            {syncingDepts ? 'Импорт...' : 'Импортировать отделы'}
-          </button>
-        </div>
-        {deptResult && (
-          <div className="sigur-sync-result">
-            <div className="sigur-sync-stats">
-              <span className="sigur-sync-stat">Всего в Sigur: <strong>{deptResult.total}</strong></span>
-              <span className="sigur-sync-stat success">Новых: <strong>{deptResult.imported}</strong></span>
-              <span className="sigur-sync-stat">Обновлено: <strong>{deptResult.updated}</strong></span>
-              <span className="sigur-sync-stat skipped">Пропущено: <strong>{deptResult.skipped}</strong></span>
-              <span className="sigur-sync-stat">Отфильтровано: <strong>{deptResult.filtered}</strong></span>
-              <span className="sigur-sync-stat">Связей parent: <strong>{deptResult.parentLinksSet}</strong></span>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Секция 5: Должности */}
-      <div className="sigur-section">
-        <h2 className="sigur-section-title">
-          <Briefcase size={18} />
-          Справочник должностей
-        </h2>
-        <div className="sigur-connection-row">
-          <button
-            className="sigur-btn sigur-btn-primary"
-            onClick={handleSeedPositions}
-            disabled={seedingPositions}
-          >
-            <Briefcase size={14} />
-            {seedingPositions ? 'Создание...' : 'Создать справочник должностей'}
-          </button>
-        </div>
-        {posResult && (
-          <div className="sigur-sync-result">
-            <div className="sigur-sync-stats">
-              <span className="sigur-sync-stat success">Создано: <strong>{posResult.created}</strong></span>
-              <span className="sigur-sync-stat skipped">Уже есть: <strong>{posResult.skipped}</strong></span>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Секция 6: Discover API */}
+      {/* Секция 3: Discover API */}
       <div className="sigur-section">
         <h2 className="sigur-section-title">
           <Search size={18} />
@@ -498,7 +406,7 @@ export const SigurSettingsPage = () => {
         )}
       </div>
 
-      {/* Секция 7: Предпросмотр */}
+      {/* Секция 4: Предпросмотр */}
       <div className="sigur-section">
         <h2 className="sigur-section-title">
           <Eye size={18} />
@@ -575,11 +483,11 @@ export const SigurSettingsPage = () => {
         )}
       </div>
 
-      {/* Секция 4: Синхронизация */}
+      {/* Секция 5: Синхронизация событий */}
       <div className="sigur-section">
         <h2 className="sigur-section-title">
           <Download size={18} />
-          Синхронизация в базу
+          Синхронизация событий в базу
         </h2>
         <div className="sigur-sync-controls">
           <label>

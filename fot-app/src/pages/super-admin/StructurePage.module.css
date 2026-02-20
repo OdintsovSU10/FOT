@@ -1,13 +1,14 @@
 .container {
   padding: 24px;
-  max-width: 1200px;
+  max-width: 900px;
 }
 
+/* Header */
 .header {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-  margin-bottom: 24px;
+  margin-bottom: 20px;
 }
 
 .title {
@@ -28,348 +29,201 @@
   gap: 8px;
 }
 
-.addCompanyBtn,
-.addDeptBtn {
-  padding: 10px 20px;
-  background: var(--primary);
-  color: white;
-  border: none;
+.refreshBtn {
+  width: 40px;
+  height: 40px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
   border-radius: 8px;
   cursor: pointer;
-  font-weight: 500;
-  transition: background 0.2s;
-}
-
-.addDeptBtn {
-  background: #22c55e;
-}
-
-.addCompanyBtn:hover {
-  background: var(--primary-hover);
-}
-
-.addDeptBtn:hover {
-  background: #16a34a;
-}
-
-.orgSelector {
+  font-size: 20px;
+  color: var(--text-secondary);
   display: flex;
   align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+}
+
+.refreshBtn:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+
+/* Toolbar */
+.toolbar {
+  display: flex;
   gap: 12px;
+  align-items: center;
   margin-bottom: 16px;
-  padding: 12px 16px;
-  background: var(--bg-secondary);
-  border-radius: 8px;
 }
 
-.orgSelector label {
-  font-weight: 500;
-  color: var(--text-secondary);
-  white-space: nowrap;
-}
-
-.orgSelector select {
+.searchInput {
   flex: 1;
-  padding: 8px 12px;
+  padding: 10px 14px;
   border: 1px solid var(--border);
   border-radius: 8px;
   font-size: 14px;
   background: var(--bg-primary);
   color: var(--text-primary);
+  outline: none;
+  transition: border-color 0.2s;
 }
 
-.addOrgBtn {
-  padding: 8px 16px;
-  background: var(--primary);
-  color: white;
-  border: none;
+.searchInput:focus {
+  border-color: var(--primary);
+}
+
+.toolbarActions {
+  display: flex;
+  gap: 6px;
+}
+
+.toolbarBtn {
+  padding: 8px 14px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
   border-radius: 8px;
   cursor: pointer;
-  font-weight: 500;
-  font-size: 14px;
-  white-space: nowrap;
-  transition: background 0.2s;
-}
-
-.addOrgBtn:hover {
-  background: var(--primary-hover);
-}
-
-.loading {
-  text-align: center;
-  padding: 60px 20px;
+  font-size: 13px;
   color: var(--text-secondary);
+  white-space: nowrap;
+  transition: all 0.2s;
 }
 
+.toolbarBtn:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+
+/* Loading */
+.loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 80px 20px;
+  color: var(--text-secondary);
+  font-size: 14px;
+}
+
+.spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid var(--border);
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Error */
 .error {
   background: #fef2f2;
   border: 1px solid #fecaca;
   color: #dc2626;
-  padding: 12px 16px;
+  padding: 14px 16px;
   border-radius: 8px;
   margin-bottom: 16px;
   display: flex;
   justify-content: space-between;
   align-items: center;
+  font-size: 14px;
 }
 
 .error button {
-  background: none;
+  padding: 6px 14px;
+  background: #dc2626;
+  color: white;
   border: none;
-  color: #dc2626;
+  border-radius: 6px;
   cursor: pointer;
-  font-size: 18px;
-  padding: 0 8px;
+  font-size: 13px;
 }
 
-/* Дерево */
+.error button:hover {
+  background: #b91c1c;
+}
+
+/* Tree */
 .tree {
   background: var(--bg-secondary);
   border-radius: 12px;
-  padding: 20px;
-  min-height: 400px;
+  padding: 12px 8px;
+  min-height: 300px;
 }
 
 .empty {
   text-align: center;
   padding: 60px 20px;
   color: var(--text-secondary);
-}
-
-.empty p {
-  margin: 0 0 8px 0;
-}
-
-.emptyHint {
   font-size: 14px;
-  opacity: 0.7;
 }
 
-/* Узел дерева */
+/* Nodes */
 .treeNode {
-  margin: 4px 0;
+  user-select: none;
 }
 
 .nodeHeader {
   display: flex;
   align-items: center;
-  padding: 10px 12px;
-  border-radius: 8px;
-  gap: 8px;
-  transition: background 0.2s;
+  padding: 8px 12px;
+  border-radius: 6px;
+  gap: 6px;
+  cursor: default;
+  transition: background 0.15s;
 }
 
-.nodeHeader:hover {
+.branchNode {
+  cursor: pointer;
+}
+
+.branchNode:hover {
   background: var(--surface-hover);
 }
 
-.companyNode {
-  background: rgba(59, 130, 246, 0.1);
-  border-left: 3px solid #3b82f6;
+.leafNode:hover {
+  background: rgba(0, 0, 0, 0.02);
 }
 
-.departmentNode {
-  background: rgba(34, 197, 94, 0.1);
-  border-left: 3px solid #22c55e;
-}
-
-.subdivisionNode {
-  background: rgba(168, 85, 247, 0.1);
-  border-left: 3px solid #a855f7;
-}
-
-.expandBtn {
-  width: 20px;
-  height: 20px;
-  background: none;
-  border: none;
-  cursor: pointer;
+.expandIcon {
+  width: 16px;
+  font-size: 14px;
   color: var(--text-secondary);
-  font-size: 10px;
-  padding: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  flex-shrink: 0;
 }
 
-.expandPlaceholder {
-  width: 20px;
-}
-
-.nodeType {
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  color: var(--text-secondary);
-  padding: 2px 6px;
-  background: var(--bg-tertiary);
-  border-radius: 4px;
+.leafIcon {
+  width: 16px;
+  font-size: 6px;
+  color: var(--border);
+  flex-shrink: 0;
+  text-align: center;
 }
 
 .nodeName {
   flex: 1;
+  font-size: 14px;
   font-weight: 500;
   color: var(--text-primary);
+  line-height: 1.3;
 }
 
-.nodeActions {
-  display: flex;
-  gap: 4px;
-  opacity: 0;
-  transition: opacity 0.2s;
-}
-
-.nodeHeader:hover .nodeActions {
-  opacity: 1;
-}
-
-.addChildBtn {
-  padding: 4px 8px;
+.employeeCount {
   font-size: 12px;
-  background: var(--primary);
-  color: white;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-  white-space: nowrap;
-}
-
-.addChildBtn:hover {
-  background: var(--primary-hover);
-}
-
-.deleteBtn {
-  width: 24px;
-  height: 24px;
-  background: #fee2e2;
-  color: #dc2626;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 16px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.deleteBtn:hover {
-  background: #fecaca;
+  color: var(--text-secondary);
+  background: var(--bg-tertiary);
+  padding: 2px 8px;
+  border-radius: 10px;
+  flex-shrink: 0;
 }
 
 .nodeChildren {
+  border-left: 1px solid var(--border);
   margin-left: 20px;
-  border-left: 1px dashed var(--border);
-  padding-left: 8px;
-}
-
-/* Сиротские отделы */
-.orphanSection {
-  margin-top: 24px;
-  padding-top: 24px;
-  border-top: 1px dashed var(--border);
-}
-
-.orphanHeader {
-  font-size: 12px;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  color: var(--text-secondary);
-  margin-bottom: 12px;
-}
-
-/* Модалка */
-.modalOverlay {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(0, 0, 0, 0.5);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1000;
-}
-
-.modal {
-  background: var(--bg-primary);
-  border-radius: 12px;
-  padding: 24px;
-  width: 100%;
-  max-width: 400px;
-  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.2);
-}
-
-.modalTitle {
-  font-size: 18px;
-  font-weight: 600;
-  margin: 0 0 20px 0;
-  color: var(--text-primary);
-}
-
-.formGroup {
-  margin-bottom: 20px;
-}
-
-.formGroup label {
-  display: block;
-  font-size: 14px;
-  font-weight: 500;
-  color: var(--text-secondary);
-  margin-bottom: 8px;
-}
-
-.formGroup input {
-  width: 100%;
-  padding: 10px 12px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  font-size: 14px;
-  background: var(--bg-secondary);
-  color: var(--text-primary);
-}
-
-.formGroup input:focus {
-  outline: none;
-  border-color: var(--primary);
-}
-
-.modalActions {
-  display: flex;
-  gap: 12px;
-  justify-content: flex-end;
-}
-
-.cancelBtn {
-  padding: 10px 20px;
-  background: var(--bg-secondary);
-  color: var(--text-primary);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  cursor: pointer;
-}
-
-.cancelBtn:hover {
-  background: var(--surface-hover);
-}
-
-.saveBtn {
-  padding: 10px 20px;
-  background: var(--primary);
-  color: white;
-  border: none;
-  border-radius: 8px;
-  cursor: pointer;
-  font-weight: 500;
-}
-
-.saveBtn:hover:not(:disabled) {
-  background: var(--primary-hover);
-}
-
-.saveBtn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
 }
 
 /* Responsive */
@@ -378,35 +232,21 @@
     padding: 16px;
   }
 
-  .header {
+  .toolbar {
     flex-direction: column;
-    gap: 12px;
   }
 
-  .headerActions {
+  .toolbarActions {
     width: 100%;
   }
 
-  .headerActions .addCompanyBtn,
-  .headerActions .addDeptBtn {
+  .toolbarBtn {
     flex: 1;
+    text-align: center;
   }
 
   .nodeChildren {
     margin-left: 12px;
-    padding-left: 4px;
-  }
-
-  .nodeActions {
-    opacity: 1;
-  }
-
-  .modalOverlay {
-    padding: 16px;
-  }
-
-  .modal {
-    max-width: calc(100% - 32px);
   }
 }
 
@@ -419,26 +259,16 @@
     font-size: 20px;
   }
 
-  .orgSelector {
-    flex-direction: column;
-    align-items: stretch;
-    gap: 8px;
-  }
-
-  .addOrgBtn {
-    text-align: center;
-  }
-
-  .headerActions {
-    flex-direction: column;
-  }
-
   .nodeHeader {
-    padding: 8px 10px;
+    padding: 7px 8px;
     font-size: 13px;
   }
 
-  .modal {
-    padding: 16px;
+  .nodeName {
+    font-size: 13px;
+  }
+
+  .nodeChildren {
+    margin-left: 8px;
   }
 }

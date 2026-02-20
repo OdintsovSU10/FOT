@@ -53,17 +53,17 @@ export const structureController = {
     try {
       const organizationId = req.user.organization_id;
 
-      if (!organizationId) {
-        res.status(400).json({ success: false, error: 'Организация не указана' });
-        return;
-      }
-
-      const { data: departmentsData, error } = await supabase
+      let query = supabase
         .from('org_departments')
         .select('*')
-        .eq('organization_id', organizationId)
         .eq('is_active', true)
         .order('sort_order');
+
+      if (organizationId) {
+        query = query.eq('organization_id', organizationId);
+      }
+
+      const { data: departmentsData, error } = await query;
 
       if (error) {
         console.error('Get structure error:', error);

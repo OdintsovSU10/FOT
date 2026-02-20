@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { Users, Plus, Upload, Search, Archive, Trash2, Edit3, X, Check, ChevronDown, ChevronUp, AlertTriangle, FileSpreadsheet } from 'lucide-react';
+import { Users, Plus, Upload, Search, Archive, Trash2, Edit3, X, Check, ChevronDown, ChevronUp, AlertTriangle, FileSpreadsheet, List, GitBranch } from 'lucide-react';
 import { employeeService } from '../../services/employeeService';
 import { adminService } from '../../services/adminService';
 import { useAuth } from '../../contexts/AuthContext';
+import { EmployeeTreeView } from '../../components/employees/EmployeeTreeView';
 import type { Employee, EmployeeInput, Organization } from '../../types';
 import '../../styles/TenderPage.css';
 
@@ -21,6 +22,7 @@ export const TenderPage: React.FC = () => {
   const [error, setError] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [showArchived, setShowArchived] = useState(false);
+  const [viewMode, setViewMode] = useState<'list' | 'tree'>('list');
 
   // Filter states
   const [positionFilter, setPositionFilter] = useState('');
@@ -57,10 +59,6 @@ export const TenderPage: React.FC = () => {
   }, [needsOrgSelector]);
 
   const loadEmployees = useCallback(async () => {
-    if (needsOrgSelector && !selectedOrgId) {
-      setLoading(false);
-      return;
-    }
     setLoading(true);
     setError('');
     try {
@@ -71,7 +69,7 @@ export const TenderPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [showArchived, effectiveOrgId, needsOrgSelector, selectedOrgId]);
+  }, [showArchived, effectiveOrgId]);
 
   useEffect(() => {
     loadEmployees();
@@ -277,7 +275,7 @@ export const TenderPage: React.FC = () => {
             onChange={(e) => setSelectedOrgId(e.target.value || null)}
             className="filter-select"
           >
-            <option value="">Выберите организацию</option>
+            <option value="">Все организации</option>
             {organizations.map((org) => (
               <option key={org.id} value={org.id}>{org.name}</option>
             ))}
@@ -336,6 +334,23 @@ export const TenderPage: React.FC = () => {
           <span>{showArchived ? 'Архив' : 'Архив'}</span>
         </button>
 
+        <div className="view-mode-toggle">
+          <button
+            className={`btn-view-mode ${viewMode === 'list' ? 'active' : ''}`}
+            onClick={() => setViewMode('list')}
+            title="Список"
+          >
+            <List size={16} />
+          </button>
+          <button
+            className={`btn-view-mode ${viewMode === 'tree' ? 'active' : ''}`}
+            onClick={() => setViewMode('tree')}
+            title="По отделам"
+          >
+            <GitBranch size={16} />
+          </button>
+        </div>
+
         {canEdit && (
           <div className="tender-actions">
             <button className="btn-import" onClick={() => setShowImportModal(true)}>
@@ -370,6 +385,25 @@ export const TenderPage: React.FC = () => {
 
       {loading ? (
         <div className="loading">Загрузка...</div>
+      ) : viewMode === 'tree' ? (
+        <EmployeeTreeView
+          employees={filteredEmployees}
+          searchQuery={searchQuery}
+          expandedId={expandedId}
+          isEditing={isEditing}
+          canEdit={canEdit}
+          showArchived={showArchived}
+          effectiveOrgId={effectiveOrgId}
+          onRowClick={handleRowClick}
+          onStartEditing={startEditing}
+          onCancelEditing={cancelEditing}
+          onSaveEditing={saveEditing}
+          onArchive={handleArchive}
+          onRestore={handleRestore}
+          onDelete={handleDelete}
+          editFormData={editFormData}
+          onEditFormChange={setEditFormData}
+        />
       ) : filteredEmployees.length === 0 ? (
         <div className="empty-state">
           <Users size={48} />

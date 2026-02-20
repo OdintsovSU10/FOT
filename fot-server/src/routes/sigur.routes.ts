@@ -50,6 +50,9 @@ router.get('/preview', sigurController.preview as any);
 
 // === Sync эндпоинты ===
 
+// POST /api/sigur/sync-all — полная синхронизация структуры (SSE)
+router.post('/sync-all', sigurSyncController.syncAll as any);
+
 // POST /api/sigur/sync — синхронизация событий из Sigur в БД
 router.post('/sync', sigurSyncController.sync as any);
 

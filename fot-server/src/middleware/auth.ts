@@ -176,7 +176,8 @@ export const injectOrganizationFromQuery = (
 
   const orgId = req.query.organization_id as string | undefined;
   if (!orgId) {
-    res.status(400).json({ success: false, error: 'Параметр organization_id обязателен для super_admin' });
+    // Super admin может работать без organization_id — видит все организации
+    next();
     return;
   }
 

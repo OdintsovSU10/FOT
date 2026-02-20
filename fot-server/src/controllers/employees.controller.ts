@@ -41,16 +41,20 @@ interface StructureCache {
 /**
  * Загружает кэш структуры организации (отделы, должности)
  */
-async function loadStructureCache(organizationId: string): Promise<StructureCache> {
+async function loadStructureCache(organizationId?: string): Promise<StructureCache> {
   const cache: StructureCache = {
     departments: new Map(),
     positions: new Map(),
   };
 
-  const [departmentsRes, positionsRes] = await Promise.all([
-    supabase.from('org_departments').select('id, name_encrypted').eq('organization_id', organizationId),
-    supabase.from('positions').select('id, name_encrypted').eq('organization_id', organizationId),
-  ]);
+  let deptQuery = supabase.from('org_departments').select('id, name_encrypted');
+  let posQuery = supabase.from('positions').select('id, name_encrypted');
+  if (organizationId) {
+    deptQuery = deptQuery.eq('organization_id', organizationId);
+    posQuery = posQuery.eq('organization_id', organizationId);
+  }
+
+  const [departmentsRes, positionsRes] = await Promise.all([deptQuery, posQuery]);
 
   (departmentsRes.data || []).forEach((d: { id: string; name_encrypted: string }) => {
     cache.departments.set(d.id, safeDecrypt(d.name_encrypted) || '');
@@ -104,19 +108,19 @@ export const employeesController = {
       const showArchived = req.query.archived === 'true';
       const organizationId = req.user.organization_id;
 
-      if (!organizationId) {
-        res.status(400).json({ success: false, error: 'Organization required' });
-        return;
+      let empQuery = supabase
+        .from('employees')
+        .select('*')
+        .eq('is_archived', showArchived)
+        .order('id');
+
+      if (organizationId) {
+        empQuery = empQuery.eq('organization_id', organizationId);
       }
 
       const [employeesResult, structureCache] = await Promise.all([
-        supabase
-          .from('employees')
-          .select('*')
-          .eq('organization_id', organizationId)
-          .eq('is_archived', showArchived)
-          .order('id'),
-        loadStructureCache(organizationId),
+        empQuery,
+        loadStructureCache(organizationId || undefined),
       ]);
 
       if (employeesResult.error) {

@@ -4,17 +4,15 @@ import { supabase } from '../config/database.js';
 import { encryptionService } from '../services/encryption.service.js';
 import { auditService } from '../services/audit.service.js';
 import { mapSigurEvent } from '../utils/sigur.mapper.js';
-import { parseFIO } from '../utils/fio.utils.js';
+import {
+  syncOrganizationsLogic,
+  cleanDuplicateOrganizationsLogic,
+  syncDepartmentsLogic,
+  syncPositionsFromSigurLogic,
+  seedPositionsLogic,
+  syncEmployeesLogic,
+} from '../services/sigur-sync.service.js';
 import type { AuthenticatedRequest } from '../types/index.js';
-
-/** Системные папки Sigur — фильтруем при импорте отделов */
-const SIGUR_SYSTEM_DEPARTMENTS = [
-  'api_keys', 'автопарк', 'гостевые qr-коды',
-];
-
-function isSystemDepartment(name: string): boolean {
-  return SIGUR_SYSTEM_DEPARTMENTS.includes(name.toLowerCase().trim());
-}
 
 export const sigurSyncController = {
   /**
@@ -242,145 +240,14 @@ export const sigurSyncController = {
    */
   async syncEmployees(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
-      if (!sigurService.isConfigured()) {
-        res.status(503).json({ success: false, error: 'Sigur не настроен' });
-        return;
-      }
-
       const organizationId = req.body.organization_id || req.user.organization_id;
       if (!organizationId) {
         res.status(400).json({ success: false, error: 'organization_id обязателен' });
         return;
       }
-
       const connection = (req.body.connection as 'external' | 'internal') || undefined;
-
-      console.log('[syncEmployees] fetching employees from Sigur...');
-      const sigurEmployees = await sigurService.getEmployeesCached(connection);
-      console.log('[syncEmployees] got', sigurEmployees.length, 'employees from Sigur');
-
-      if (sigurEmployees.length === 0) {
-        res.json({ success: true, data: { imported: 0, updated: 0, skipped: 0, total: 0 } });
-        return;
-      }
-
-      // Загружаем существующих сотрудников для upsert по sigur_employee_id
-      const { data: existingEmps } = await supabase
-        .from('employees')
-        .select('id, sigur_employee_id')
-        .eq('organization_id', organizationId)
-        .not('sigur_employee_id', 'is', null);
-
-      const sigurIdToDbId = new Map<number, number>();
-      for (const e of existingEmps || []) {
-        if (e.sigur_employee_id != null) {
-          sigurIdToDbId.set(e.sigur_employee_id, e.id);
-        }
-      }
-
-      // Маппинг org_departments: sigur_department_id → db uuid
-      const { data: dbDepartments } = await supabase
-        .from('org_departments')
-        .select('id, sigur_department_id')
-        .eq('organization_id', organizationId)
-        .not('sigur_department_id', 'is', null);
-
-      const sigurDeptToDbId = new Map<number, string>();
-      for (const d of dbDepartments || []) {
-        if (d.sigur_department_id != null) {
-          sigurDeptToDbId.set(d.sigur_department_id, d.id);
-        }
-      }
-
-      // Маппинг positions: sigur_position_id → db uuid
-      const { data: dbPositions } = await supabase
-        .from('positions')
-        .select('id, sigur_position_id')
-        .eq('organization_id', organizationId)
-        .not('sigur_position_id', 'is', null);
-
-      const sigurPosToDbId = new Map<number, string>();
-      for (const p of dbPositions || []) {
-        if (p.sigur_position_id != null) {
-          sigurPosToDbId.set(p.sigur_position_id, p.id);
-        }
-      }
-
-      let imported = 0;
-      let updated = 0;
-      let skipped = 0;
-      const errors: string[] = [];
-
-      const BATCH_SIZE = 100;
-      const inserts: Record<string, unknown>[] = [];
-
-      for (const emp of sigurEmployees) {
-        const fullName = (emp.name as string) || '';
-        if (!fullName.trim()) { skipped++; continue; }
-
-        const sigurEmpId = emp.id as number | undefined;
-
-        // Резолвим подразделение и должность
-        const sigurDeptId = emp.departmentId as number | undefined;
-        const orgDepartmentId = sigurDeptId ? sigurDeptToDbId.get(sigurDeptId) || null : null;
-
-        const sigurPosId = emp.positionId as number | undefined;
-        const positionId = sigurPosId ? sigurPosToDbId.get(sigurPosId) || null : null;
-
-        // Если уже импортирован — обновляем привязки
-        if (sigurEmpId && sigurIdToDbId.has(sigurEmpId)) {
-          const dbId = sigurIdToDbId.get(sigurEmpId)!;
-          const updateFields: Record<string, unknown> = {};
-
-          if (orgDepartmentId) updateFields.org_department_id = orgDepartmentId;
-          if (positionId) updateFields.position_id = positionId;
-
-          if (Object.keys(updateFields).length > 0) {
-            const { error: updateError } = await supabase
-              .from('employees')
-              .update(updateFields)
-              .eq('id', dbId);
-            if (!updateError) updated++;
-            else errors.push(`update ${fullName}: ${updateError.message}`);
-          } else {
-            skipped++;
-          }
-          continue;
-        }
-
-        const fio = parseFIO(fullName);
-
-        inserts.push({
-          organization_id: organizationId,
-          full_name_encrypted: encryptionService.encrypt(fullName.trim()),
-          last_name_encrypted: encryptionService.encrypt(fio.lastName),
-          first_name_encrypted: fio.firstName ? encryptionService.encrypt(fio.firstName) : null,
-          middle_name_encrypted: fio.middleName ? encryptionService.encrypt(fio.middleName) : null,
-          hire_date_encrypted: encryptionService.encrypt(new Date().toISOString().slice(0, 10)),
-          sigur_employee_id: sigurEmpId || null,
-          org_department_id: orgDepartmentId,
-          position_id: positionId,
-        });
-      }
-
-      console.log('[syncEmployees] prepared', inserts.length, 'inserts');
-
-      for (let i = 0; i < inserts.length; i += BATCH_SIZE) {
-        const batch = inserts.slice(i, i + BATCH_SIZE);
-        const { error: insertError } = await supabase.from('employees').insert(batch);
-        if (insertError) {
-          errors.push(`Ошибка вставки батча ${i / BATCH_SIZE + 1}: ${insertError.message}`);
-        } else {
-          imported += batch.length;
-        }
-      }
-
-      console.log(`[syncEmployees] done: ${imported} imported, ${updated} updated, ${skipped} skipped`);
-
-      res.json({
-        success: true,
-        data: { imported, updated, skipped, total: sigurEmployees.length, errors },
-      });
+      const result = await syncEmployeesLogic(organizationId, connection);
+      res.json({ success: true, data: result });
     } catch (error) {
       console.error('Sigur syncEmployees error:', error);
       res.status(500).json({ success: false, error: 'Ошибка импорта сотрудников из Sigur' });
@@ -393,143 +260,14 @@ export const sigurSyncController = {
    */
   async syncDepartments(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
-      if (!sigurService.isConfigured()) {
-        res.status(503).json({ success: false, error: 'Sigur не настроен' });
-        return;
-      }
-
       const organizationId = req.body.organization_id || req.user.organization_id;
       if (!organizationId) {
         res.status(400).json({ success: false, error: 'organization_id обязателен' });
         return;
       }
-
       const connection = (req.body.connection as 'external' | 'internal') || undefined;
-      const departments = await sigurService.getDepartments(connection) as Record<string, unknown>[];
-
-      if (!departments || departments.length === 0) {
-        res.json({ success: true, data: { imported: 0, updated: 0, skipped: 0, filtered: 0, total: 0 } });
-        return;
-      }
-
-      console.log(`[syncDepartments] got ${departments.length} departments from Sigur`);
-
-      // Загружаем существующие отделы для upsert по sigur_department_id
-      const { data: existingDepts } = await supabase
-        .from('org_departments')
-        .select('id, sigur_department_id, name_encrypted')
-        .eq('organization_id', organizationId);
-
-      const sigurIdToDbId = new Map<number, string>();
-      for (const d of existingDepts || []) {
-        if (d.sigur_department_id != null) {
-          sigurIdToDbId.set(d.sigur_department_id, d.id);
-        }
-      }
-
-      let imported = 0;
-      let updated = 0;
-      let skipped = 0;
-      let filtered = 0;
-      const errors: string[] = [];
-
-      // Pass 1: Upsert отделов (без parent_id)
-      const sigurToDbMap = new Map<number, string>(); // sigurId → db uuid
-
-      // Копируем существующие маппинги
-      for (const [sigurId, dbId] of sigurIdToDbId) {
-        sigurToDbMap.set(sigurId, dbId);
-      }
-
-      // Определяем корневой элемент (Объект) — не создаём как отдел
-      const rootDept = departments.find(d =>
-        (d.parentId === null || d.parentId === undefined || d.parentId === 0) &&
-        departments.some(child => child.parentId === d.id)
-      );
-      const rootSigurId = rootDept?.id as number | undefined;
-
-      for (const dept of departments) {
-        const name = (dept.name as string) || '';
-        const sigurId = dept.id as number;
-
-        if (!name.trim()) { skipped++; continue; }
-
-        // Пропускаем корневой элемент (это сама организация)
-        if (rootSigurId && sigurId === rootSigurId) {
-          skipped++;
-          continue;
-        }
-
-        // Фильтруем системные папки
-        if (isSystemDepartment(name)) {
-          filtered++;
-          continue;
-        }
-
-        // Upsert: есть ли уже в БД?
-        if (sigurIdToDbId.has(sigurId)) {
-          // Обновляем название
-          const dbId = sigurIdToDbId.get(sigurId)!;
-          const { error: updateError } = await supabase
-            .from('org_departments')
-            .update({ name_encrypted: encryptionService.encrypt(name.trim()) })
-            .eq('id', dbId);
-
-          if (updateError) {
-            errors.push(`update ${name}: ${updateError.message}`);
-          } else {
-            updated++;
-          }
-          sigurToDbMap.set(sigurId, dbId);
-        } else {
-          // Создаём новый
-          const { data: created, error: insertError } = await supabase
-            .from('org_departments')
-            .insert({
-              organization_id: organizationId,
-              name_encrypted: encryptionService.encrypt(name.trim()),
-              sigur_department_id: sigurId,
-            })
-            .select('id')
-            .single();
-
-          if (insertError) {
-            errors.push(`insert ${name}: ${insertError.message}`);
-          } else {
-            imported++;
-            sigurToDbMap.set(sigurId, created.id);
-          }
-        }
-      }
-
-      // Pass 2: Проставляем parent_id связи
-      let parentLinksSet = 0;
-      for (const dept of departments) {
-        const sigurId = dept.id as number;
-        const parentSigurId = dept.parentId as number | null | undefined;
-
-        if (!parentSigurId || !sigurToDbMap.has(sigurId)) continue;
-
-        // Если parent — корень, ставим null (верхний уровень)
-        const parentDbId = (rootSigurId && parentSigurId === rootSigurId)
-          ? null
-          : sigurToDbMap.get(parentSigurId) || null;
-
-        const dbId = sigurToDbMap.get(sigurId)!;
-        const { error: linkError } = await supabase
-          .from('org_departments')
-          .update({ parent_id: parentDbId })
-          .eq('id', dbId);
-
-        if (!linkError) parentLinksSet++;
-      }
-
-      console.log(`[syncDepartments] done: ${imported} imported, ${updated} updated, ${skipped} skipped, ${filtered} filtered, ${parentLinksSet} parent links`);
-
-      res.json({
-        success: true,
-        data: { imported, updated, skipped, filtered, total: departments.length, parentLinksSet, errors },
-      });
+      const result = await syncDepartmentsLogic(organizationId, connection);
+      res.json({ success: true, data: result });
     } catch (error) {
       console.error('Sigur syncDepartments error:', error);
       res.status(500).json({ success: false, error: 'Ошибка импорта отделов из Sigur' });
@@ -542,91 +280,93 @@ export const sigurSyncController = {
    */
   async syncPositions(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
-      if (!sigurService.isConfigured()) {
-        res.status(503).json({ success: false, error: 'Sigur не настроен' });
-        return;
-      }
-
       const organizationId = req.body.organization_id || req.user.organization_id;
       if (!organizationId) {
         res.status(400).json({ success: false, error: 'organization_id обязателен' });
         return;
       }
-
       const connection = (req.body.connection as 'external' | 'internal') || undefined;
-      const sigurPositions = await sigurService.getPositions(connection);
-
-      if (!sigurPositions || sigurPositions.length === 0) {
-        res.json({ success: true, data: { imported: 0, updated: 0, skipped: 0, total: 0 } });
-        return;
-      }
-
-      console.log(`[syncPositions] got ${sigurPositions.length} positions from Sigur`);
-
-      // Загружаем существующие должности для upsert по sigur_position_id
-      const { data: existingPositions } = await supabase
-        .from('positions')
-        .select('id, sigur_position_id, name_encrypted')
-        .eq('organization_id', organizationId);
-
-      const sigurIdToDbId = new Map<number, string>();
-      for (const p of existingPositions || []) {
-        if (p.sigur_position_id != null) {
-          sigurIdToDbId.set(p.sigur_position_id, p.id);
-        }
-      }
-
-      let imported = 0;
-      let updated = 0;
-      let skipped = 0;
-      const errors: string[] = [];
-
-      for (const pos of sigurPositions) {
-        const name = (pos.name as string) || '';
-        const sigurId = pos.id as number;
-
-        if (!name.trim()) { skipped++; continue; }
-
-        if (sigurIdToDbId.has(sigurId)) {
-          const dbId = sigurIdToDbId.get(sigurId)!;
-          const { error: updateError } = await supabase
-            .from('positions')
-            .update({ name_encrypted: encryptionService.encrypt(name.trim()) })
-            .eq('id', dbId);
-
-          if (updateError) {
-            errors.push(`update ${name}: ${updateError.message}`);
-          } else {
-            updated++;
-          }
-        } else {
-          const { error: insertError } = await supabase
-            .from('positions')
-            .insert({
-              organization_id: organizationId,
-              name_encrypted: encryptionService.encrypt(name.trim()),
-              sigur_position_id: sigurId,
-              category: 'other',
-            });
-
-          if (insertError) {
-            errors.push(`insert ${name}: ${insertError.message}`);
-          } else {
-            imported++;
-          }
-        }
-      }
-
-      console.log(`[syncPositions] done: ${imported} imported, ${updated} updated, ${skipped} skipped`);
-
-      res.json({
-        success: true,
-        data: { imported, updated, skipped, total: sigurPositions.length, errors },
-      });
+      const result = await syncPositionsFromSigurLogic(organizationId, connection);
+      res.json({ success: true, data: result });
     } catch (error) {
       console.error('Sigur syncPositions error:', error);
       res.status(500).json({ success: false, error: 'Ошибка импорта должностей из Sigur' });
     }
   },
 
+  /**
+   * POST /api/sigur/sync-all
+   * Полная синхронизация структуры из Sigur (SSE)
+   * Последовательность: организации → дубли → отделы → должности → сотрудники
+   */
+  async syncAll(req: AuthenticatedRequest, res: Response): Promise<void> {
+    try {
+      if (!sigurService.isConfigured()) {
+        res.status(503).json({ success: false, error: 'Sigur не настроен' });
+        return;
+      }
+
+      let organizationId = req.body.organization_id || req.user.organization_id;
+      if (!organizationId) {
+        const { data: orgs } = await supabase.from('organizations').select('id').limit(1);
+        organizationId = orgs?.[0]?.id || null;
+      }
+      if (!organizationId) {
+        res.status(400).json({ success: false, error: 'organization_id обязателен' });
+        return;
+      }
+
+      res.setHeader('Content-Type', 'text/event-stream');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Connection', 'keep-alive');
+      res.flushHeaders();
+
+      const sendProgress = (data: Record<string, unknown>) => {
+        res.write(`data: ${JSON.stringify(data)}\n\n`);
+      };
+
+      const connection = (req.body.connection as 'external' | 'internal') || undefined;
+
+      const steps = [
+        { id: 1, name: 'organizations', label: 'Импорт организаций', fn: () => syncOrganizationsLogic(connection) },
+        { id: 2, name: 'clean-duplicates', label: 'Очистка дублей', fn: () => cleanDuplicateOrganizationsLogic() },
+        { id: 3, name: 'departments', label: 'Импорт отделов (иерархия)', fn: () => syncDepartmentsLogic(organizationId, connection) },
+        { id: 4, name: 'positions', label: 'Импорт должностей', fn: async () => {
+          const fromSigur = await syncPositionsFromSigurLogic(organizationId, connection);
+          const seeded = await seedPositionsLogic(organizationId);
+          return { ...fromSigur, seeded: seeded.created };
+        }},
+        { id: 5, name: 'employees', label: 'Импорт сотрудников', fn: () => syncEmployeesLogic(organizationId, connection) },
+      ];
+
+      const results: Record<string, unknown> = {};
+
+      for (const step of steps) {
+        sendProgress({ type: 'step', step: step.id, name: step.name, label: step.label, status: 'running' });
+        try {
+          const result = await step.fn();
+          results[step.name] = result;
+          sendProgress({ type: 'step', step: step.id, name: step.name, label: step.label, status: 'done', result });
+        } catch (error) {
+          const message = (error as Error).message;
+          results[step.name] = { error: message };
+          sendProgress({ type: 'step', step: step.id, name: step.name, label: step.label, status: 'error', error: message });
+        }
+      }
+
+      // Аудит
+      await auditService.logFromRequest(req, req.user.id, 'SYNC_ALL_SIGUR', {
+        details: { results },
+      });
+
+      sendProgress({ type: 'done', results });
+      res.end();
+    } catch (error) {
+      console.error('Sigur syncAll error:', error);
+      try {
+        res.write(`data: ${JSON.stringify({ type: 'error', message: 'Ошибка полной синхронизации' })}\n\n`);
+        res.end();
+      } catch { /* headers already sent */ }
+    }
+  },
 };

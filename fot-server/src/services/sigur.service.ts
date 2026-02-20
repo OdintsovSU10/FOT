@@ -345,7 +345,7 @@ class SigurService {
       return this.employeeFetchPromise;
     }
     console.log('[sigur] fetching employees (no cache)...');
-    this.employeeFetchPromise = this.getEmployeesLimited(3000, connection)
+    this.employeeFetchPromise = this.getEmployees(undefined, connection)
       .then(data => {
         this.employeeCache = { data, fetchedAt: Date.now() };
         console.log('[sigur] cached', data.length, 'employees');
