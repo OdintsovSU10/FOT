@@ -15,7 +15,7 @@ interface SigurTokenInfo {
   authenticatedAt: number;
 }
 
-const PAGE_SIZE = 100;
+const PAGE_SIZE = 5000;
 
 /**
  * Сервис для взаимодействия с Sigur REST API.
@@ -174,6 +174,41 @@ class SigurService {
       }
       throw error;
     }
+  }
+
+  /**
+   * Пагинация с колбэком прогресса (для SSE).
+   */
+  async fetchWithProgress<T>(
+    endpoint: string,
+    onProgress: (loaded: number, page: number, pageItems: T[]) => void,
+    params?: Record<string, any>,
+    connection?: ConnectionType,
+    pageSize = 1000,
+  ): Promise<T[]> {
+    const allItems: T[] = [];
+    let offset = 0;
+    let page = 0;
+
+    while (true) {
+      page++;
+      const response = await this.request<any>(endpoint, {
+        ...params,
+        limit: pageSize,
+        offset,
+      }, connection);
+
+      const items = response?.data || response || [];
+      if (!Array.isArray(items) || items.length === 0) break;
+
+      allItems.push(...items);
+      onProgress(allItems.length, page, items);
+
+      if (items.length < pageSize) break;
+      offset += pageSize;
+    }
+
+    return allItems;
   }
 
   /**

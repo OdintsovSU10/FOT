@@ -39,6 +39,66 @@ export const sigurController = {
   },
 
   /**
+   * GET /api/sigur/stream?type=employees
+   * SSE-стриминг данных с прогрессом
+   */
+  async stream(req: AuthenticatedRequest, res: Response): Promise<void> {
+    try {
+      if (!sigurService.isConfigured()) {
+        res.status(503).json({ success: false, error: 'Sigur не настроен' });
+        return;
+      }
+
+      const type = req.query.type as string;
+      const ENTITIES: Record<string, string> = {
+        employees: '/api/v1/employees',
+        departments: '/api/v1/departments',
+        events: '/api/v1/events/parsed',
+        'access-points': '/api/v1/accesspoints',
+        cards: '/api/v1/cards',
+        zones: '/api/v1/zones',
+        'access-rules': '/api/v1/accessrules',
+      };
+
+      const endpoint = ENTITIES[type];
+      if (!endpoint) {
+        res.status(400).json({ success: false, error: 'Неизвестный тип данных' });
+        return;
+      }
+
+      res.setHeader('Content-Type', 'text/event-stream');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Connection', 'keep-alive');
+      res.flushHeaders();
+
+      const send = (data: Record<string, unknown>) => {
+        res.write(`data: ${JSON.stringify(data)}\n\n`);
+      };
+
+      const connection = (req.query.connection as 'external' | 'internal') || undefined;
+
+      send({ type: 'start' });
+
+      const allData = await sigurService.fetchWithProgress(
+        endpoint,
+        (loaded, page, pageItems) => {
+          send({ type: 'progress', loaded, page, pageSize: pageItems.length });
+        },
+        undefined,
+        connection,
+      );
+
+      send({ type: 'done', data: allData, total: allData.length });
+      res.end();
+    } catch (error) {
+      try {
+        res.write(`data: ${JSON.stringify({ type: 'error', message: (error as Error).message })}\n\n`);
+        res.end();
+      } catch { /* headers already sent */ }
+    }
+  },
+
+  /**
    * GET /api/sigur/employees
    * Получить список сотрудников из Sigur
    */

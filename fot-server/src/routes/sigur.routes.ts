@@ -6,7 +6,10 @@ const router = Router();
 
 // Все роуты требуют аутентификации и роли admin/super_admin
 router.use(authenticate as any);
-router.use(requireRole('admin', 'owner', 'super_admin') as any);
+router.use(requireRole('header', 'admin', 'owner', 'super_admin') as any);
+
+// GET /api/sigur/stream?type=employees — SSE-стриминг с прогрессом
+router.get('/stream', sigurController.stream as any);
 
 // GET /api/sigur/test — проверка подключения
 router.get('/test', sigurController.testConnection as any);

@@ -66,6 +66,26 @@ export const sigurService = {
     return apiClient.get('/sigur/departments');
   },
 
+  async getAccessPoints(): Promise<{ data: unknown[]; count: number }> {
+    return apiClient.get('/sigur/access-points');
+  },
+
+  async getCards(): Promise<{ data: unknown[]; count: number }> {
+    return apiClient.get('/sigur/cards');
+  },
+
+  async getZones(): Promise<{ data: unknown[]; count: number }> {
+    return apiClient.get('/sigur/zones');
+  },
+
+  async getAccessRules(): Promise<{ data: unknown[]; count: number }> {
+    return apiClient.get('/sigur/access-rules');
+  },
+
+  async getEventCodes(): Promise<{ data: unknown[] }> {
+    return apiClient.get('/sigur/events/codes');
+  },
+
   async syncOrganizations(): Promise<{ imported: number; skipped: number; total: number }> {
     const response = await apiClient.post<ApiResponse<{ imported: number; skipped: number; total: number }>>(
       '/sigur/sync-organizations'

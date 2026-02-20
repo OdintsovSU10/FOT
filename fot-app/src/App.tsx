@@ -23,6 +23,8 @@ import { TenderPage } from './pages/tender/TenderPage';
 import { SKUDPage } from './pages/skud/SKUDPage';
 import { SKUDAnalysisPage } from './pages/skud/SKUDAnalysisPage';
 import { SigurSettingsPage } from './pages/skud/SigurSettingsPage';
+import { SigurRawDataPage } from './pages/skud/SigurRawDataPage';
+import { SkudSupabasePage } from './pages/skud/SkudSupabasePage';
 
 // Profile
 import { ProfilePage } from './pages/profile';
@@ -173,6 +175,22 @@ const AppRoutes = () => {
           element={
             <Layout title="Настройки СКУД" theme={theme} onToggleTheme={toggleTheme}>
               <SigurSettingsPage />
+            </Layout>
+          }
+        />
+        <Route
+          path="/skud-raw"
+          element={
+            <Layout title="Просмотр СКУД" theme={theme} onToggleTheme={toggleTheme}>
+              <SigurRawDataPage />
+            </Layout>
+          }
+        />
+        <Route
+          path="/skud-db"
+          element={
+            <Layout title="Просмотр СКУД (база)" theme={theme} onToggleTheme={toggleTheme}>
+              <SkudSupabasePage />
             </Layout>
           }
         />

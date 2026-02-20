@@ -12,6 +12,8 @@ import {
   BuildingIcon,
   BarChartIcon,
   ClipboardCheckIcon,
+  FileTextIcon,
+  DatabaseIcon,
 } from '../ui/Icons';
 
 interface INavItem {
@@ -42,6 +44,8 @@ const navGroups: INavGroup[] = [
     items: [
       { id: 'access', path: '/skud', label: 'СКУД', icon: ShieldIcon },
       { id: 'access-analysis', path: '/skud-analysis', label: 'Анализ СКУД', icon: BarChartIcon },
+      { id: 'skud-raw', path: '/skud-raw', label: 'Просмотр СКУД', icon: FileTextIcon },
+      { id: 'skud-db', path: '/skud-db', label: 'СКУД (база)', icon: DatabaseIcon },
       { id: 'sigur-settings', path: '/skud-settings', label: 'Настройки СКУД', icon: SettingsIcon },
     ]
   },
@@ -95,7 +99,10 @@ export const Sidebar: FC<ISidebarProps> = ({ theme = 'dark', isOpen, onClose }) 
 
   const activeItem = getActiveItem();
 
-  const handleItemClick = (path: string) => {
+  const handleItemClick = (e: React.MouseEvent, path: string) => {
+    // Позволяем браузеру обработать Ctrl+Click / средняя кнопка (новая вкладка)
+    if (e.metaKey || e.ctrlKey || e.button === 1) return;
+    e.preventDefault();
     navigate(path);
     onClose?.();
   };
@@ -150,17 +157,18 @@ export const Sidebar: FC<ISidebarProps> = ({ theme = 'dark', isOpen, onClose }) 
               {visibleItems.map(item => {
                 const Icon = item.icon;
                 return (
-                  <div
+                  <a
                     key={item.id}
+                    href={item.path}
                     className={`${styles.navItem} ${activeItem === item.id ? styles.active : ''}`}
-                    onClick={() => handleItemClick(item.path)}
+                    onClick={(e) => handleItemClick(e, item.path)}
                   >
                     <Icon className={styles.navIcon} />
                     {item.label}
                     {item.badge !== undefined && item.badge > 0 && (
                       <span className={styles.navBadge}>{item.badge}</span>
                     )}
-                  </div>
+                  </a>
                 );
               })}
             </div>
