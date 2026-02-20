@@ -1,8 +1,21 @@
 import { useState, useEffect, useMemo, type FC } from 'react';
 import { ChevronDown, ChevronUp, ChevronRight, Building2, Users, Edit3, Archive, Trash2, X, Check } from 'lucide-react';
-import { structureApi } from '../../api/structure';
-import type { Employee, EmployeeInput, OrgDepartmentNode } from '../../types';
+import { apiClient } from '../../api/client';
+import type { Employee, EmployeeInput } from '../../types';
 import '../../styles/EmployeeTreeView.css';
+
+interface ISigurDepartment {
+  id: number;
+  name: string;
+  parentId: number | null;
+}
+
+interface IDeptTreeNode {
+  id: number;
+  name: string;
+  parentId: number | null;
+  children: IDeptTreeNode[];
+}
 
 interface IEmployeeTreeViewProps {
   employees: Employee[];
@@ -11,7 +24,6 @@ interface IEmployeeTreeViewProps {
   isEditing: boolean;
   canEdit: boolean;
   showArchived: boolean;
-  effectiveOrgId?: string;
   onRowClick: (emp: Employee) => void;
   onStartEditing: (emp: Employee) => void;
   onCancelEditing: () => void;
@@ -22,6 +34,8 @@ interface IEmployeeTreeViewProps {
   editFormData: Partial<EmployeeInput>;
   onEditFormChange: (data: Partial<EmployeeInput>) => void;
 }
+
+const SYSTEM_DEPTS = ['api_keys', 'автопарк', 'гостевые qr-коды'];
 
 const formatDate = (dateStr: string) =>
   new Date(dateStr).toLocaleDateString('ru-RU');
@@ -38,14 +52,31 @@ const calculateTenure = (hireDate: string) => {
   return years > 0 ? `${years} \u0433. ${rem} \u043C\u0435\u0441.` : `${rem} \u043C\u0435\u0441.`;
 };
 
+const buildTree = (departments: ISigurDepartment[]): IDeptTreeNode[] => {
+  const map = new Map<number, IDeptTreeNode>();
+  const roots: IDeptTreeNode[] = [];
+
+  for (const d of departments) {
+    map.set(d.id, { id: d.id, name: d.name, parentId: d.parentId, children: [] });
+  }
+
+  for (const node of map.values()) {
+    if (node.parentId && map.has(node.parentId)) {
+      map.get(node.parentId)!.children.push(node);
+    } else {
+      roots.push(node);
+    }
+  }
+
+  return roots;
+};
+
 export const EmployeeTreeView: FC<IEmployeeTreeViewProps> = ({
   employees,
   searchQuery,
   expandedId,
   isEditing,
   canEdit,
-  showArchived,
-  effectiveOrgId,
   onRowClick,
   onStartEditing,
   onCancelEditing,
@@ -56,79 +87,100 @@ export const EmployeeTreeView: FC<IEmployeeTreeViewProps> = ({
   editFormData,
   onEditFormChange,
 }) => {
-  const [departments, setDepartments] = useState<OrgDepartmentNode[]>([]);
+  const [tree, setTree] = useState<IDeptTreeNode[]>([]);
   const [loading, setLoading] = useState(true);
-  const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set());
+  const [expandedNodes, setExpandedNodes] = useState<Set<number>>(new Set());
 
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
       setLoading(true);
-      const res = await structureApi.getTree(effectiveOrgId);
-      if (!cancelled && res.success && res.data) {
-        setDepartments(res.data.departments);
-        const all = new Set<string>();
-        const expand = (nodes: OrgDepartmentNode[]) => {
-          nodes.forEach(d => { all.add(d.id); if (d.children) expand(d.children); });
-        };
-        expand(res.data.departments);
-        setExpandedNodes(all);
+      try {
+        const res = await apiClient.get<{ success: boolean; data: ISigurDepartment[] }>('/sigur/departments');
+        if (cancelled) return;
+        const filtered = (res.data || []).filter(
+          d => !SYSTEM_DEPTS.includes(d.name.toLowerCase().trim())
+        );
+        const built = buildTree(filtered);
+        setTree(built);
+        // Раскрываем первый уровень
+        const initial = new Set<number>();
+        built.forEach(n => initial.add(n.id));
+        setExpandedNodes(initial);
+      } catch {
+        if (!cancelled) setTree([]);
       }
       if (!cancelled) setLoading(false);
     };
     load();
     return () => { cancelled = true; };
-  }, [effectiveOrgId]);
+  }, []);
 
-  const employeesByDept = useMemo(() => {
-    const map = new Map<string | null, Employee[]>();
+  // Группировка сотрудников по имени отдела (department из Supabase)
+  const employeesByDeptName = useMemo(() => {
+    const map = new Map<string, Employee[]>();
     employees.forEach(emp => {
-      const key = emp.org_department_id;
+      const key = (emp.department || '').trim().toLowerCase();
       if (!map.has(key)) map.set(key, []);
       map.get(key)!.push(emp);
     });
     return map;
   }, [employees]);
 
-  const flatDeptMap = useMemo(() => {
-    const map = new Map<string, OrgDepartmentNode>();
-    const flatten = (nodes: OrgDepartmentNode[]) => {
-      nodes.forEach(n => { map.set(n.id, n); if (n.children) flatten(n.children); });
+  // Плоский Map id → node для поиска предков
+  const flatMap = useMemo(() => {
+    const map = new Map<number, IDeptTreeNode>();
+    const flatten = (nodes: IDeptTreeNode[]) => {
+      nodes.forEach(n => { map.set(n.id, n); flatten(n.children); });
     };
-    flatten(departments);
+    flatten(tree);
     return map;
-  }, [departments]);
+  }, [tree]);
 
-  const visibleDeptIds = useMemo(() => {
+  // Получить сотрудников для узла дерева
+  const getEmpsForNode = (node: IDeptTreeNode): Employee[] => {
+    const key = node.name.trim().toLowerCase();
+    return employeesByDeptName.get(key) || [];
+  };
+
+  // Рекурсивный подсчёт сотрудников в ветке
+  const countBranch = useMemo(() => {
+    const cache = new Map<number, number>();
+    const count = (node: IDeptTreeNode): number => {
+      if (cache.has(node.id)) return cache.get(node.id)!;
+      let total = getEmpsForNode(node).length;
+      node.children.forEach(child => { total += count(child); });
+      cache.set(node.id, total);
+      return total;
+    };
+    tree.forEach(n => count(n));
+    return cache;
+  }, [tree, employeesByDeptName]);
+
+  // При поиске: определяем видимые узлы (содержащие сотрудников + предки)
+  const visibleNodeIds = useMemo(() => {
     if (!searchQuery && employees.length === 0) return null;
-    const ids = new Set<string>();
-    const addAncestors = (deptId: string) => {
-      let current = flatDeptMap.get(deptId);
+    const ids = new Set<number>();
+    const addAncestors = (nodeId: number) => {
+      let current = flatMap.get(nodeId);
       while (current) {
         if (ids.has(current.id)) break;
         ids.add(current.id);
-        current = current.parent_id ? flatDeptMap.get(current.parent_id) : undefined;
+        current = current.parentId ? flatMap.get(current.parentId) : undefined;
       }
     };
-    employeesByDept.forEach((_emps, key) => {
-      if (key) addAncestors(key);
-    });
-    return ids;
-  }, [searchQuery, employees, employeesByDept, flatDeptMap]);
-
-  const deptCounts = useMemo(() => {
-    const counts = new Map<string, number>();
-    const count = (dept: OrgDepartmentNode): number => {
-      let total = (employeesByDept.get(dept.id) || []).length;
-      dept.children.forEach(child => { total += count(child); });
-      counts.set(dept.id, total);
-      return total;
+    // Для каждого отдела с сотрудниками — добавляем его и предков
+    const flatten = (nodes: IDeptTreeNode[]) => {
+      nodes.forEach(n => {
+        if (getEmpsForNode(n).length > 0) addAncestors(n.id);
+        flatten(n.children);
+      });
     };
-    departments.forEach(d => count(d));
-    return counts;
-  }, [departments, employeesByDept]);
+    flatten(tree);
+    return ids;
+  }, [searchQuery, employees, tree, flatMap, employeesByDeptName]);
 
-  const toggleNode = (id: string) => {
+  const toggleNode = (id: number) => {
     setExpandedNodes(prev => {
       const next = new Set(prev);
       next.has(id) ? next.delete(id) : next.add(id);
@@ -225,38 +277,38 @@ export const EmployeeTreeView: FC<IEmployeeTreeViewProps> = ({
     </div>
   );
 
-  const renderDeptNode = (dept: OrgDepartmentNode, level: number) => {
-    const count = deptCounts.get(dept.id) || 0;
-    const isExpanded = expandedNodes.has(dept.id);
-    const hasChildren = dept.children && dept.children.length > 0;
-    const deptEmployees = employeesByDept.get(dept.id) || [];
+  const renderDeptNode = (node: IDeptTreeNode, level: number) => {
+    const count = countBranch.get(node.id) || 0;
+    const isExpanded = expandedNodes.has(node.id);
+    const hasChildren = node.children.length > 0;
+    const nodeEmployees = getEmpsForNode(node);
 
-    if (visibleDeptIds && !visibleDeptIds.has(dept.id) && count === 0) return null;
+    if (visibleNodeIds && !visibleNodeIds.has(node.id) && count === 0) return null;
 
     return (
-      <div key={dept.id} className="dept-node">
+      <div key={node.id} className="dept-node">
         <div
           className="dept-header"
           style={{ paddingLeft: 12 + level * 24 }}
-          onClick={() => toggleNode(dept.id)}
+          onClick={() => toggleNode(node.id)}
         >
           <span className="dept-expand">
-            {(hasChildren || deptEmployees.length > 0)
+            {(hasChildren || nodeEmployees.length > 0)
               ? (isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />)
               : <span className="dept-expand-placeholder" />
             }
           </span>
           <Building2 size={16} className="dept-icon" />
-          <span className="dept-name">{dept.name}</span>
+          <span className="dept-name">{node.name}</span>
           {count > 0 && <span className="dept-count">{count}</span>}
         </div>
 
         {isExpanded && (
           <div className="dept-children">
-            {hasChildren && dept.children.map(child => renderDeptNode(child, level + 1))}
-            {deptEmployees.length > 0 && (
+            {hasChildren && node.children.map(child => renderDeptNode(child, level + 1))}
+            {nodeEmployees.length > 0 && (
               <div className="dept-employees" style={{ paddingLeft: 12 + (level + 1) * 24 }}>
-                {deptEmployees.map(renderEmployeeRow)}
+                {nodeEmployees.map(renderEmployeeRow)}
               </div>
             )}
           </div>
@@ -269,27 +321,41 @@ export const EmployeeTreeView: FC<IEmployeeTreeViewProps> = ({
     return <div className="loading">Загрузка структуры...</div>;
   }
 
-  const unassigned = employeesByDept.get(null) || [];
-  const hasTree = departments.length > 0;
+  // Сотрудники без совпадения с отделами Sigur
+  const assignedDeptNames = new Set<string>();
+  const collectNames = (nodes: IDeptTreeNode[]) => {
+    nodes.forEach(n => {
+      assignedDeptNames.add(n.name.trim().toLowerCase());
+      collectNames(n.children);
+    });
+  };
+  collectNames(tree);
+
+  const unassigned = employees.filter(emp => {
+    const deptName = (emp.department || '').trim().toLowerCase();
+    return !deptName || !assignedDeptNames.has(deptName);
+  });
+
+  const hasTree = tree.length > 0;
 
   return (
     <div className="employee-tree">
-      {hasTree && departments.map(dept => renderDeptNode(dept, 0))}
+      {hasTree && tree.map(node => renderDeptNode(node, 0))}
 
       {unassigned.length > 0 && (
         <div className="dept-node unassigned-section">
           <div
             className="dept-header unassigned-header"
-            onClick={() => toggleNode('__unassigned')}
+            onClick={() => toggleNode(-1)}
           >
             <span className="dept-expand">
-              {expandedNodes.has('__unassigned') ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+              {expandedNodes.has(-1) ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
             </span>
             <Users size={16} className="dept-icon" />
             <span className="dept-name">Без отдела</span>
             <span className="dept-count">{unassigned.length}</span>
           </div>
-          {expandedNodes.has('__unassigned') && (
+          {expandedNodes.has(-1) && (
             <div className="dept-children">
               <div className="dept-employees" style={{ paddingLeft: 36 }}>
                 {unassigned.map(renderEmployeeRow)}

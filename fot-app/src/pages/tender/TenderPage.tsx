@@ -1,21 +1,77 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Users, Plus, Upload, Search, Archive, Trash2, Edit3, X, Check, ChevronDown, ChevronUp, AlertTriangle, FileSpreadsheet, List, GitBranch } from 'lucide-react';
 import { employeeService } from '../../services/employeeService';
-import { adminService } from '../../services/adminService';
+import { apiClient } from '../../api/client';
 import { useAuth } from '../../contexts/AuthContext';
 import { EmployeeTreeView } from '../../components/employees/EmployeeTreeView';
-import type { Employee, EmployeeInput, Organization } from '../../types';
+import type { Employee, EmployeeInput } from '../../types';
 import '../../styles/TenderPage.css';
 
+interface ISigurDepartment {
+  id: number;
+  name: string;
+  parentId: number | null;
+}
+
+interface IDeptTreeNode {
+  id: number;
+  name: string;
+  children: IDeptTreeNode[];
+}
+
+interface IDeptFlatOption {
+  id: number;
+  name: string;
+  level: number;
+  allNames: string[]; // имя + все потомки (lowercase)
+}
+
+const SYSTEM_DEPTS = ['api_keys', 'автопарк', 'гостевые qr-коды'];
+
+const buildDeptTree = (departments: ISigurDepartment[]): IDeptTreeNode[] => {
+  const map = new Map<number, IDeptTreeNode>();
+  const roots: IDeptTreeNode[] = [];
+  for (const d of departments) {
+    map.set(d.id, { id: d.id, name: d.name, children: [] });
+  }
+  for (const d of departments) {
+    const node = map.get(d.id)!;
+    if (d.parentId && map.has(d.parentId)) {
+      map.get(d.parentId)!.children.push(node);
+    } else {
+      roots.push(node);
+    }
+  }
+  return roots;
+};
+
+const collectAllNames = (node: IDeptTreeNode): string[] => {
+  const names = [node.name.trim().toLowerCase()];
+  for (const child of node.children) {
+    names.push(...collectAllNames(child));
+  }
+  return names;
+};
+
+const flattenDeptTree = (nodes: IDeptTreeNode[], level = 0): IDeptFlatOption[] => {
+  const result: IDeptFlatOption[] = [];
+  for (const node of nodes) {
+    result.push({
+      id: node.id,
+      name: node.name,
+      level,
+      allNames: collectAllNames(node),
+    });
+    result.push(...flattenDeptTree(node.children, level + 1));
+  }
+  return result;
+};
+
 export const TenderPage: React.FC = () => {
-  const { hasPosition, canAccess, profile } = useAuth();
+  const { hasPosition, canAccess } = useAuth();
   const isSuperAdmin = hasPosition('super_admin');
-  const needsOrgSelector = isSuperAdmin && !profile?.organization_id;
   const canEdit = canAccess('header'); // header и выше (admin, super_admin)
   const [deleting, setDeleting] = useState(false);
-  const [organizations, setOrganizations] = useState<Organization[]>([]);
-  const [selectedOrgId, setSelectedOrgId] = useState<string | null>(null);
-  const effectiveOrgId = needsOrgSelector ? (selectedOrgId ?? undefined) : undefined;
 
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [loading, setLoading] = useState(true);
@@ -24,9 +80,12 @@ export const TenderPage: React.FC = () => {
   const [showArchived, setShowArchived] = useState(false);
   const [viewMode, setViewMode] = useState<'list' | 'tree'>('list');
 
+  // Sigur departments for filter
+  const [deptOptions, setDeptOptions] = useState<IDeptFlatOption[]>([]);
+  const [selectedDeptId, setSelectedDeptId] = useState<number | null>(null);
+
   // Filter states
   const [positionFilter, setPositionFilter] = useState('');
-  const [groupFilter, setGroupFilter] = useState('');
 
   // Expanded row state
   const [expandedId, setExpandedId] = useState<number | null>(null);
@@ -47,49 +106,48 @@ export const TenderPage: React.FC = () => {
   // Edit form state
   const [editFormData, setEditFormData] = useState<Partial<EmployeeInput>>({});
 
-  // Загрузка списка организаций для super_admin
+  // Загрузка отделов из Sigur для фильтра
   useEffect(() => {
-    if (!needsOrgSelector) return;
-    adminService.getOrganizations().then((orgs) => {
-      setOrganizations(orgs);
-      if (orgs.length === 1) setSelectedOrgId(orgs[0].id);
-    }).catch(() => {
-      setError('Ошибка загрузки организаций');
-    });
-  }, [needsOrgSelector]);
+    apiClient.get<{ success: boolean; data: ISigurDepartment[] }>('/sigur/departments')
+      .then(res => {
+        const filtered = (res.data || []).filter(
+          d => !SYSTEM_DEPTS.includes(d.name.toLowerCase().trim())
+        );
+        const tree = buildDeptTree(filtered);
+        setDeptOptions(flattenDeptTree(tree));
+      })
+      .catch(() => { /* Sigur недоступен — фильтр не покажется */ });
+  }, []);
 
   const loadEmployees = useCallback(async () => {
     setLoading(true);
     setError('');
     try {
-      const data = await employeeService.getAll(effectiveOrgId);
+      const data = await employeeService.getAll();
       setEmployees(data.filter(e => showArchived ? e.is_archived : !e.is_archived));
     } catch {
       setError('Ошибка загрузки сотрудников');
     } finally {
       setLoading(false);
     }
-  }, [showArchived, effectiveOrgId]);
+  }, [showArchived]);
 
   useEffect(() => {
     loadEmployees();
   }, [loadEmployees]);
 
-  // Extract unique positions and groups for filters
-  const { positions, groups } = useMemo(() => {
+  // Уникальные должности для фильтра
+  const positions = useMemo(() => {
     const posSet = new Set<string>();
-    const groupSet = new Set<string>();
-
-    employees.forEach(emp => {
-      if (emp.position_name) posSet.add(emp.position_name);
-      if (emp.department) groupSet.add(emp.department);
-    });
-
-    return {
-      positions: Array.from(posSet).sort((a, b) => a.localeCompare(b, 'ru')),
-      groups: Array.from(groupSet).sort((a, b) => a.localeCompare(b, 'ru')),
-    };
+    employees.forEach(emp => { if (emp.position_name) posSet.add(emp.position_name); });
+    return Array.from(posSet).sort((a, b) => a.localeCompare(b, 'ru'));
   }, [employees]);
+
+  // Выбранный отдел Sigur (для фильтрации по ветке)
+  const selectedDept = useMemo(
+    () => selectedDeptId !== null ? deptOptions.find(d => d.id === selectedDeptId) : null,
+    [selectedDeptId, deptOptions],
+  );
 
   const filteredEmployees = useMemo(() => {
     return employees.filter(emp => {
@@ -98,11 +156,13 @@ export const TenderPage: React.FC = () => {
         (emp.position_name || '').toLowerCase().includes(searchQuery.toLowerCase());
 
       const matchesPosition = positionFilter === '' || emp.position_name === positionFilter;
-      const matchesGroup = groupFilter === '' || emp.department === groupFilter;
 
-      return matchesSearch && matchesPosition && matchesGroup;
+      const matchesDept = !selectedDept ||
+        selectedDept.allNames.includes((emp.department || '').trim().toLowerCase());
+
+      return matchesSearch && matchesPosition && matchesDept;
     });
-  }, [employees, searchQuery, positionFilter, groupFilter]);
+  }, [employees, searchQuery, positionFilter, selectedDept]);
 
   const handleAddEmployee = async () => {
     if (!formData.full_name || !formData.hire_date) return;
@@ -246,11 +306,11 @@ export const TenderPage: React.FC = () => {
 
   const clearFilters = () => {
     setPositionFilter('');
-    setGroupFilter('');
+    setSelectedDeptId(null);
     setSearchQuery('');
   };
 
-  const hasActiveFilters = positionFilter !== '' || groupFilter !== '' || searchQuery !== '';
+  const hasActiveFilters = positionFilter !== '' || selectedDeptId !== null || searchQuery !== '';
 
   return (
     <div className="tender-page">
@@ -268,21 +328,6 @@ export const TenderPage: React.FC = () => {
         </div>
       )}
 
-      {needsOrgSelector && (
-        <div className="org-selector" style={{ marginBottom: 16 }}>
-          <select
-            value={selectedOrgId || ''}
-            onChange={(e) => setSelectedOrgId(e.target.value || null)}
-            className="filter-select"
-          >
-            <option value="">Все организации</option>
-            {organizations.map((org) => (
-              <option key={org.id} value={org.id}>{org.name}</option>
-            ))}
-          </select>
-        </div>
-      )}
-
       <div className="tender-toolbar">
         <div className="search-box">
           <Search size={16} />
@@ -294,6 +339,21 @@ export const TenderPage: React.FC = () => {
           />
         </div>
 
+        {deptOptions.length > 0 && (
+          <select
+            className="filter-select"
+            value={selectedDeptId ?? ''}
+            onChange={e => setSelectedDeptId(e.target.value ? Number(e.target.value) : null)}
+          >
+            <option value="">Все отделы</option>
+            {deptOptions.map(dept => (
+              <option key={dept.id} value={dept.id}>
+                {'\u00A0'.repeat(dept.level * 2)}{dept.name}
+              </option>
+            ))}
+          </select>
+        )}
+
         <select
           className="filter-select"
           value={positionFilter}
@@ -302,17 +362,6 @@ export const TenderPage: React.FC = () => {
           <option value="">Все должности</option>
           {positions.map(pos => (
             <option key={pos} value={pos}>{pos}</option>
-          ))}
-        </select>
-
-        <select
-          className="filter-select"
-          value={groupFilter}
-          onChange={e => setGroupFilter(e.target.value)}
-        >
-          <option value="">Все группы</option>
-          {groups.map(group => (
-            <option key={group} value={group}>{group}</option>
           ))}
         </select>
 
@@ -393,7 +442,6 @@ export const TenderPage: React.FC = () => {
           isEditing={isEditing}
           canEdit={canEdit}
           showArchived={showArchived}
-          effectiveOrgId={effectiveOrgId}
           onRowClick={handleRowClick}
           onStartEditing={startEditing}
           onCancelEditing={cancelEditing}

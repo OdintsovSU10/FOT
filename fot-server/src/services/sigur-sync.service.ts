@@ -225,6 +225,39 @@ export async function syncDepartmentsLogic(
   let filtered = 0;
   const errors: string[] = [];
 
+  // Создаём/находим корневой отдел «Объект» (виртуальный корень Sigur, не возвращается API)
+  const ROOT_DEPT_NAME = 'Объект';
+  let rootDeptId: string | null = null;
+
+  const existingRoot = (existingDepts || []).find(d => {
+    if (!d.name_encrypted) return false;
+    try {
+      return encryptionService.decrypt(d.name_encrypted).trim() === ROOT_DEPT_NAME;
+    } catch { return false; }
+  });
+
+  if (existingRoot) {
+    rootDeptId = existingRoot.id;
+  } else {
+    const { data: createdRoot, error: rootError } = await supabase
+      .from('org_departments')
+      .insert({
+        organization_id: organizationId,
+        name_encrypted: encryptionService.encrypt(ROOT_DEPT_NAME),
+        parent_id: null,
+      })
+      .select('id')
+      .single();
+
+    if (rootError) {
+      errors.push(`create root «${ROOT_DEPT_NAME}»: ${rootError.message}`);
+    } else {
+      rootDeptId = createdRoot.id;
+      imported++;
+      console.log(`[syncDepartments] created root department «${ROOT_DEPT_NAME}» id=${rootDeptId}`);
+    }
+  }
+
   // Pass 1: Upsert отделов (без parent_id)
   const sigurToDbMap = new Map<number, string>();
   for (const [sigurId, dbId] of sigurIdToDbId) {
@@ -281,11 +314,19 @@ export async function syncDepartmentsLogic(
     const sigurId = dept.id as number;
     const parentSigurId = dept.parentId as number | null | undefined;
 
-    if (!parentSigurId || !sigurToDbMap.has(sigurId)) continue;
-
-    const parentDbId = sigurToDbMap.get(parentSigurId) || null;
+    if (!sigurToDbMap.has(sigurId)) continue;
+    if (isSystemDepartment((dept.name as string) || '')) continue;
 
     const dbId = sigurToDbMap.get(sigurId)!;
+    let parentDbId: string | null;
+
+    if (!parentSigurId || parentSigurId === 0) {
+      // Корневой отдел в Sigur (parentId=0/null) → привязываем к «Объект»
+      parentDbId = rootDeptId;
+    } else {
+      parentDbId = sigurToDbMap.get(parentSigurId) || null;
+    }
+
     const { error: linkError } = await supabase
       .from('org_departments')
       .update({ parent_id: parentDbId })

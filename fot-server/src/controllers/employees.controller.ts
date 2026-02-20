@@ -112,7 +112,8 @@ export const employeesController = {
         .from('employees')
         .select('*')
         .eq('is_archived', showArchived)
-        .order('id');
+        .order('id')
+        .limit(10000);
 
       if (organizationId) {
         empQuery = empQuery.eq('organization_id', organizationId);
