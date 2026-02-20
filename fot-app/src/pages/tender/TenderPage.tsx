@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Users, Plus, Upload, Search, Archive, X, AlertTriangle, FileSpreadsheet, List, GitBranch, ChevronDown } from 'lucide-react';
 import { employeeService } from '../../services/employeeService';
 import { apiClient } from '../../api/client';
@@ -46,6 +46,7 @@ const flattenDbTree = (nodes: IDbDepartment[], level = 0): IDeptFlatOption[] => 
 
 export const TenderPage: React.FC = () => {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { hasPosition, canAccess } = useAuth();
   const isSuperAdmin = hasPosition('super_admin');
   const canEdit = canAccess('header');
@@ -54,16 +55,27 @@ export const TenderPage: React.FC = () => {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [searchQuery, setSearchQuery] = useState('');
-  const [showArchived, setShowArchived] = useState(false);
-  const [viewMode, setViewMode] = useState<'list' | 'tree'>('list');
+  const [searchQuery, setSearchQuery] = useState(searchParams.get('q') || '');
+  const [showArchived, setShowArchived] = useState(searchParams.get('archived') === '1');
+  const [viewMode, setViewMode] = useState<'list' | 'tree'>((searchParams.get('view') as 'list' | 'tree') || 'list');
 
   const [deptOptions, setDeptOptions] = useState<IDeptFlatOption[]>([]);
-  const [selectedDeptId, setSelectedDeptId] = useState<string | null>(null);
-  const [positionFilter, setPositionFilter] = useState('');
+  const [selectedDeptId, setSelectedDeptId] = useState<string | null>(searchParams.get('dept') || null);
+  const [positionFilter, setPositionFilter] = useState(searchParams.get('pos') || '');
   const [deptSearchQuery, setDeptSearchQuery] = useState('');
   const [deptDropdownOpen, setDeptDropdownOpen] = useState(false);
   const deptDropdownRef = useRef<HTMLDivElement>(null);
+
+  // Синхронизация фильтров в URL
+  useEffect(() => {
+    const params = new URLSearchParams();
+    if (searchQuery) params.set('q', searchQuery);
+    if (selectedDeptId) params.set('dept', selectedDeptId);
+    if (positionFilter) params.set('pos', positionFilter);
+    if (viewMode !== 'list') params.set('view', viewMode);
+    if (showArchived) params.set('archived', '1');
+    setSearchParams(params, { replace: true });
+  }, [searchQuery, selectedDeptId, positionFilter, viewMode, showArchived]);
 
   const [showAddModal, setShowAddModal] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
@@ -185,14 +197,6 @@ export const TenderPage: React.FC = () => {
 
   const formatDate = (dateStr: string) => new Date(dateStr).toLocaleDateString('ru-RU');
 
-  const calculateTenure = (hireDate: string) => {
-    const hire = new Date(hireDate);
-    const now = new Date();
-    const months = (now.getFullYear() - hire.getFullYear()) * 12 + (now.getMonth() - hire.getMonth());
-    const years = Math.floor(months / 12);
-    const rem = months % 12;
-    return years > 0 ? `${years} г. ${rem} мес.` : `${rem} мес.`;
-  };
 
   const clearFilters = () => {
     setPositionFilter('');
@@ -374,7 +378,6 @@ export const TenderPage: React.FC = () => {
             <span style={{ width: '40px', textAlign: 'center' }}>№</span>
             <span>ФИО</span>
             <span>Должность</span>
-            <span>Стаж</span>
             <span>Группа</span>
           </div>
           {filteredEmployees.map((emp, index) => (
@@ -388,7 +391,6 @@ export const TenderPage: React.FC = () => {
               </span>
               <span className="col-name">{emp.full_name}</span>
               <span className="col-position">{emp.position_name || '—'}</span>
-              <span className="col-tenure">{calculateTenure(emp.hire_date)}</span>
               <span className="col-group">{emp.department || '—'}</span>
             </div>
           ))}

@@ -535,6 +535,20 @@ export async function syncEmployeesLogic(
     }
   }
 
+  // Карта имя должности → DB id (для текстового резолва)
+  const { data: allDbPositions } = await supabase
+    .from('positions')
+    .select('id, name_encrypted')
+    .eq('organization_id', organizationId);
+
+  const posNameToDbId = new Map<string, string>();
+  for (const p of allDbPositions || []) {
+    if (p.name_encrypted) {
+      const name = encryptionService.decrypt(p.name_encrypted).toLowerCase().trim();
+      if (name && !posNameToDbId.has(name)) posNameToDbId.set(name, p.id);
+    }
+  }
+
   let imported = 0;
   let updated = 0;
   let skipped = 0;
@@ -549,7 +563,38 @@ export async function syncEmployeesLogic(
     const sigurDeptId = emp.departmentId as number | undefined;
     const orgDepartmentId = sigurDeptId ? sigurDeptToDbId.get(sigurDeptId) || null : null;
     const sigurPosId = emp.positionId as number | undefined;
-    const positionId = sigurPosId ? sigurPosToDbId.get(sigurPosId) || null : null;
+    const positionText = ((emp.position as string) || '').trim();
+
+    let positionId: string | null = null;
+
+    // 1) FK-маппинг через sigur_position_id
+    if (sigurPosId) {
+      positionId = sigurPosToDbId.get(sigurPosId) || null;
+    }
+
+    // 2) Текстовый матчинг по имени должности
+    if (!positionId && positionText) {
+      const posKey = positionText.toLowerCase();
+      positionId = posNameToDbId.get(posKey) || null;
+
+      // 3) Создаём новую должность если нет совпадения
+      if (!positionId) {
+        const { data: created, error: createErr } = await supabase
+          .from('positions')
+          .insert({
+            organization_id: organizationId,
+            name_encrypted: encryptionService.encrypt(positionText),
+            category: 'other' as const,
+          })
+          .select('id')
+          .single();
+
+        if (!createErr && created) {
+          positionId = created.id;
+          posNameToDbId.set(posKey, created.id);
+        }
+      }
+    }
 
     if (sigurEmpId && sigurIdToDbId.has(sigurEmpId)) {
       const dbId = sigurIdToDbId.get(sigurEmpId)!;
