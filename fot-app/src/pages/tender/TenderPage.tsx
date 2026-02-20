@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { Users, Plus, Upload, Search, Archive, Trash2, Edit3, X, Check, ChevronDown, ChevronUp, AlertTriangle, FileSpreadsheet, List, GitBranch } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Users, Plus, Upload, Search, Archive, X, AlertTriangle, FileSpreadsheet, List, GitBranch, ChevronDown } from 'lucide-react';
 import { employeeService } from '../../services/employeeService';
 import { apiClient } from '../../api/client';
 import { useAuth } from '../../contexts/AuthContext';
@@ -18,7 +19,7 @@ interface IDeptFlatOption {
   id: string;
   name: string;
   level: number;
-  allIds: string[]; // id + все потомки (для каскадной фильтрации)
+  allIds: string[];
 }
 
 const collectAllIds = (node: IDbDepartment): string[] => {
@@ -44,9 +45,10 @@ const flattenDbTree = (nodes: IDbDepartment[], level = 0): IDeptFlatOption[] => 
 };
 
 export const TenderPage: React.FC = () => {
+  const navigate = useNavigate();
   const { hasPosition, canAccess } = useAuth();
   const isSuperAdmin = hasPosition('super_admin');
-  const canEdit = canAccess('header'); // header и выше (admin, super_admin)
+  const canEdit = canAccess('header');
   const [deleting, setDeleting] = useState(false);
 
   const [employees, setEmployees] = useState<Employee[]>([]);
@@ -56,40 +58,30 @@ export const TenderPage: React.FC = () => {
   const [showArchived, setShowArchived] = useState(false);
   const [viewMode, setViewMode] = useState<'list' | 'tree'>('list');
 
-  // DB departments for filter
   const [deptOptions, setDeptOptions] = useState<IDeptFlatOption[]>([]);
   const [selectedDeptId, setSelectedDeptId] = useState<string | null>(null);
-
-  // Filter states
   const [positionFilter, setPositionFilter] = useState('');
+  const [deptSearchQuery, setDeptSearchQuery] = useState('');
+  const [deptDropdownOpen, setDeptDropdownOpen] = useState(false);
+  const deptDropdownRef = useRef<HTMLDivElement>(null);
 
-  // Expanded row state
-  const [expandedId, setExpandedId] = useState<number | null>(null);
-  const [isEditing, setIsEditing] = useState(false);
-
-  // Modal states
   const [showAddModal, setShowAddModal] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Form state for adding
   const [formData, setFormData] = useState<EmployeeInput>({
     full_name: '',
     hire_date: new Date().toISOString().split('T')[0],
     current_salary: null,
   });
 
-  // Edit form state
-  const [editFormData, setEditFormData] = useState<Partial<EmployeeInput>>({});
-
-  // Загрузка отделов из БД для фильтра
   useEffect(() => {
     apiClient.get<{ success: boolean; data: { departments: IDbDepartment[] } }>('/structure')
       .then(res => {
         const departments = res.data?.departments || [];
         setDeptOptions(flattenDbTree(departments));
       })
-      .catch(() => { /* фильтр не покажется */ });
+      .catch(() => {});
   }, []);
 
   const loadEmployees = useCallback(async () => {
@@ -105,49 +97,53 @@ export const TenderPage: React.FC = () => {
     }
   }, [showArchived]);
 
-  useEffect(() => {
-    loadEmployees();
-  }, [loadEmployees]);
+  useEffect(() => { loadEmployees(); }, [loadEmployees]);
 
-  // Уникальные должности для фильтра
   const positions = useMemo(() => {
     const posSet = new Set<string>();
     employees.forEach(emp => { if (emp.position_name) posSet.add(emp.position_name); });
     return Array.from(posSet).sort((a, b) => a.localeCompare(b, 'ru'));
   }, [employees]);
 
-  // Выбранный отдел (для каскадной фильтрации по ветке)
   const selectedDept = useMemo(
     () => selectedDeptId !== null ? deptOptions.find(d => d.id === selectedDeptId) : null,
     [selectedDeptId, deptOptions],
   );
+
+  const filteredDeptOptions = useMemo(() => {
+    if (!deptSearchQuery) return deptOptions;
+    const q = deptSearchQuery.toLowerCase();
+    return deptOptions.filter(d => d.name.toLowerCase().includes(q));
+  }, [deptOptions, deptSearchQuery]);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (deptDropdownRef.current && !deptDropdownRef.current.contains(e.target as Node)) {
+        setDeptDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   const filteredEmployees = useMemo(() => {
     return employees.filter(emp => {
       const matchesSearch = searchQuery === '' ||
         emp.full_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
         (emp.position_name || '').toLowerCase().includes(searchQuery.toLowerCase());
-
       const matchesPosition = positionFilter === '' || emp.position_name === positionFilter;
-
       const matchesDept = !selectedDept ||
         selectedDept.allIds.includes(emp.org_department_id || '');
-
       return matchesSearch && matchesPosition && matchesDept;
     });
   }, [employees, searchQuery, positionFilter, selectedDept]);
 
   const handleAddEmployee = async () => {
     if (!formData.full_name || !formData.hire_date) return;
-
     try {
       await employeeService.create(formData);
       setShowAddModal(false);
-      setFormData({
-        full_name: '',
-        hire_date: new Date().toISOString().split('T')[0],
-        current_salary: null,
-      });
+      setFormData({ full_name: '', hire_date: new Date().toISOString().split('T')[0], current_salary: null });
       loadEmployees();
     } catch {
       setError('Ошибка добавления сотрудника');
@@ -155,51 +151,12 @@ export const TenderPage: React.FC = () => {
   };
 
   const handleRowClick = (emp: Employee) => {
-    if (expandedId === emp.id) {
-      setExpandedId(null);
-      setIsEditing(false);
-    } else {
-      setExpandedId(emp.id);
-      setIsEditing(false);
-    }
-  };
-
-  const handleArchive = async (id: number) => {
-    if (!confirm('Перевести сотрудника в архив?')) return;
-    try {
-      await employeeService.archive(id);
-      loadEmployees();
-      setExpandedId(null);
-    } catch {
-      setError('Ошибка архивации');
-    }
-  };
-
-  const handleRestore = async (id: number) => {
-    try {
-      await employeeService.restore(id);
-      loadEmployees();
-      setExpandedId(null);
-    } catch {
-      setError('Ошибка восстановления');
-    }
-  };
-
-  const handleDelete = async (id: number) => {
-    if (!confirm('Удалить сотрудника? Это действие необратимо.')) return;
-    try {
-      await employeeService.delete(id);
-      loadEmployees();
-      setExpandedId(null);
-    } catch {
-      setError('Ошибка удаления');
-    }
+    navigate(`/tender/${emp.id}`);
   };
 
   const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-
     try {
       const result = await employeeService.import(file);
       alert(`Импортировано: ${result.imported} сотрудников`);
@@ -214,7 +171,6 @@ export const TenderPage: React.FC = () => {
   const handleDeleteAll = async () => {
     if (!confirm('ВНИМАНИЕ! Удалить ВСЕХ сотрудников? Это действие необратимо!')) return;
     if (!confirm('Вы уверены? Это удалит ВСЕ данные сотрудников!')) return;
-
     setDeleting(true);
     try {
       const result = await employeeService.deleteAll();
@@ -227,54 +183,15 @@ export const TenderPage: React.FC = () => {
     }
   };
 
-  const startEditing = (emp: Employee) => {
-    setEditFormData({
-      full_name: emp.full_name,
-      position_id: emp.position_id || undefined,
-      hire_date: emp.hire_date,
-      birth_date: emp.birth_date || undefined,
-      current_salary: emp.current_salary,
-      org_department_id: emp.org_department_id || undefined,
-    });
-    setIsEditing(true);
-  };
-
-  const cancelEditing = () => {
-    setIsEditing(false);
-    setEditFormData({});
-  };
-
-  const saveEditing = async (id: number) => {
-    try {
-      await employeeService.update(id, editFormData);
-      setIsEditing(false);
-      setEditFormData({});
-      loadEmployees();
-    } catch {
-      setError('Ошибка сохранения');
-    }
-  };
-
-  const formatDate = (dateStr: string) => {
-    return new Date(dateStr).toLocaleDateString('ru-RU');
-  };
-
-  const formatSalary = (salary: number | null) => {
-    if (!salary) return '—';
-    return salary.toLocaleString('ru-RU') + ' ₽';
-  };
+  const formatDate = (dateStr: string) => new Date(dateStr).toLocaleDateString('ru-RU');
 
   const calculateTenure = (hireDate: string) => {
     const hire = new Date(hireDate);
     const now = new Date();
     const months = (now.getFullYear() - hire.getFullYear()) * 12 + (now.getMonth() - hire.getMonth());
     const years = Math.floor(months / 12);
-    const remainingMonths = months % 12;
-
-    if (years > 0) {
-      return `${years} г. ${remainingMonths} мес.`;
-    }
-    return `${remainingMonths} мес.`;
+    const rem = months % 12;
+    return years > 0 ? `${years} г. ${rem} мес.` : `${rem} мес.`;
   };
 
   const clearFilters = () => {
@@ -313,18 +230,55 @@ export const TenderPage: React.FC = () => {
         </div>
 
         {deptOptions.length > 0 && (
-          <select
-            className="filter-select"
-            value={selectedDeptId ?? ''}
-            onChange={e => setSelectedDeptId(e.target.value || null)}
-          >
-            <option value="">Все отделы</option>
-            {deptOptions.map(dept => (
-              <option key={dept.id} value={dept.id}>
-                {'\u00A0'.repeat(dept.level * 2)}{dept.name}
-              </option>
-            ))}
-          </select>
+          <div className="dept-dropdown" ref={deptDropdownRef}>
+            <button
+              className={`dept-dropdown-trigger ${selectedDeptId ? 'has-value' : ''}`}
+              onClick={() => {
+                setDeptDropdownOpen(!deptDropdownOpen);
+                setDeptSearchQuery('');
+              }}
+            >
+              <span className="dept-dropdown-label">
+                {selectedDept ? selectedDept.name : 'Все отделы'}
+              </span>
+              <ChevronDown size={14} className={`dept-dropdown-chevron ${deptDropdownOpen ? 'open' : ''}`} />
+            </button>
+            {deptDropdownOpen && (
+              <div className="dept-dropdown-menu">
+                <div className="dept-dropdown-search">
+                  <Search size={14} />
+                  <input
+                    type="text"
+                    placeholder="Поиск отдела..."
+                    value={deptSearchQuery}
+                    onChange={e => setDeptSearchQuery(e.target.value)}
+                    autoFocus
+                  />
+                </div>
+                <div className="dept-dropdown-list">
+                  <div
+                    className={`dept-dropdown-item ${!selectedDeptId ? 'selected' : ''}`}
+                    onClick={() => { setSelectedDeptId(null); setDeptDropdownOpen(false); }}
+                  >
+                    Все отделы
+                  </div>
+                  {filteredDeptOptions.map(dept => (
+                    <div
+                      key={dept.id}
+                      className={`dept-dropdown-item ${selectedDeptId === dept.id ? 'selected' : ''}`}
+                      style={{ paddingLeft: 12 + dept.level * 16 }}
+                      onClick={() => { setSelectedDeptId(dept.id); setDeptDropdownOpen(false); }}
+                    >
+                      {dept.name}
+                    </div>
+                  ))}
+                  {filteredDeptOptions.length === 0 && (
+                    <div className="dept-dropdown-empty">Не найдено</div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
         )}
 
         <select
@@ -339,11 +293,7 @@ export const TenderPage: React.FC = () => {
         </select>
 
         {hasActiveFilters && (
-          <button
-            className="btn-clear-filters"
-            onClick={clearFilters}
-            title="Сбросить фильтры"
-          >
+          <button className="btn-clear-filters" onClick={clearFilters} title="Сбросить фильтры">
             <X size={16} />
           </button>
         )}
@@ -353,7 +303,7 @@ export const TenderPage: React.FC = () => {
           onClick={() => setShowArchived(!showArchived)}
         >
           <Archive size={16} />
-          <span>{showArchived ? 'Архив' : 'Архив'}</span>
+          <span>Архив</span>
         </button>
 
         <div className="view-mode-toggle">
@@ -411,19 +361,7 @@ export const TenderPage: React.FC = () => {
         <EmployeeTreeView
           employees={filteredEmployees}
           searchQuery={searchQuery}
-          expandedId={expandedId}
-          isEditing={isEditing}
-          canEdit={canEdit}
-          showArchived={showArchived}
-          onRowClick={handleRowClick}
-          onStartEditing={startEditing}
-          onCancelEditing={cancelEditing}
-          onSaveEditing={saveEditing}
-          onArchive={handleArchive}
-          onRestore={handleRestore}
-          onDelete={handleDelete}
-          editFormData={editFormData}
-          onEditFormChange={setEditFormData}
+          onEmployeeClick={handleRowClick}
         />
       ) : filteredEmployees.length === 0 ? (
         <div className="empty-state">
@@ -437,144 +375,22 @@ export const TenderPage: React.FC = () => {
             <span>ФИО</span>
             <span>Должность</span>
             <span>Стаж</span>
-            <span>Зарплата</span>
-            <span>Дата найма</span>
             <span>Группа</span>
-            <span style={{ width: '30px' }}></span>
           </div>
           {filteredEmployees.map((emp, index) => (
-            <React.Fragment key={emp.id}>
-              <div
-                className={`table-row ${expandedId === emp.id ? 'expanded' : ''} ${emp.is_archived ? 'archived' : ''}`}
-                onClick={() => handleRowClick(emp)}
-              >
-                <span className="col-number" style={{ width: '40px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
-                  {index + 1}
-                </span>
-                <span className="col-name">{emp.full_name}</span>
-                <span className="col-position">{emp.position_name || '—'}</span>
-                <span className="col-tenure">{calculateTenure(emp.hire_date)}</span>
-                <span className="col-salary">{formatSalary(emp.current_salary)}</span>
-                <span className="col-date">{formatDate(emp.hire_date)}</span>
-                <span className="col-group">{emp.department || '—'}</span>
-                <span className="col-chevron" style={{ width: '30px', display: 'flex', justifyContent: 'center' }}>
-                  {expandedId === emp.id ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
-                </span>
-              </div>
-
-              {/* Expanded Details */}
-              {expandedId === emp.id && (
-                <div className="employee-expanded">
-                  {isEditing ? (
-                    <div className="expanded-edit-form">
-                      <div className="edit-grid">
-                        <div className="form-group">
-                          <label>ФИО</label>
-                          <input
-                            type="text"
-                            value={editFormData.full_name || ''}
-                            onChange={e => setEditFormData({ ...editFormData, full_name: e.target.value })}
-                          />
-                        </div>
-                        <div className="form-group">
-                          <label>Должность</label>
-                          <span style={{ padding: '8px 0', color: 'var(--text-muted)' }}>
-                            {employees.find(e => e.id === expandedId)?.position_name || '—'}
-                          </span>
-                        </div>
-                        <div className="form-group">
-                          <label>Дата найма</label>
-                          <input
-                            type="date"
-                            value={editFormData.hire_date || ''}
-                            onChange={e => setEditFormData({ ...editFormData, hire_date: e.target.value })}
-                          />
-                        </div>
-                        <div className="form-group">
-                          <label>Дата рождения</label>
-                          <input
-                            type="date"
-                            value={editFormData.birth_date || ''}
-                            onChange={e => setEditFormData({ ...editFormData, birth_date: e.target.value || undefined })}
-                          />
-                        </div>
-                        <div className="form-group">
-                          <label>Зарплата</label>
-                          <input
-                            type="number"
-                            value={editFormData.current_salary || ''}
-                            onChange={e => setEditFormData({ ...editFormData, current_salary: e.target.value ? Number(e.target.value) : null })}
-                          />
-                        </div>
-                      </div>
-                      <div className="expanded-actions">
-                        <button className="btn-cancel" onClick={cancelEditing}>
-                          <X size={16} />
-                          Отмена
-                        </button>
-                        <button className="btn-save" onClick={() => saveEditing(emp.id)}>
-                          <Check size={16} />
-                          Сохранить
-                        </button>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="expanded-view">
-                      <div className="expanded-info">
-                        <div className="info-item">
-                          <span className="info-label">Должность</span>
-                          <span className="info-value">{emp.position_name || '—'}</span>
-                        </div>
-                        <div className="info-item">
-                          <span className="info-label">Дата найма</span>
-                          <span className="info-value">{formatDate(emp.hire_date)}</span>
-                        </div>
-                        <div className="info-item">
-                          <span className="info-label">Стаж</span>
-                          <span className="info-value">{calculateTenure(emp.hire_date)}</span>
-                        </div>
-                        {emp.birth_date && (
-                          <div className="info-item">
-                            <span className="info-label">Дата рождения</span>
-                            <span className="info-value">{formatDate(emp.birth_date)}</span>
-                          </div>
-                        )}
-                        <div className="info-item">
-                          <span className="info-label">Группа</span>
-                          <span className="info-value">{emp.department || '—'}</span>
-                        </div>
-                        <div className="info-item highlight">
-                          <span className="info-label">Зарплата</span>
-                          <span className="info-value">{formatSalary(emp.current_salary)}</span>
-                        </div>
-                      </div>
-                      {canEdit && (
-                        <div className="expanded-actions">
-                          <button className="btn-edit" onClick={(e) => { e.stopPropagation(); startEditing(emp); }}>
-                            <Edit3 size={16} />
-                            Редактировать
-                          </button>
-                          {emp.is_archived ? (
-                            <button className="btn-restore" onClick={(e) => { e.stopPropagation(); handleRestore(emp.id); }}>
-                              Восстановить
-                            </button>
-                          ) : (
-                            <button className="btn-archive" onClick={(e) => { e.stopPropagation(); handleArchive(emp.id); }}>
-                              <Archive size={16} />
-                              В архив
-                            </button>
-                          )}
-                          <button className="btn-delete" onClick={(e) => { e.stopPropagation(); handleDelete(emp.id); }}>
-                            <Trash2 size={16} />
-                            Удалить
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              )}
-            </React.Fragment>
+            <div
+              key={emp.id}
+              className={`table-row ${emp.is_archived ? 'archived' : ''}`}
+              onClick={() => handleRowClick(emp)}
+            >
+              <span className="col-number" style={{ width: '40px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+                {index + 1}
+              </span>
+              <span className="col-name">{emp.full_name}</span>
+              <span className="col-position">{emp.position_name || '—'}</span>
+              <span className="col-tenure">{calculateTenure(emp.hire_date)}</span>
+              <span className="col-group">{emp.department || '—'}</span>
+            </div>
           ))}
         </div>
       )}
@@ -584,7 +400,6 @@ export const TenderPage: React.FC = () => {
         <div className="modal-overlay" onClick={() => setShowAddModal(false)}>
           <div className="modal-content" onClick={e => e.stopPropagation()}>
             <h3>Добавить сотрудника</h3>
-
             <div className="form-group">
               <label>ФИО</label>
               <input
@@ -594,7 +409,6 @@ export const TenderPage: React.FC = () => {
                 placeholder="Иванов Иван Иванович"
               />
             </div>
-
             <div className="form-row">
               <div className="form-group">
                 <label>Дата найма</label>
@@ -614,12 +428,9 @@ export const TenderPage: React.FC = () => {
                 />
               </div>
             </div>
-
             <div className="modal-actions">
               <button onClick={() => setShowAddModal(false)}>Отмена</button>
-              <button className="btn-primary" onClick={handleAddEmployee}>
-                Добавить
-              </button>
+              <button className="btn-primary" onClick={handleAddEmployee}>Добавить</button>
             </div>
           </div>
         </div>
@@ -641,7 +452,6 @@ export const TenderPage: React.FC = () => {
                 <X size={20} />
               </button>
             </div>
-
             <div className="import-modal-body">
               <table className="import-columns-table">
                 <thead>
@@ -675,7 +485,6 @@ export const TenderPage: React.FC = () => {
                   ))}
                 </tbody>
               </table>
-
               <div className="import-hints">
                 <div className="import-hint">
                   <span className="import-hint-icon">📅</span>
@@ -687,11 +496,8 @@ export const TenderPage: React.FC = () => {
                 </div>
               </div>
             </div>
-
             <div className="import-modal-footer">
-              <button className="import-btn-cancel" onClick={() => setShowImportModal(false)}>
-                Отмена
-              </button>
+              <button className="import-btn-cancel" onClick={() => setShowImportModal(false)}>Отмена</button>
               <button
                 className="import-btn-submit"
                 onClick={() => {

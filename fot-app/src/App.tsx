@@ -20,6 +20,7 @@ import { DataAuditPage } from './pages/super-admin/DataAuditPage';
 
 // Tender & SKUD
 import { TenderPage } from './pages/tender/TenderPage';
+import { EmployeeCardPage } from './pages/employees/EmployeeCardPage';
 import { SigurSettingsPage } from './pages/skud/SigurSettingsPage';
 import { SigurRawDataPage } from './pages/skud/SigurRawDataPage';
 import { SkudSupabasePage } from './pages/skud/SkudSupabasePage';
@@ -149,6 +150,14 @@ const AppRoutes = () => {
           element={
             <Layout title="Сотрудники" theme={theme} onToggleTheme={toggleTheme}>
               <TenderPage />
+            </Layout>
+          }
+        />
+        <Route
+          path="/tender/:id"
+          element={
+            <Layout title="Карточка сотрудника" theme={theme} onToggleTheme={toggleTheme}>
+              <EmployeeCardPage />
             </Layout>
           }
         />

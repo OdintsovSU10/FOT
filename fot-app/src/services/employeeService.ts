@@ -1,5 +1,5 @@
 import { apiClient } from '../api/client';
-import type { Employee, EmployeeInput } from '../types';
+import type { Employee, EmployeeInput, EmployeeHistoryEvent } from '../types';
 
 interface ApiResponse<T> {
   success: boolean;
@@ -74,6 +74,11 @@ export const employeeService = {
     }
 
     return response.blob();
+  },
+
+  async getHistory(id: number): Promise<EmployeeHistoryEvent[]> {
+    const response = await apiClient.get<ApiResponse<EmployeeHistoryEvent[]>>(`/employees/${id}/history`);
+    return response.data || [];
   },
 
   async deleteAll(): Promise<{ deleted: number }> {

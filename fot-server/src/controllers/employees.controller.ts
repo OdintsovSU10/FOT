@@ -488,6 +488,90 @@ export const employeesController = {
   },
 
   /**
+   * GET /api/employees/:id/history
+   */
+  async getHistory(req: AuthenticatedRequest, res: Response): Promise<void> {
+    try {
+      const { id } = req.params;
+      const organizationId = req.user.organization_id;
+
+      if (!organizationId) {
+        res.status(400).json({ success: false, error: 'Organization required' });
+        return;
+      }
+
+      // Проверяем что сотрудник принадлежит организации
+      const { data: emp } = await supabase
+        .from('employees')
+        .select('id')
+        .eq('id', id)
+        .eq('organization_id', organizationId)
+        .single();
+
+      if (!emp) {
+        res.status(404).json({ success: false, error: 'Employee not found' });
+        return;
+      }
+
+      const { data, error } = await supabase
+        .from('employee_history')
+        .select('*')
+        .eq('employee_id', id)
+        .order('event_date', { ascending: false });
+
+      if (error) {
+        console.error('Get employee history error:', error);
+        res.status(500).json({ success: false, error: 'Failed to fetch history' });
+        return;
+      }
+
+      const structureCache = await loadStructureCache(organizationId);
+
+      const events = (data || []).map((row: Record<string, unknown>) => {
+        const eventData = row.event_data as Record<string, unknown> || {};
+        let decryptedData: Record<string, unknown> = {};
+
+        if (row.event_type === 'salary') {
+          decryptedData = {
+            salary: eventData.salary_encrypted ? parseFloat(safeDecrypt(eventData.salary_encrypted as string) || '0') : null,
+            reason: eventData.reason,
+            order_number: eventData.order_number,
+            note: eventData.note ? safeDecrypt(eventData.note as string) : null,
+          };
+        } else if (row.event_type === 'assignment') {
+          decryptedData = {
+            department: eventData.department_id ? structureCache.departments.get(eventData.department_id as string) || null : null,
+            department_id: eventData.department_id,
+            position: eventData.position_id ? structureCache.positions.get(eventData.position_id as string) || null : null,
+            position_id: eventData.position_id,
+            site_id: eventData.site_id,
+            is_primary: eventData.is_primary,
+            type: eventData.type,
+            reason: eventData.reason,
+            order_number: eventData.order_number,
+          };
+        }
+
+        return {
+          employee_id: row.employee_id,
+          event_type: row.event_type,
+          event_id: row.event_id,
+          event_date: row.event_date,
+          event_end_date: row.event_end_date,
+          event_data: decryptedData,
+          created_at: row.created_at,
+          created_by: row.created_by,
+        };
+      });
+
+      res.json({ success: true, data: events });
+    } catch (error) {
+      console.error('Get employee history error:', error);
+      res.status(500).json({ success: false, error: 'Failed to fetch history' });
+    }
+  },
+
+  /**
    * DELETE /api/employees/all
    */
   async deleteAll(req: AuthenticatedRequest, res: Response): Promise<void> {

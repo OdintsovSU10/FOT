@@ -80,7 +80,7 @@
 
 .tree-emp-row {
   display: grid;
-  grid-template-columns: 2fr 1.5fr 1fr 30px;
+  grid-template-columns: 2fr 1.5fr;
   gap: 12px;
   padding: 10px 16px;
   border-bottom: 1px solid var(--border);
@@ -95,11 +95,6 @@
 
 .tree-emp-row:hover {
   background: var(--surface-hover);
-}
-
-.tree-emp-row.tree-emp-expanded {
-  background: var(--primary-light);
-  border-left: 3px solid var(--primary);
 }
 
 .tree-emp-row.tree-emp-archived {
@@ -120,32 +115,6 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-.tree-emp-salary {
-  color: var(--text-primary);
-  font-size: 0.9rem;
-  font-weight: 500;
-  text-align: right;
-}
-
-.tree-emp-chevron {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--text-muted);
-}
-
-.tree-emp-expanded .tree-emp-chevron {
-  color: var(--primary);
-}
-
-/* Expanded employee details inside tree */
-.tree-emp-details {
-  background: var(--bg-tertiary);
-  border-bottom: 1px solid var(--border);
-  padding: 16px 20px;
-  animation: expandDown 0.2s ease-out;
 }
 
 /* Unassigned section */
@@ -170,17 +139,14 @@
   }
 
   .tree-emp-row {
-    grid-template-columns: 1fr auto 30px;
-    gap: 8px;
+    grid-template-columns: 1fr;
+    gap: 2px;
     padding: 10px 12px;
   }
 
   .tree-emp-position {
-    display: none;
-  }
-
-  .tree-emp-details {
-    padding: 12px 16px;
+    font-size: 0.8rem;
+    color: var(--text-muted);
   }
 }
 
@@ -200,13 +166,5 @@
 
   .tree-emp-name {
     font-size: 0.9rem;
-  }
-
-  .tree-emp-salary {
-    font-size: 0.85rem;
-  }
-
-  .tree-emp-details {
-    padding: 10px 12px;
   }
 }

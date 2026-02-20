@@ -53,6 +53,13 @@ router.delete(
   employeesController.deleteAll as any
 );
 
+// GET /api/employees/:id/history - история событий сотрудника (worker+)
+router.get(
+  '/:id/history',
+  requirePosition('worker', 'header', 'admin', 'super_admin') as any,
+  employeesController.getHistory as any
+);
+
 // GET /api/employees/:id - получение одного (worker+)
 router.get(
   '/:id',
