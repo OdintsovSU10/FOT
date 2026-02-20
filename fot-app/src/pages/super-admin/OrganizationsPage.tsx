@@ -137,6 +137,100 @@ export const OrganizationsPage: React.FC = () => {
     }
   };
 
+  const renderOrgRow = (org: OrganizationWithStats) => {
+    const isExpanded = expandedOrgId === org.id;
+    const usersInOrg = getUsersInOrg(org.id);
+
+    return (
+      <div key={org.id} className={`${styles.userRow} ${isExpanded ? styles.expanded : ''}`}>
+        <div className={styles.userRowHeader} onClick={() => toggleExpand(org.id)}>
+          <div className={styles.userRowInfo}>
+            <div className={styles.userRowName}>{org.name}</div>
+            <div className={styles.userRowEmail}>
+              Создан: {new Date(org.created_at).toLocaleDateString('ru-RU')}
+              {org.parent_organization_id && <span style={{ marginLeft: 8, opacity: 0.6 }}>(подрядчик)</span>}
+            </div>
+          </div>
+          <div className={styles.userRowMeta}>
+            <span className={styles.userRowRole}>{org.member_count || 0} сотрудников</span>
+          </div>
+          <div className={styles.expandIcon}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+              style={{ transform: isExpanded ? 'rotate(180deg)' : 'rotate(0deg)' }}>
+              <polyline points="6 9 12 15 18 9" />
+            </svg>
+          </div>
+        </div>
+
+        {isExpanded && (
+          <div className={styles.userRowControls}>
+            <div className={styles.controlGroup}>
+              <label>Название:</label>
+              {editingOrg?.id === org.id ? (
+                <div className={styles.nameEditGroup}>
+                  <input
+                    type="text"
+                    value={editingOrg.name}
+                    onChange={(e) => setEditingOrg({ ...editingOrg, name: e.target.value })}
+                    className={styles.nameInput}
+                    autoFocus
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') handleEditSave();
+                      if (e.key === 'Escape') handleEditCancel();
+                    }}
+                  />
+                  <button className={styles.saveBtn} onClick={handleEditSave}>Сохранить</button>
+                  <button className={styles.cancelBtn} onClick={handleEditCancel}>Отмена</button>
+                </div>
+              ) : (
+                <button className={styles.editNameBtn} onClick={() => handleEditStart(org)}>
+                  {org.name}
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="14" height="14">
+                    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                  </svg>
+                </button>
+              )}
+            </div>
+
+            <div className={styles.controlActions}>
+              <button
+                className={styles.dangerBtn}
+                onClick={() => handleDelete(org)}
+                disabled={Boolean(org.member_count && org.member_count > 0)}
+              >
+                Удалить отдел
+              </button>
+            </div>
+
+            {usersInOrg.length > 0 && (
+              <div className={styles.orgUsersList}>
+                <div className={styles.orgUsersHeader}>Сотрудники отдела:</div>
+                {usersInOrg.map(user => (
+                  <div key={user.id} className={styles.orgUserItem}>
+                    <span className={styles.orgUserName}>{user.full_name || 'Без имени'}</span>
+                    <span className={styles.orgUserRole}>{getPositionName(user.position_type)}</span>
+                    {!user.is_approved ? (
+                      <span className={styles.notApproved}>Не одобрен</span>
+                    ) : !user.two_factor_enabled ? (
+                      <span className={styles.twoFaDisabled}>Ожидает 2FA</span>
+                    ) : (
+                      <span className={styles.approved}>Активен</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {usersInOrg.length === 0 && (
+              <div className={styles.orgUsersEmpty}>В этом отделе пока нет сотрудников</div>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
+
   if (loading) {
     return (
       <div className={styles.container}>
@@ -160,122 +254,25 @@ export const OrganizationsPage: React.FC = () => {
         </div>
       ) : (
         <div className={styles.userListCompact}>
-          {organizations.map(org => {
-            const isExpanded = expandedOrgId === org.id;
-            const usersInOrg = getUsersInOrg(org.id);
-
+          {/* Головные организации (без parent) */}
+          {organizations.filter(o => !o.parent_organization_id).map(org => {
+            const children = organizations.filter(c => c.parent_organization_id === org.id);
             return (
-              <div key={org.id} className={`${styles.userRow} ${isExpanded ? styles.expanded : ''}`}>
-                {/* Header row */}
-                <div className={styles.userRowHeader} onClick={() => toggleExpand(org.id)}>
-                  <div className={styles.userRowInfo}>
-                    <div className={styles.userRowName}>
-                      {org.name}
-                    </div>
-                    <div className={styles.userRowEmail}>
-                      Создан: {new Date(org.created_at).toLocaleDateString('ru-RU')}
-                    </div>
-                  </div>
-
-                  <div className={styles.userRowMeta}>
-                    <span className={styles.userRowRole}>
-                      {org.member_count || 0} сотрудников
-                    </span>
-                  </div>
-
-                  <div className={styles.expandIcon}>
-                    <svg
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      style={{ transform: isExpanded ? 'rotate(180deg)' : 'rotate(0deg)' }}
-                    >
-                      <polyline points="6 9 12 15 18 9" />
-                    </svg>
-                  </div>
-                </div>
-
-                {/* Expanded content */}
-                {isExpanded && (
-                  <div className={styles.userRowControls}>
-                    {/* Edit name */}
-                    <div className={styles.controlGroup}>
-                      <label>Название:</label>
-                      {editingOrg?.id === org.id ? (
-                        <div className={styles.nameEditGroup}>
-                          <input
-                            type="text"
-                            value={editingOrg.name}
-                            onChange={(e) => setEditingOrg({ ...editingOrg, name: e.target.value })}
-                            className={styles.nameInput}
-                            autoFocus
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') handleEditSave();
-                              if (e.key === 'Escape') handleEditCancel();
-                            }}
-                          />
-                          <button className={styles.saveBtn} onClick={handleEditSave}>Сохранить</button>
-                          <button className={styles.cancelBtn} onClick={handleEditCancel}>Отмена</button>
-                        </div>
-                      ) : (
-                        <button
-                          className={styles.editNameBtn}
-                          onClick={() => handleEditStart(org)}
-                        >
-                          {org.name}
-                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="14" height="14">
-                            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
-                            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
-                          </svg>
-                        </button>
-                      )}
-                    </div>
-
-                    <div className={styles.controlActions}>
-                      <button
-                        className={styles.dangerBtn}
-                        onClick={() => handleDelete(org)}
-                        disabled={Boolean(org.member_count && org.member_count > 0)}
-                      >
-                        Удалить отдел
-                      </button>
-                    </div>
-
-                    {/* Users list */}
-                    {usersInOrg.length > 0 && (
-                      <div className={styles.orgUsersList}>
-                        <div className={styles.orgUsersHeader}>Сотрудники отдела:</div>
-                        {usersInOrg.map(user => (
-                          <div key={user.id} className={styles.orgUserItem}>
-                            <span className={styles.orgUserName}>
-                              {user.full_name || 'Без имени'}
-                            </span>
-                            <span className={styles.orgUserRole}>
-                              {getPositionName(user.position_type)}
-                            </span>
-                            {!user.is_approved ? (
-                              <span className={styles.notApproved}>Не одобрен</span>
-                            ) : !user.two_factor_enabled ? (
-                              <span className={styles.twoFaDisabled}>Ожидает 2FA</span>
-                            ) : (
-                              <span className={styles.approved}>Активен</span>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    )}
-
-                    {usersInOrg.length === 0 && (
-                      <div className={styles.orgUsersEmpty}>
-                        В этом отделе пока нет сотрудников
-                      </div>
-                    )}
+              <React.Fragment key={org.id}>
+                {renderOrgRow(org)}
+                {children.length > 0 && (
+                  <div style={{ marginLeft: 24, borderLeft: '2px solid var(--border)', paddingLeft: 8 }}>
+                    {children.map(child => renderOrgRow(child))}
                   </div>
                 )}
-              </div>
+              </React.Fragment>
             );
           })}
+          {/* Организации с parent, но parent не найден (orphans) — показываем тоже */}
+          {organizations.filter(o =>
+            o.parent_organization_id &&
+            !organizations.some(p => p.id === o.parent_organization_id)
+          ).map(org => renderOrgRow(org))}
         </div>
       )}
 

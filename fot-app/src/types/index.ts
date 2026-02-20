@@ -187,6 +187,7 @@ export interface SkudDailySummary {
 export interface Organization {
   id: string;
   name: string;
+  parent_organization_id: string | null;
   created_at: string;
 }
 
@@ -218,12 +219,20 @@ export interface OrgDepartment {
   id: string;
   organization_id: string;
   company_id: string | null;
+  parent_id: string | null;
+  sigur_department_id: number | null;
   name: string;
   description: string | null;
   sort_order: number;
   is_active: boolean;
   created_at: string;
   updated_at: string;
+}
+
+// Узел дерева отделов (рекурсивный)
+export interface OrgDepartmentNode extends OrgDepartment {
+  subdivisions: OrgSubdivision[];
+  children: OrgDepartmentNode[];
 }
 
 // Структура организации - Подразделение
@@ -242,16 +251,14 @@ export interface OrgSubdivision {
 // Полная структура для дерева
 export interface OrgStructureTree {
   companies: (OrgCompany & {
-    departments: (OrgDepartment & {
-      subdivisions: OrgSubdivision[];
-    })[];
+    departments: OrgDepartmentNode[];
   })[];
 }
 
 // Ответ API структуры
 export interface OrgStructureResponse {
   tree: OrgStructureTree;
-  orphanDepartments: (OrgDepartment & { subdivisions: OrgSubdivision[] })[];
+  orphanDepartments: OrgDepartmentNode[];
   stats: {
     companies: number;
     departments: number;

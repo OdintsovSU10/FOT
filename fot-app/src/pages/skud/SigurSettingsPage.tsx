@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Settings, Wifi, WifiOff, RefreshCw, Eye, Download, Building2, Users, Trash2 } from 'lucide-react';
+import { Settings, Wifi, WifiOff, RefreshCw, Eye, Download, Building2, Users, Trash2, Search, FolderTree, Briefcase } from 'lucide-react';
 import { sigurService } from '../../services/sigurService';
 import '../../styles/SigurSettingsPage.css';
 
@@ -65,6 +65,18 @@ export const SigurSettingsPage = () => {
   const [syncing, setSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState<ISyncResult | null>(null);
   const [syncProgress, setSyncProgress] = useState<{ percent: number; day: string; message: string } | null>(null);
+
+  // Discover
+  const [discovering, setDiscovering] = useState(false);
+  const [discoverData, setDiscoverData] = useState<Record<string, unknown> | null>(null);
+
+  // Отделы
+  const [syncingDepts, setSyncingDepts] = useState(false);
+  const [deptResult, setDeptResult] = useState<{ imported: number; updated: number; skipped: number; filtered: number; total: number; parentLinksSet: number } | null>(null);
+
+  // Должности
+  const [seedingPositions, setSeedingPositions] = useState(false);
+  const [posResult, setPosResult] = useState<{ created: number; skipped: number; total: number } | null>(null);
 
   // Инициализация дат текущим месяцем
   useEffect(() => {
@@ -162,6 +174,48 @@ export const SigurSettingsPage = () => {
       setError(err instanceof Error ? err.message : 'Ошибка импорта сотрудников');
     } finally {
       setSyncingEmps(false);
+    }
+  };
+
+  const handleDiscover = async () => {
+    setDiscovering(true);
+    setDiscoverData(null);
+    setError('');
+    try {
+      const result = await sigurService.discover();
+      setDiscoverData(result);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Ошибка диагностики API');
+    } finally {
+      setDiscovering(false);
+    }
+  };
+
+  const handleSyncDepartments = async () => {
+    setSyncingDepts(true);
+    setDeptResult(null);
+    setError('');
+    try {
+      const result = await sigurService.syncDepartments('');
+      setDeptResult(result);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Ошибка импорта отделов');
+    } finally {
+      setSyncingDepts(false);
+    }
+  };
+
+  const handleSeedPositions = async () => {
+    setSeedingPositions(true);
+    setPosResult(null);
+    setError('');
+    try {
+      const result = await sigurService.seedPositions('');
+      setPosResult(result);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Ошибка создания справочника');
+    } finally {
+      setSeedingPositions(false);
     }
   };
 
@@ -363,7 +417,88 @@ export const SigurSettingsPage = () => {
         )}
       </div>
 
-      {/* Секция 4: Предпросмотр */}
+      {/* Секция 4: Отделы */}
+      <div className="sigur-section">
+        <h2 className="sigur-section-title">
+          <FolderTree size={18} />
+          Импорт отделов из Sigur (с иерархией)
+        </h2>
+        <div className="sigur-connection-row">
+          <button
+            className="sigur-btn sigur-btn-primary"
+            onClick={handleSyncDepartments}
+            disabled={syncingDepts || !connected}
+          >
+            <FolderTree size={14} />
+            {syncingDepts ? 'Импорт...' : 'Импортировать отделы'}
+          </button>
+        </div>
+        {deptResult && (
+          <div className="sigur-sync-result">
+            <div className="sigur-sync-stats">
+              <span className="sigur-sync-stat">Всего в Sigur: <strong>{deptResult.total}</strong></span>
+              <span className="sigur-sync-stat success">Новых: <strong>{deptResult.imported}</strong></span>
+              <span className="sigur-sync-stat">Обновлено: <strong>{deptResult.updated}</strong></span>
+              <span className="sigur-sync-stat skipped">Пропущено: <strong>{deptResult.skipped}</strong></span>
+              <span className="sigur-sync-stat">Отфильтровано: <strong>{deptResult.filtered}</strong></span>
+              <span className="sigur-sync-stat">Связей parent: <strong>{deptResult.parentLinksSet}</strong></span>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Секция 5: Должности */}
+      <div className="sigur-section">
+        <h2 className="sigur-section-title">
+          <Briefcase size={18} />
+          Справочник должностей
+        </h2>
+        <div className="sigur-connection-row">
+          <button
+            className="sigur-btn sigur-btn-primary"
+            onClick={handleSeedPositions}
+            disabled={seedingPositions}
+          >
+            <Briefcase size={14} />
+            {seedingPositions ? 'Создание...' : 'Создать справочник должностей'}
+          </button>
+        </div>
+        {posResult && (
+          <div className="sigur-sync-result">
+            <div className="sigur-sync-stats">
+              <span className="sigur-sync-stat success">Создано: <strong>{posResult.created}</strong></span>
+              <span className="sigur-sync-stat skipped">Уже есть: <strong>{posResult.skipped}</strong></span>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Секция 6: Discover API */}
+      <div className="sigur-section">
+        <h2 className="sigur-section-title">
+          <Search size={18} />
+          Диагностика Sigur API
+        </h2>
+        <div className="sigur-connection-row">
+          <button
+            className="sigur-btn"
+            onClick={handleDiscover}
+            disabled={discovering || !connected}
+          >
+            <Search size={14} />
+            {discovering ? 'Анализ...' : 'Discover API'}
+          </button>
+        </div>
+        {discoverData && (
+          <div className="sigur-sync-result">
+            <pre style={{ fontSize: '0.7rem', maxHeight: 400, overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+              {JSON.stringify(discoverData, null, 2)}
+            </pre>
+          </div>
+        )}
+      </div>
+
+      {/* Секция 7: Предпросмотр */}
       <div className="sigur-section">
         <h2 className="sigur-section-title">
           <Eye size={18} />

@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, type FC } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { structureApi } from '../../api/structure';
 import { adminService } from '../../services/adminService';
-import type { OrgCompany, OrgDepartment, OrgSubdivision, OrgStructureResponse, Organization } from '../../types';
+import type { OrgCompany, OrgDepartmentNode, OrgSubdivision, OrgStructureResponse, Organization } from '../../types';
 import styles from './StructurePage.module.css';
 
 export const StructurePage: FC = () => {
@@ -23,6 +23,8 @@ export const StructurePage: FC = () => {
   const [showAddModal, setShowAddModal] = useState(false);
   const [addType, setAddType] = useState<'organization' | 'company' | 'department' | 'subdivision'>('company');
   const [addParentId, setAddParentId] = useState<string | null>(null);
+  const [addCompanyId, setAddCompanyId] = useState<string | null>(null);
+  const [addParentDeptId, setAddParentDeptId] = useState<string | null>(null);
   const [newName, setNewName] = useState('');
   const [saving, setSaving] = useState(false);
 
@@ -52,12 +54,19 @@ export const StructurePage: FC = () => {
       if (response.success && response.data) {
         setStructure(response.data);
         const expanded = new Set<string>();
+        const expandDepts = (depts: OrgDepartmentNode[]) => {
+          depts.forEach((d) => {
+            expanded.add(`department-${d.id}`);
+            if (d.children) expandDepts(d.children);
+          });
+        };
         response.data.tree.companies.forEach((c) => {
           expanded.add(`company-${c.id}`);
-          c.departments.forEach((d) => {
-            expanded.add(`department-${d.id}`);
-          });
+          expandDepts(c.departments);
         });
+        if (response.data.orphanDepartments) {
+          expandDepts(response.data.orphanDepartments as OrgDepartmentNode[]);
+        }
         setExpandedNodes(expanded);
       } else {
         setError(response.error || 'Ошибка загрузки');
@@ -95,7 +104,9 @@ export const StructurePage: FC = () => {
       if (addType === 'company') {
         response = await structureApi.createCompany(newName.trim(), undefined, effectiveOrgId);
       } else if (addType === 'department') {
-        response = await structureApi.createDepartment(newName.trim(), addParentId, undefined, effectiveOrgId);
+        response = await structureApi.createDepartment(
+          newName.trim(), addCompanyId, undefined, effectiveOrgId, addParentDeptId
+        );
       } else {
         response = await structureApi.createSubdivision(newName.trim(), addParentId, undefined, effectiveOrgId);
       }
@@ -154,75 +165,59 @@ export const StructurePage: FC = () => {
   };
 
   // Открытие модалки добавления
-  const openAddModal = (type: 'organization' | 'company' | 'department' | 'subdivision', parentId: string | null = null) => {
+  const openAddModal = (
+    type: 'organization' | 'company' | 'department' | 'subdivision',
+    parentId: string | null = null,
+    companyId: string | null = null,
+    parentDeptId: string | null = null,
+  ) => {
     setAddType(type);
     setAddParentId(parentId);
+    setAddCompanyId(companyId);
+    setAddParentDeptId(parentDeptId);
     setNewName('');
     setShowAddModal(true);
   };
 
-  // Рендер узла дерева
-  const renderTreeNode = (
-    type: 'company' | 'department' | 'subdivision',
-    item: OrgCompany | OrgDepartment | OrgSubdivision,
-    children?: React.ReactNode,
-    level: number = 0
-  ) => {
-    const nodeId = `${type}-${item.id}`;
+  // Рекурсивный рендер отдела
+  const renderDepartmentNode = (dept: OrgDepartmentNode, level: number, companyId: string | null) => {
+    const nodeId = `department-${dept.id}`;
     const isExpanded = expandedNodes.has(nodeId);
-    const hasChildren = type !== 'subdivision';
-
-    const typeLabels = {
-      company: 'Компания',
-      department: 'Отдел',
-      subdivision: 'Подразделение',
-    };
-
-    const typeColors = {
-      company: styles.companyNode,
-      department: styles.departmentNode,
-      subdivision: styles.subdivisionNode,
-    };
+    const hasChildren = (dept.children && dept.children.length > 0) || (dept.subdivisions && dept.subdivisions.length > 0);
 
     return (
-      <div key={item.id} className={styles.treeNode} style={{ marginLeft: level * 24 }}>
-        <div className={`${styles.nodeHeader} ${typeColors[type]}`}>
-          {hasChildren && (
-            <button
-              className={styles.expandBtn}
-              onClick={() => toggleNode(nodeId)}
-            >
+      <div key={dept.id} className={styles.treeNode} style={{ marginLeft: level * 24 }}>
+        <div className={`${styles.nodeHeader} ${styles.departmentNode}`}>
+          {hasChildren ? (
+            <button className={styles.expandBtn} onClick={() => toggleNode(nodeId)}>
               {isExpanded ? '▼' : '▶'}
             </button>
+          ) : (
+            <span className={styles.expandPlaceholder} />
           )}
-          {!hasChildren && <span className={styles.expandPlaceholder} />}
 
-          <span className={styles.nodeType}>{typeLabels[type]}</span>
-          <span className={styles.nodeName}>{item.name}</span>
+          <span className={styles.nodeType}>Отдел</span>
+          <span className={styles.nodeName}>{dept.name}</span>
 
           {isSuperAdmin && (
             <div className={styles.nodeActions}>
-              {type === 'company' && (
-                <button
-                  className={styles.addChildBtn}
-                  onClick={() => openAddModal('department', item.id)}
-                  title="Добавить отдел"
-                >
-                  + Отдел
-                </button>
-              )}
-              {type === 'department' && (
-                <button
-                  className={styles.addChildBtn}
-                  onClick={() => openAddModal('subdivision', item.id)}
-                  title="Добавить подразделение"
-                >
-                  + Подр.
-                </button>
-              )}
+              <button
+                className={styles.addChildBtn}
+                onClick={() => openAddModal('department', null, companyId, dept.id)}
+                title="Добавить подотдел"
+              >
+                + Подотдел
+              </button>
+              <button
+                className={styles.addChildBtn}
+                onClick={() => openAddModal('subdivision', dept.id)}
+                title="Добавить подразделение"
+              >
+                + Подр.
+              </button>
               <button
                 className={styles.deleteBtn}
-                onClick={() => handleDelete(type, item.id, item.name)}
+                onClick={() => handleDelete('department', dept.id, dept.name)}
                 title="Удалить"
               >
                 ×
@@ -231,7 +226,72 @@ export const StructurePage: FC = () => {
           )}
         </div>
 
-        {isExpanded && children && <div className={styles.nodeChildren}>{children}</div>}
+        {isExpanded && hasChildren && (
+          <div className={styles.nodeChildren}>
+            {dept.children?.map((child) => renderDepartmentNode(child, level + 1, companyId))}
+            {dept.subdivisions?.map((sub) => (
+              <div key={sub.id} className={styles.treeNode} style={{ marginLeft: (level + 1) * 24 }}>
+                <div className={`${styles.nodeHeader} ${styles.subdivisionNode}`}>
+                  <span className={styles.expandPlaceholder} />
+                  <span className={styles.nodeType}>Подразделение</span>
+                  <span className={styles.nodeName}>{sub.name}</span>
+                  {isSuperAdmin && (
+                    <div className={styles.nodeActions}>
+                      <button
+                        className={styles.deleteBtn}
+                        onClick={() => handleDelete('subdivision', sub.id, sub.name)}
+                        title="Удалить"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  // Рендер компании
+  const renderCompanyNode = (company: OrgCompany & { departments: OrgDepartmentNode[] }) => {
+    const nodeId = `company-${company.id}`;
+    const isExpanded = expandedNodes.has(nodeId);
+
+    return (
+      <div key={company.id} className={styles.treeNode}>
+        <div className={`${styles.nodeHeader} ${styles.companyNode}`}>
+          <button className={styles.expandBtn} onClick={() => toggleNode(nodeId)}>
+            {isExpanded ? '▼' : '▶'}
+          </button>
+          <span className={styles.nodeType}>Компания</span>
+          <span className={styles.nodeName}>{company.name}</span>
+          {isSuperAdmin && (
+            <div className={styles.nodeActions}>
+              <button
+                className={styles.addChildBtn}
+                onClick={() => openAddModal('department', null, company.id, null)}
+                title="Добавить отдел"
+              >
+                + Отдел
+              </button>
+              <button
+                className={styles.deleteBtn}
+                onClick={() => handleDelete('company', company.id, company.name)}
+                title="Удалить"
+              >
+                ×
+              </button>
+            </div>
+          )}
+        </div>
+        {isExpanded && company.departments.length > 0 && (
+          <div className={styles.nodeChildren}>
+            {company.departments.map((dept) => renderDepartmentNode(dept, 1, company.id))}
+          </div>
+        )}
       </div>
     );
   };
@@ -323,41 +383,14 @@ export const StructurePage: FC = () => {
           ) : (
             <>
               {structure?.tree.companies.map((company) =>
-                renderTreeNode(
-                  'company',
-                  company,
-                  <>
-                    {company.departments.map((dept) =>
-                      renderTreeNode(
-                        'department',
-                        dept,
-                        <>
-                          {dept.subdivisions.map((sub) =>
-                            renderTreeNode('subdivision', sub, null, 2)
-                          )}
-                        </>,
-                        1
-                      )
-                    )}
-                  </>,
-                  0
-                )
+                renderCompanyNode(company as OrgCompany & { departments: OrgDepartmentNode[] })
               )}
 
               {structure?.orphanDepartments && structure.orphanDepartments.length > 0 && (
                 <div className={styles.orphanSection}>
                   <div className={styles.orphanHeader}>Отделы без компании</div>
-                  {structure.orphanDepartments.map((dept) =>
-                    renderTreeNode(
-                      'department',
-                      dept,
-                      <>
-                        {dept.subdivisions.map((sub) =>
-                          renderTreeNode('subdivision', sub, null, 2)
-                        )}
-                      </>,
-                      0
-                    )
+                  {(structure.orphanDepartments as OrgDepartmentNode[]).map((dept) =>
+                    renderDepartmentNode(dept, 0, null)
                   )}
                 </div>
               )}

@@ -9,6 +9,7 @@ import type {
   OrgCompanyEncrypted,
   OrgDepartment,
   OrgDepartmentEncrypted,
+  OrgDepartmentNode,
   OrgSubdivision,
   OrgSubdivisionEncrypted,
   OrgStructureTree,
@@ -38,6 +39,8 @@ function decryptDepartment(encrypted: OrgDepartmentEncrypted): OrgDepartment {
     id: encrypted.id,
     organization_id: encrypted.organization_id,
     company_id: encrypted.company_id,
+    parent_id: encrypted.parent_id,
+    sigur_department_id: encrypted.sigur_department_id,
     name: encryptionService.decrypt(encrypted.name_encrypted),
     description: safeDecrypt(encrypted.description_encrypted),
     sort_order: encrypted.sort_order,
@@ -45,6 +48,24 @@ function decryptDepartment(encrypted: OrgDepartmentEncrypted): OrgDepartment {
     created_at: encrypted.created_at,
     updated_at: encrypted.updated_at,
   };
+}
+
+/**
+ * Рекурсивное построение дерева отделов
+ */
+function buildDepartmentTree(
+  allDepts: OrgDepartment[],
+  subdivisions: OrgSubdivision[],
+  parentId: string | null,
+): OrgDepartmentNode[] {
+  return allDepts
+    .filter(d => d.parent_id === parentId)
+    .sort((a, b) => a.sort_order - b.sort_order)
+    .map(dept => ({
+      ...dept,
+      subdivisions: subdivisions.filter(s => s.department_id === dept.id),
+      children: buildDepartmentTree(allDepts, subdivisions, dept.id),
+    }));
 }
 
 /**
@@ -111,26 +132,21 @@ export const structureController = {
       const departments = ((departmentsRes.data || []) as OrgDepartmentEncrypted[]).map(decryptDepartment);
       const subdivisions = ((subdivisionsRes.data || []) as OrgSubdivisionEncrypted[]).map(decryptSubdivision);
 
-      // Строим дерево
+      // Строим рекурсивное дерево
       const tree: OrgStructureTree = {
-        companies: companies.map((company) => ({
-          ...company,
-          departments: departments
-            .filter((dept) => dept.company_id === company.id)
-            .map((dept) => ({
-              ...dept,
-              subdivisions: subdivisions.filter((sub) => sub.department_id === dept.id),
-            })),
-        })),
+        companies: companies.map((company) => {
+          // Отделы этой компании (корневые — без parent_id)
+          const companyDepts = departments.filter(d => d.company_id === company.id);
+          return {
+            ...company,
+            departments: buildDepartmentTree(companyDepts, subdivisions, null),
+          };
+        }),
       };
 
-      // Добавляем отделы без компании (на верхнем уровне)
-      const orphanDepartments = departments
-        .filter((dept) => !dept.company_id)
-        .map((dept) => ({
-          ...dept,
-          subdivisions: subdivisions.filter((sub) => sub.department_id === dept.id),
-        }));
+      // Отделы без компании (orphans) — тоже рекурсивное дерево
+      const orphanDepts = departments.filter(d => !d.company_id);
+      const orphanDepartments = buildDepartmentTree(orphanDepts, subdivisions, null);
 
       res.json({
         success: true,
@@ -204,7 +220,7 @@ export const structureController = {
   async createDepartment(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
       const organizationId = req.user.organization_id;
-      const { name, description, company_id } = req.body;
+      const { name, description, company_id, parent_id } = req.body;
 
       if (!organizationId) {
         res.status(400).json({ success: false, error: 'Организация не указана' });
@@ -221,6 +237,7 @@ export const structureController = {
         .insert({
           organization_id: organizationId,
           company_id: company_id || null,
+          parent_id: parent_id || null,
           name_encrypted: encryptionService.encrypt(name.trim()),
           description_encrypted: description ? encryptionService.encrypt(description.trim()) : null,
         })

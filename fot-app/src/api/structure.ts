@@ -47,12 +47,14 @@ export const structureApi = {
     name: string,
     companyId: string | null,
     description?: string,
-    organizationId?: string
+    organizationId?: string,
+    parentId?: string | null,
   ): Promise<ApiResponse<OrgDepartment>> {
     try {
       return await apiClient.post<ApiResponse<OrgDepartment>>(`/structure/departments${orgQuery(organizationId)}`, {
         name,
         company_id: companyId,
+        parent_id: parentId || null,
         description,
       });
     } catch (error) {

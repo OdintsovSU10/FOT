@@ -42,6 +42,7 @@ export interface AuthenticatedRequest extends Request {
 export interface OrganizationEncrypted {
   id: string;
   name_encrypted: string;
+  parent_organization_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -50,6 +51,7 @@ export interface OrganizationEncrypted {
 export interface Organization {
   id: string;
   name: string;
+  parent_organization_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -75,6 +77,7 @@ export interface EmployeeEncrypted {
   org_company_id: string | null;
   org_department_id: string | null;
   org_subdivision_id: string | null;
+  sigur_employee_id: number | null;
   is_archived: boolean;
   archived_at: string | null;
   created_at: string;
@@ -257,6 +260,8 @@ export interface OrgDepartmentEncrypted {
   id: string;
   organization_id: string;
   company_id: string | null;
+  parent_id: string | null;
+  sigur_department_id: number | null;
   name_encrypted: string;
   description_encrypted: string | null;
   sort_order: number;
@@ -270,6 +275,8 @@ export interface OrgDepartment {
   id: string;
   organization_id: string;
   company_id: string | null;
+  parent_id: string | null;
+  sigur_department_id: number | null;
   name: string;
   description: string | null;
   sort_order: number;
@@ -304,11 +311,15 @@ export interface OrgSubdivision {
   updated_at: string;
 }
 
+// Узел дерева отделов (рекурсивный)
+export interface OrgDepartmentNode extends OrgDepartment {
+  subdivisions: OrgSubdivision[];
+  children: OrgDepartmentNode[];
+}
+
 // Полная структура для дерева
 export interface OrgStructureTree {
   companies: (OrgCompany & {
-    departments: (OrgDepartment & {
-      subdivisions: OrgSubdivision[];
-    })[];
+    departments: OrgDepartmentNode[];
   })[];
 }

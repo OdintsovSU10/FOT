@@ -20,8 +20,6 @@ import { DataAuditPage } from './pages/super-admin/DataAuditPage';
 
 // Tender & SKUD
 import { TenderPage } from './pages/tender/TenderPage';
-import { SKUDPage } from './pages/skud/SKUDPage';
-import { SKUDAnalysisPage } from './pages/skud/SKUDAnalysisPage';
 import { SigurSettingsPage } from './pages/skud/SigurSettingsPage';
 import { SigurRawDataPage } from './pages/skud/SigurRawDataPage';
 import { SkudSupabasePage } from './pages/skud/SkudSupabasePage';
@@ -151,22 +149,6 @@ const AppRoutes = () => {
           element={
             <Layout title="Сотрудники" theme={theme} onToggleTheme={toggleTheme}>
               <TenderPage />
-            </Layout>
-          }
-        />
-        <Route
-          path="/skud"
-          element={
-            <Layout title="СКУД" theme={theme} onToggleTheme={toggleTheme}>
-              <SKUDPage />
-            </Layout>
-          }
-        />
-        <Route
-          path="/skud-analysis"
-          element={
-            <Layout title="Анализ СКУД" theme={theme} onToggleTheme={toggleTheme}>
-              <SKUDAnalysisPage />
             </Layout>
           }
         />

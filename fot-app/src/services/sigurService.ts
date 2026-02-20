@@ -106,4 +106,25 @@ export const sigurService = {
     );
     return response.data;
   },
+
+  async discover(): Promise<Record<string, unknown>> {
+    const response = await apiClient.get<ApiResponse<Record<string, unknown>>>('/sigur/discover');
+    return response.data;
+  },
+
+  async syncDepartments(organizationId: string): Promise<{ imported: number; updated: number; skipped: number; filtered: number; total: number; parentLinksSet: number; errors: string[] }> {
+    const response = await apiClient.post<ApiResponse<{ imported: number; updated: number; skipped: number; filtered: number; total: number; parentLinksSet: number; errors: string[] }>>(
+      '/sigur/sync-departments',
+      { organization_id: organizationId }
+    );
+    return response.data;
+  },
+
+  async seedPositions(organizationId: string): Promise<{ created: number; skipped: number; total: number }> {
+    const response = await apiClient.post<ApiResponse<{ created: number; skipped: number; total: number }>>(
+      '/sigur/seed-positions',
+      { organization_id: organizationId }
+    );
+    return response.data;
+  },
 };

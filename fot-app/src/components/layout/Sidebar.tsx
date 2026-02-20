@@ -7,10 +7,8 @@ import {
   GridIcon,
   UsersIcon,
   CalendarIcon,
-  ShieldIcon,
   SettingsIcon,
   BuildingIcon,
-  BarChartIcon,
   ClipboardCheckIcon,
   FileTextIcon,
   DatabaseIcon,
@@ -42,8 +40,6 @@ const navGroups: INavGroup[] = [
   {
     label: 'Контроль',
     items: [
-      { id: 'access', path: '/skud', label: 'СКУД', icon: ShieldIcon },
-      { id: 'access-analysis', path: '/skud-analysis', label: 'Анализ СКУД', icon: BarChartIcon },
       { id: 'skud-raw', path: '/skud-raw', label: 'Просмотр СКУД', icon: FileTextIcon },
       { id: 'skud-db', path: '/skud-db', label: 'СКУД (база)', icon: DatabaseIcon },
       { id: 'sigur-settings', path: '/skud-settings', label: 'Настройки СКУД', icon: SettingsIcon },

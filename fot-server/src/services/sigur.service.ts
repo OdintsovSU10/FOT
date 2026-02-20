@@ -383,6 +383,26 @@ class SigurService {
     return this.request('/api/v1/events/codes', undefined, connection);
   }
 
+  /** Попытка получить должности из Sigur (эндпоинт может не существовать) */
+  async getPositions(connection?: ConnectionType): Promise<Record<string, unknown>[] | null> {
+    try {
+      return await this.fetchAllPaginated('/api/v1/positions', undefined, connection);
+    } catch {
+      console.warn('[sigur] /api/v1/positions not available');
+      return null;
+    }
+  }
+
+  /** Получить один отдел по ID (для просмотра полной схемы) */
+  async getDepartmentById(id: number, connection?: ConnectionType) {
+    return this.request<Record<string, unknown>>(`/api/v1/departments/${id}`, undefined, connection);
+  }
+
+  /** Получить одного сотрудника по ID (для просмотра полной схемы) */
+  async getEmployeeById(id: number, connection?: ConnectionType) {
+    return this.request<Record<string, unknown>>(`/api/v1/employees/${id}`, undefined, connection);
+  }
+
   /** Предзагрузка кэша сотрудников при старте сервера */
   warmUpCache(): void {
     if (!this.isConfigured()) return;
