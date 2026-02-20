@@ -107,32 +107,39 @@ export const employeesController = {
     try {
       const showArchived = req.query.archived === 'true';
       const organizationId = req.user.organization_id;
+      const departmentId = req.query.department_id as string | undefined;
 
-      let empQuery = supabase
-        .from('employees')
-        .select('*')
-        .eq('is_archived', showArchived)
-        .order('id')
-        .limit(10000);
+      // Пагинация Supabase (дефолт max-rows = 1000)
+      const PAGE_SIZE = 1000;
+      let allRows: EmployeeEncrypted[] = [];
+      let from = 0;
+      let hasMore = true;
 
-      if (organizationId) {
-        empQuery = empQuery.eq('organization_id', organizationId);
+      while (hasMore) {
+        let q = supabase
+          .from('employees')
+          .select('*')
+          .eq('is_archived', showArchived)
+          .order('id')
+          .range(from, from + PAGE_SIZE - 1);
+
+        if (organizationId) q = q.eq('organization_id', organizationId);
+        if (departmentId) q = q.eq('org_department_id', departmentId);
+
+        const { data, error } = await q;
+        if (error) {
+          console.error('Get employees error:', error);
+          res.status(500).json({ success: false, error: 'Failed to fetch employees' });
+          return;
+        }
+
+        allRows = allRows.concat((data || []) as EmployeeEncrypted[]);
+        hasMore = (data?.length || 0) === PAGE_SIZE;
+        from += PAGE_SIZE;
       }
 
-      const [employeesResult, structureCache] = await Promise.all([
-        empQuery,
-        loadStructureCache(organizationId || undefined),
-      ]);
-
-      if (employeesResult.error) {
-        console.error('Get employees error:', employeesResult.error);
-        res.status(500).json({ success: false, error: 'Failed to fetch employees' });
-        return;
-      }
-
-      const employees = (employeesResult.data as EmployeeEncrypted[]).map(
-        (emp) => decryptEmployee(emp, structureCache)
-      );
+      const structureCache = await loadStructureCache(organizationId || undefined);
+      const employees = allRows.map(emp => decryptEmployee(emp, structureCache));
 
       await auditService.logFromRequest(req, req.user.id, 'VIEW_EMPLOYEES', {
         details: { count: employees.length, archived: showArchived },

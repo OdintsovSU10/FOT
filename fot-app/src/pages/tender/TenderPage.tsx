@@ -7,62 +7,38 @@ import { EmployeeTreeView } from '../../components/employees/EmployeeTreeView';
 import type { Employee, EmployeeInput } from '../../types';
 import '../../styles/TenderPage.css';
 
-interface ISigurDepartment {
-  id: number;
+interface IDbDepartment {
+  id: string;
   name: string;
-  parentId: number | null;
-}
-
-interface IDeptTreeNode {
-  id: number;
-  name: string;
-  children: IDeptTreeNode[];
+  parent_id: string | null;
+  children: IDbDepartment[];
 }
 
 interface IDeptFlatOption {
-  id: number;
+  id: string;
   name: string;
   level: number;
-  allNames: string[]; // имя + все потомки (lowercase)
+  allIds: string[]; // id + все потомки (для каскадной фильтрации)
 }
 
-const SYSTEM_DEPTS = ['api_keys', 'автопарк', 'гостевые qr-коды'];
-
-const buildDeptTree = (departments: ISigurDepartment[]): IDeptTreeNode[] => {
-  const map = new Map<number, IDeptTreeNode>();
-  const roots: IDeptTreeNode[] = [];
-  for (const d of departments) {
-    map.set(d.id, { id: d.id, name: d.name, children: [] });
-  }
-  for (const d of departments) {
-    const node = map.get(d.id)!;
-    if (d.parentId && map.has(d.parentId)) {
-      map.get(d.parentId)!.children.push(node);
-    } else {
-      roots.push(node);
-    }
-  }
-  return roots;
-};
-
-const collectAllNames = (node: IDeptTreeNode): string[] => {
-  const names = [node.name.trim().toLowerCase()];
+const collectAllIds = (node: IDbDepartment): string[] => {
+  const ids = [node.id];
   for (const child of node.children) {
-    names.push(...collectAllNames(child));
+    ids.push(...collectAllIds(child));
   }
-  return names;
+  return ids;
 };
 
-const flattenDeptTree = (nodes: IDeptTreeNode[], level = 0): IDeptFlatOption[] => {
+const flattenDbTree = (nodes: IDbDepartment[], level = 0): IDeptFlatOption[] => {
   const result: IDeptFlatOption[] = [];
   for (const node of nodes) {
     result.push({
       id: node.id,
       name: node.name,
       level,
-      allNames: collectAllNames(node),
+      allIds: collectAllIds(node),
     });
-    result.push(...flattenDeptTree(node.children, level + 1));
+    result.push(...flattenDbTree(node.children, level + 1));
   }
   return result;
 };
@@ -80,9 +56,9 @@ export const TenderPage: React.FC = () => {
   const [showArchived, setShowArchived] = useState(false);
   const [viewMode, setViewMode] = useState<'list' | 'tree'>('list');
 
-  // Sigur departments for filter
+  // DB departments for filter
   const [deptOptions, setDeptOptions] = useState<IDeptFlatOption[]>([]);
-  const [selectedDeptId, setSelectedDeptId] = useState<number | null>(null);
+  const [selectedDeptId, setSelectedDeptId] = useState<string | null>(null);
 
   // Filter states
   const [positionFilter, setPositionFilter] = useState('');
@@ -106,25 +82,22 @@ export const TenderPage: React.FC = () => {
   // Edit form state
   const [editFormData, setEditFormData] = useState<Partial<EmployeeInput>>({});
 
-  // Загрузка отделов из Sigur для фильтра
+  // Загрузка отделов из БД для фильтра
   useEffect(() => {
-    apiClient.get<{ success: boolean; data: ISigurDepartment[] }>('/sigur/departments')
+    apiClient.get<{ success: boolean; data: { departments: IDbDepartment[] } }>('/structure')
       .then(res => {
-        const filtered = (res.data || []).filter(
-          d => !SYSTEM_DEPTS.includes(d.name.toLowerCase().trim())
-        );
-        const tree = buildDeptTree(filtered);
-        setDeptOptions(flattenDeptTree(tree));
+        const departments = res.data?.departments || [];
+        setDeptOptions(flattenDbTree(departments));
       })
-      .catch(() => { /* Sigur недоступен — фильтр не покажется */ });
+      .catch(() => { /* фильтр не покажется */ });
   }, []);
 
   const loadEmployees = useCallback(async () => {
     setLoading(true);
     setError('');
     try {
-      const data = await employeeService.getAll();
-      setEmployees(data.filter(e => showArchived ? e.is_archived : !e.is_archived));
+      const data = await employeeService.getAll({ archived: showArchived });
+      setEmployees(data);
     } catch {
       setError('Ошибка загрузки сотрудников');
     } finally {
@@ -143,7 +116,7 @@ export const TenderPage: React.FC = () => {
     return Array.from(posSet).sort((a, b) => a.localeCompare(b, 'ru'));
   }, [employees]);
 
-  // Выбранный отдел Sigur (для фильтрации по ветке)
+  // Выбранный отдел (для каскадной фильтрации по ветке)
   const selectedDept = useMemo(
     () => selectedDeptId !== null ? deptOptions.find(d => d.id === selectedDeptId) : null,
     [selectedDeptId, deptOptions],
@@ -158,7 +131,7 @@ export const TenderPage: React.FC = () => {
       const matchesPosition = positionFilter === '' || emp.position_name === positionFilter;
 
       const matchesDept = !selectedDept ||
-        selectedDept.allNames.includes((emp.department || '').trim().toLowerCase());
+        selectedDept.allIds.includes(emp.org_department_id || '');
 
       return matchesSearch && matchesPosition && matchesDept;
     });
@@ -343,7 +316,7 @@ export const TenderPage: React.FC = () => {
           <select
             className="filter-select"
             value={selectedDeptId ?? ''}
-            onChange={e => setSelectedDeptId(e.target.value ? Number(e.target.value) : null)}
+            onChange={e => setSelectedDeptId(e.target.value || null)}
           >
             <option value="">Все отделы</option>
             {deptOptions.map(dept => (

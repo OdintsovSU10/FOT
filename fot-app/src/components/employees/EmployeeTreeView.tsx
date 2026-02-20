@@ -4,17 +4,11 @@ import { apiClient } from '../../api/client';
 import type { Employee, EmployeeInput } from '../../types';
 import '../../styles/EmployeeTreeView.css';
 
-interface ISigurDepartment {
-  id: number;
+interface IDbDepartment {
+  id: string;
   name: string;
-  parentId: number | null;
-}
-
-interface IDeptTreeNode {
-  id: number;
-  name: string;
-  parentId: number | null;
-  children: IDeptTreeNode[];
+  parent_id: string | null;
+  children: IDbDepartment[];
 }
 
 interface IEmployeeTreeViewProps {
@@ -35,8 +29,6 @@ interface IEmployeeTreeViewProps {
   onEditFormChange: (data: Partial<EmployeeInput>) => void;
 }
 
-const SYSTEM_DEPTS = ['api_keys', 'автопарк', 'гостевые qr-коды'];
-
 const formatDate = (dateStr: string) =>
   new Date(dateStr).toLocaleDateString('ru-RU');
 
@@ -52,23 +44,13 @@ const calculateTenure = (hireDate: string) => {
   return years > 0 ? `${years} \u0433. ${rem} \u043C\u0435\u0441.` : `${rem} \u043C\u0435\u0441.`;
 };
 
-const buildTree = (departments: ISigurDepartment[]): IDeptTreeNode[] => {
-  const map = new Map<number, IDeptTreeNode>();
-  const roots: IDeptTreeNode[] = [];
-
-  for (const d of departments) {
-    map.set(d.id, { id: d.id, name: d.name, parentId: d.parentId, children: [] });
+/** Собрать все id узла и его потомков */
+const collectIds = (node: IDbDepartment): string[] => {
+  const ids = [node.id];
+  for (const child of node.children) {
+    ids.push(...collectIds(child));
   }
-
-  for (const node of map.values()) {
-    if (node.parentId && map.has(node.parentId)) {
-      map.get(node.parentId)!.children.push(node);
-    } else {
-      roots.push(node);
-    }
-  }
-
-  return roots;
+  return ids;
 };
 
 export const EmployeeTreeView: FC<IEmployeeTreeViewProps> = ({
@@ -87,25 +69,22 @@ export const EmployeeTreeView: FC<IEmployeeTreeViewProps> = ({
   editFormData,
   onEditFormChange,
 }) => {
-  const [tree, setTree] = useState<IDeptTreeNode[]>([]);
+  const [tree, setTree] = useState<IDbDepartment[]>([]);
   const [loading, setLoading] = useState(true);
-  const [expandedNodes, setExpandedNodes] = useState<Set<number>>(new Set());
+  const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
       setLoading(true);
       try {
-        const res = await apiClient.get<{ success: boolean; data: ISigurDepartment[] }>('/sigur/departments');
+        const res = await apiClient.get<{ success: boolean; data: { departments: IDbDepartment[] } }>('/structure');
         if (cancelled) return;
-        const filtered = (res.data || []).filter(
-          d => !SYSTEM_DEPTS.includes(d.name.toLowerCase().trim())
-        );
-        const built = buildTree(filtered);
-        setTree(built);
+        const departments = res.data?.departments || [];
+        setTree(departments);
         // Раскрываем первый уровень
-        const initial = new Set<number>();
-        built.forEach(n => initial.add(n.id));
+        const initial = new Set<string>();
+        departments.forEach(n => initial.add(n.id));
         setExpandedNodes(initial);
       } catch {
         if (!cancelled) setTree([]);
@@ -116,11 +95,11 @@ export const EmployeeTreeView: FC<IEmployeeTreeViewProps> = ({
     return () => { cancelled = true; };
   }, []);
 
-  // Группировка сотрудников по имени отдела (department из Supabase)
-  const employeesByDeptName = useMemo(() => {
+  // Группировка сотрудников по org_department_id (UUID)
+  const employeesByDeptId = useMemo(() => {
     const map = new Map<string, Employee[]>();
     employees.forEach(emp => {
-      const key = (emp.department || '').trim().toLowerCase();
+      const key = emp.org_department_id || '';
       if (!map.has(key)) map.set(key, []);
       map.get(key)!.push(emp);
     });
@@ -129,8 +108,8 @@ export const EmployeeTreeView: FC<IEmployeeTreeViewProps> = ({
 
   // Плоский Map id → node для поиска предков
   const flatMap = useMemo(() => {
-    const map = new Map<number, IDeptTreeNode>();
-    const flatten = (nodes: IDeptTreeNode[]) => {
+    const map = new Map<string, IDbDepartment>();
+    const flatten = (nodes: IDbDepartment[]) => {
       nodes.forEach(n => { map.set(n.id, n); flatten(n.children); });
     };
     flatten(tree);
@@ -138,15 +117,13 @@ export const EmployeeTreeView: FC<IEmployeeTreeViewProps> = ({
   }, [tree]);
 
   // Получить сотрудников для узла дерева
-  const getEmpsForNode = (node: IDeptTreeNode): Employee[] => {
-    const key = node.name.trim().toLowerCase();
-    return employeesByDeptName.get(key) || [];
-  };
+  const getEmpsForNode = (node: IDbDepartment): Employee[] =>
+    employeesByDeptId.get(node.id) || [];
 
   // Рекурсивный подсчёт сотрудников в ветке
   const countBranch = useMemo(() => {
-    const cache = new Map<number, number>();
-    const count = (node: IDeptTreeNode): number => {
+    const cache = new Map<string, number>();
+    const count = (node: IDbDepartment): number => {
       if (cache.has(node.id)) return cache.get(node.id)!;
       let total = getEmpsForNode(node).length;
       node.children.forEach(child => { total += count(child); });
@@ -155,32 +132,32 @@ export const EmployeeTreeView: FC<IEmployeeTreeViewProps> = ({
     };
     tree.forEach(n => count(n));
     return cache;
-  }, [tree, employeesByDeptName]);
+  }, [tree, employeesByDeptId]);
 
   // При поиске: определяем видимые узлы (содержащие сотрудников + предки)
   const visibleNodeIds = useMemo(() => {
     if (!searchQuery && employees.length === 0) return null;
-    const ids = new Set<number>();
-    const addAncestors = (nodeId: number) => {
+    const ids = new Set<string>();
+    const addAncestors = (nodeId: string) => {
       let current = flatMap.get(nodeId);
       while (current) {
         if (ids.has(current.id)) break;
         ids.add(current.id);
-        current = current.parentId ? flatMap.get(current.parentId) : undefined;
+        current = current.parent_id ? flatMap.get(current.parent_id) : undefined;
       }
     };
     // Для каждого отдела с сотрудниками — добавляем его и предков
-    const flatten = (nodes: IDeptTreeNode[]) => {
+    const walkTree = (nodes: IDbDepartment[]) => {
       nodes.forEach(n => {
         if (getEmpsForNode(n).length > 0) addAncestors(n.id);
-        flatten(n.children);
+        walkTree(n.children);
       });
     };
-    flatten(tree);
+    walkTree(tree);
     return ids;
-  }, [searchQuery, employees, tree, flatMap, employeesByDeptName]);
+  }, [searchQuery, employees, tree, flatMap, employeesByDeptId]);
 
-  const toggleNode = (id: number) => {
+  const toggleNode = (id: string) => {
     setExpandedNodes(prev => {
       const next = new Set(prev);
       next.has(id) ? next.delete(id) : next.add(id);
@@ -277,7 +254,7 @@ export const EmployeeTreeView: FC<IEmployeeTreeViewProps> = ({
     </div>
   );
 
-  const renderDeptNode = (node: IDeptTreeNode, level: number) => {
+  const renderDeptNode = (node: IDbDepartment, level: number) => {
     const count = countBranch.get(node.id) || 0;
     const isExpanded = expandedNodes.has(node.id);
     const hasChildren = node.children.length > 0;
@@ -321,20 +298,8 @@ export const EmployeeTreeView: FC<IEmployeeTreeViewProps> = ({
     return <div className="loading">Загрузка структуры...</div>;
   }
 
-  // Сотрудники без совпадения с отделами Sigur
-  const assignedDeptNames = new Set<string>();
-  const collectNames = (nodes: IDeptTreeNode[]) => {
-    nodes.forEach(n => {
-      assignedDeptNames.add(n.name.trim().toLowerCase());
-      collectNames(n.children);
-    });
-  };
-  collectNames(tree);
-
-  const unassigned = employees.filter(emp => {
-    const deptName = (emp.department || '').trim().toLowerCase();
-    return !deptName || !assignedDeptNames.has(deptName);
-  });
+  // Сотрудники без отдела (org_department_id === null)
+  const unassigned = employees.filter(emp => !emp.org_department_id);
 
   const hasTree = tree.length > 0;
 
@@ -346,16 +311,16 @@ export const EmployeeTreeView: FC<IEmployeeTreeViewProps> = ({
         <div className="dept-node unassigned-section">
           <div
             className="dept-header unassigned-header"
-            onClick={() => toggleNode(-1)}
+            onClick={() => toggleNode('__unassigned__')}
           >
             <span className="dept-expand">
-              {expandedNodes.has(-1) ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+              {expandedNodes.has('__unassigned__') ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
             </span>
             <Users size={16} className="dept-icon" />
             <span className="dept-name">Без отдела</span>
             <span className="dept-count">{unassigned.length}</span>
           </div>
-          {expandedNodes.has(-1) && (
+          {expandedNodes.has('__unassigned__') && (
             <div className="dept-children">
               <div className="dept-employees" style={{ paddingLeft: 36 }}>
                 {unassigned.map(renderEmployeeRow)}

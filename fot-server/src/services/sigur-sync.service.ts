@@ -3,10 +3,8 @@ import { supabase } from '../config/database.js';
 import { encryptionService } from './encryption.service.js';
 import { parseFIO } from '../utils/fio.utils.js';
 
-/** Системные папки Sigur — фильтруем при импорте отделов */
-const SIGUR_SYSTEM_DEPARTMENTS = [
-  'api_keys', 'автопарк', 'гостевые qr-коды',
-];
+/** Системные папки Sigur — больше не фильтруем, синхронизируем все */
+const SIGUR_SYSTEM_DEPARTMENTS: string[] = [];
 
 function isSystemDepartment(name: string): boolean {
   return SIGUR_SYSTEM_DEPARTMENTS.includes(name.toLowerCase().trim());
@@ -258,6 +256,29 @@ export async function syncDepartmentsLogic(
     }
   }
 
+  // Собираем ID системных отделов и всех их потомков (каскадная фильтрация)
+  const filteredSigurIds = new Set<number>();
+  const systemIds = new Set<number>();
+  for (const dept of departments) {
+    if (isSystemDepartment((dept.name as string) || '')) {
+      systemIds.add(dept.id as number);
+      filteredSigurIds.add(dept.id as number);
+    }
+  }
+  // Каскадно добавляем потомков системных отделов
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const dept of departments) {
+      const sigurId = dept.id as number;
+      const parentId = dept.parentId as number | null | undefined;
+      if (!filteredSigurIds.has(sigurId) && parentId && filteredSigurIds.has(parentId)) {
+        filteredSigurIds.add(sigurId);
+        changed = true;
+      }
+    }
+  }
+
   // Pass 1: Upsert отделов (без parent_id)
   const sigurToDbMap = new Map<number, string>();
   for (const [sigurId, dbId] of sigurIdToDbId) {
@@ -270,7 +291,7 @@ export async function syncDepartmentsLogic(
 
     if (!name.trim()) { skipped++; continue; }
 
-    if (isSystemDepartment(name)) {
+    if (filteredSigurIds.has(sigurId)) {
       filtered++;
       continue;
     }
@@ -315,7 +336,7 @@ export async function syncDepartmentsLogic(
     const parentSigurId = dept.parentId as number | null | undefined;
 
     if (!sigurToDbMap.has(sigurId)) continue;
-    if (isSystemDepartment((dept.name as string) || '')) continue;
+    if (filteredSigurIds.has(sigurId)) continue;
 
     const dbId = sigurToDbMap.get(sigurId)!;
     let parentDbId: string | null;
