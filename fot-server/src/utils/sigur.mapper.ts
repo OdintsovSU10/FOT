@@ -64,10 +64,6 @@ export const mapSigurEvent = (raw: Record<string, unknown>): IMappedSigurEvent |
   // ID сотрудника в Sigur (для обогащения данными)
   const employeeId = data?.employeeId ?? personData?.id ?? null;
 
-  // Статус сотрудника (AVAILABLE = не заблокирован)
-  const status = personData?.status;
-  const blocked = typeof status === 'string' ? status !== 'AVAILABLE' : null;
-
   return {
     physicalPerson: personName.trim(),
     cardNumber,
@@ -76,7 +72,7 @@ export const mapSigurEvent = (raw: Record<string, unknown>): IMappedSigurEvent |
     accessPoint,
     direction,
     employeeId: typeof employeeId === 'number' ? employeeId : null,
-    blocked,
+    blocked: null, // обогащается из кэша сотрудников (поле isBlocked)
     department: null,
   };
 };

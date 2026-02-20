@@ -12,10 +12,12 @@ interface SigurConnectionConfig {
 
 interface SigurTokenInfo {
   token: string;
+  refreshToken: string;
+  expiresAt: string;
   authenticatedAt: number;
 }
 
-const PAGE_SIZE = 5000;
+const PAGE_SIZE = 3000;
 
 /**
  * Сервис для взаимодействия с Sigur REST API.
@@ -114,7 +116,9 @@ class SigurService {
       password: config.password,
     });
 
-    const token = response.data?.token || response.data?.data?.token;
+    const token = response.data?.token;
+    const refreshToken = response.data?.refreshToken || '';
+    const expiresAt = response.data?.expiresAt || '';
 
     if (!token) {
       throw new Error('Не удалось получить токен от Sigur. Проверьте логин/пароль.');
@@ -122,6 +126,8 @@ class SigurService {
 
     this.tokens[connType] = {
       token,
+      refreshToken,
+      expiresAt,
       authenticatedAt: Date.now(),
     };
 
@@ -155,6 +161,53 @@ class SigurService {
   }
 
   /**
+   * Обновляет JWT-токен через refreshToken. При неудаче — полная ре-авторизация.
+   */
+  private async refreshTokens(connection: ConnectionType): Promise<string> {
+    const tokenInfo = this.tokens[connection];
+    if (!tokenInfo?.refreshToken) {
+      return this.authenticate(connection);
+    }
+
+    const config = this.getConnectionConfig(connection)!;
+    try {
+      const client = this.createClient(config);
+      const response = await client.post('/api/v1/jwt/refresh', tokenInfo.refreshToken, {
+        headers: {
+          'Authorization': `Bearer ${tokenInfo.token}`,
+          'Content-Type': 'text/plain',
+        },
+      });
+
+      const newToken = response.data?.token;
+      if (!newToken) {
+        return this.authenticate(connection);
+      }
+
+      this.tokens[connection] = {
+        token: newToken,
+        refreshToken: response.data?.refreshToken || tokenInfo.refreshToken,
+        expiresAt: response.data?.expiresAt || '',
+        authenticatedAt: Date.now(),
+      };
+
+      this.clients[connection] = axios.create({
+        baseURL: config.url,
+        timeout: 120000,
+        httpsAgent: new https.Agent({ rejectUnauthorized: false }),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${newToken}`,
+        },
+      });
+
+      return newToken;
+    } catch {
+      return this.authenticate(connection);
+    }
+  }
+
+  /**
    * Выполняет GET-запрос с автоматической переавторизацией при 401.
    */
   private async request<T>(endpoint: string, params?: Record<string, any>, connection?: ConnectionType): Promise<T> {
@@ -166,8 +219,8 @@ class SigurService {
       return response.data;
     } catch (error) {
       if (error instanceof AxiosError && error.response?.status === 401) {
-        // Токен истёк — переавторизуемся
-        await this.authenticate(connType);
+        // Токен истёк — пробуем обновить через refreshToken
+        await this.refreshTokens(connType);
         client = this.clients[connType]!;
         const response = await client.get<T>(endpoint, { params });
         return response.data;
@@ -275,7 +328,7 @@ class SigurService {
   }
 
   /** Получить сотрудников одним запросом (для preview) */
-  async getEmployeesLimited(maxItems = 5000, connection?: ConnectionType) {
+  async getEmployeesLimited(maxItems = 3000, connection?: ConnectionType) {
     const response = await this.request<any>('/api/v1/employees', { limit: maxItems }, connection);
     const items = response?.data || response || [];
     return Array.isArray(items) ? items : [];
@@ -292,7 +345,7 @@ class SigurService {
       return this.employeeFetchPromise;
     }
     console.log('[sigur] fetching employees (no cache)...');
-    this.employeeFetchPromise = this.getEmployeesLimited(5000, connection)
+    this.employeeFetchPromise = this.getEmployeesLimited(3000, connection)
       .then(data => {
         this.employeeCache = { data, fetchedAt: Date.now() };
         console.log('[sigur] cached', data.length, 'employees');
@@ -378,9 +431,9 @@ class SigurService {
     return Array.isArray(items) ? items.slice(0, maxItems) : [];
   }
 
-  /** Получить коды событий */
-  async getEventCodes(connection?: ConnectionType) {
-    return this.request('/api/v1/events/codes', undefined, connection);
+  /** Получить типы событий */
+  async getEventTypes(connection?: ConnectionType) {
+    return this.request('/api/v1/events/types', undefined, connection);
   }
 
   /** Попытка получить должности из Sigur (эндпоинт может не существовать) */

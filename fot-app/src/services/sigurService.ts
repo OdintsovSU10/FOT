@@ -82,8 +82,8 @@ export const sigurService = {
     return apiClient.get('/sigur/access-rules');
   },
 
-  async getEventCodes(): Promise<{ data: unknown[] }> {
-    return apiClient.get('/sigur/events/codes');
+  async getEventTypes(): Promise<{ data: unknown[] }> {
+    return apiClient.get('/sigur/events/types');
   },
 
   async syncOrganizations(): Promise<{ imported: number; skipped: number; total: number }> {

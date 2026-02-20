@@ -30,8 +30,8 @@ router.get('/access-points', sigurController.getAccessPoints as any);
 // GET /api/sigur/events — события (query: startTime, endTime)
 router.get('/events', sigurController.getEvents as any);
 
-// GET /api/sigur/events/codes — коды событий
-router.get('/events/codes', sigurController.getEventCodes as any);
+// GET /api/sigur/events/types — типы событий
+router.get('/events/types', sigurController.getEventTypes as any);
 
 // GET /api/sigur/cards — карты доступа
 router.get('/cards', sigurController.getCards as any);

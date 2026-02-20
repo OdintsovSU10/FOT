@@ -324,7 +324,7 @@ export const sigurSyncController = {
         const fio = parseFIO(fullName);
 
         // Извлекаем должность из Sigur (если доступна)
-        const sigurPosition = (emp.position as string) || (emp.jobTitle as string) || null;
+        const sigurPosition = (emp.positionName as string) || (emp.position as string) || null;
         const positionText = sigurPosition?.trim() || 'Сотрудник';
 
         inserts.push({
@@ -426,7 +426,7 @@ export const sigurSyncController = {
       const rootSigurId = rootDept?.id as number | undefined;
 
       for (const dept of departments) {
-        const name = (dept.name as string) || (dept.title as string) || '';
+        const name = (dept.name as string) || '';
         const sigurId = dept.id as number;
 
         if (!name.trim()) { skipped++; continue; }

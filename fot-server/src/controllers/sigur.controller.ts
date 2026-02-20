@@ -189,10 +189,10 @@ export const sigurController = {
   },
 
   /**
-   * GET /api/sigur/events/codes
-   * Получить коды событий из Sigur
+   * GET /api/sigur/events/types
+   * Получить типы событий из Sigur
    */
-  async getEventCodes(req: AuthenticatedRequest, res: Response): Promise<void> {
+  async getEventTypes(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
       if (!sigurService.isConfigured()) {
         res.status(503).json({ success: false, error: 'Sigur не настроен' });
@@ -200,12 +200,12 @@ export const sigurController = {
       }
 
       const connection = (req.query.connection as 'external' | 'internal') || undefined;
-      const data = await sigurService.getEventCodes(connection);
+      const data = await sigurService.getEventTypes(connection);
 
       res.json({ success: true, data });
     } catch (error) {
-      console.error('Sigur get event codes error:', error);
-      res.status(500).json({ success: false, error: 'Ошибка получения кодов событий из Sigur' });
+      console.error('Sigur get event types error:', error);
+      res.status(500).json({ success: false, error: 'Ошибка получения типов событий из Sigur' });
     }
   },
 
@@ -323,7 +323,7 @@ export const sigurController = {
         result.employeeFields = emps.length > 0 ? Object.keys(emps[0]) : [];
 
         // Ищем поля должности
-        const positionFields = ['position', 'jobTitle', 'job', 'title', 'positionName', 'tabId', 'role'];
+        const positionFields = ['positionId', 'positionName', 'position', 'jobTitle'];
         const foundPositions: Record<string, unknown> = {};
         for (const field of positionFields) {
           const hasField = emps.some(e => e[field] !== undefined);
