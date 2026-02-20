@@ -49,6 +49,13 @@ router.get(
   skudController.getAccessPoints as any
 );
 
+// GET /api/skud/presence - статус присутствия сотрудников (header+)
+router.get(
+  '/presence',
+  requireRole('header', 'viewer', 'manager', 'owner', 'super_admin') as any,
+  skudController.getPresence as any
+);
+
 // POST /api/skud/import - импорт (manager+)
 // TODO: вернуть require2FA после тестирования
 router.post(

@@ -392,6 +392,136 @@ export const skudController = {
   },
 
   /**
+   * GET /api/skud/presence
+   * Текущий статус присутствия сотрудников (онлайн/оффлайн)
+   */
+  async getPresence(req: AuthenticatedRequest, res: Response): Promise<void> {
+    try {
+      const isSuperAdmin = req.user.position_type === 'super_admin';
+      const organizationId = req.user.organization_id
+        || (isSuperAdmin && typeof req.query.organization_id === 'string' ? req.query.organization_id : undefined);
+
+      if (!organizationId && !isSuperAdmin) {
+        res.status(400).json({ success: false, error: 'Organization required' });
+        return;
+      }
+
+      const departmentId = typeof req.query.department_id === 'string' ? req.query.department_id : null;
+
+      // Собираем ID отдела + все дочерние
+      let deptIds: string[] | null = null;
+      if (departmentId) {
+        const { data: allDepts } = await supabase
+          .from('org_departments')
+          .select('id, parent_id')
+          .eq('organization_id', organizationId);
+
+        deptIds = [departmentId];
+        let changed = true;
+        while (changed) {
+          changed = false;
+          for (const d of allDepts || []) {
+            if (d.parent_id && deptIds.includes(d.parent_id) && !deptIds.includes(d.id)) {
+              deptIds.push(d.id);
+              changed = true;
+            }
+          }
+        }
+      }
+
+      // Загружаем сотрудников
+      let empQuery = supabase
+        .from('employees')
+        .select('id, full_name_encrypted, org_department_id, position_id')
+        .eq('is_archived', false);
+
+      if (organizationId) {
+        empQuery = empQuery.eq('organization_id', organizationId);
+      }
+      if (deptIds) {
+        empQuery = empQuery.in('org_department_id', deptIds);
+      }
+
+      const { data: employees } = await empQuery;
+      if (!employees || employees.length === 0) {
+        res.json({ success: true, data: [] });
+        return;
+      }
+
+      const empIds = employees.map(e => e.id);
+
+      // Загружаем справочники
+      const deptIdSet = new Set(employees.map(e => e.org_department_id).filter(Boolean));
+      const posIdSet = new Set(employees.map(e => e.position_id).filter(Boolean));
+
+      const [deptResult, posResult] = await Promise.all([
+        deptIdSet.size > 0
+          ? supabase.from('org_departments').select('id, name_encrypted').in('id', [...deptIdSet])
+          : { data: [] },
+        posIdSet.size > 0
+          ? supabase.from('positions').select('id, name_encrypted').in('id', [...posIdSet])
+          : { data: [] },
+      ]);
+
+      const deptMap = new Map<string, string>();
+      for (const d of deptResult.data || []) {
+        deptMap.set(d.id, encryptionService.decrypt(d.name_encrypted));
+      }
+      const posMap = new Map<string, string>();
+      for (const p of posResult.data || []) {
+        posMap.set(p.id, encryptionService.decrypt(p.name_encrypted));
+      }
+
+      // Загружаем события за сегодня
+      const today = new Date().toISOString().slice(0, 10);
+      const { data: events } = await supabase
+        .from('skud_events')
+        .select('employee_id, event_time, direction')
+        .eq('event_date', today)
+        .in('employee_id', empIds)
+        .order('event_time', { ascending: false });
+
+      // Последнее событие для каждого сотрудника
+      const latestEvent = new Map<number, { event_time: string; direction: string | null }>();
+      for (const evt of events || []) {
+        if (evt.employee_id && !latestEvent.has(evt.employee_id)) {
+          latestEvent.set(evt.employee_id, { event_time: evt.event_time, direction: evt.direction });
+        }
+      }
+
+      // Формируем ответ
+      const result = employees.map(emp => {
+        const last = latestEvent.get(emp.id);
+        let status: 'online' | 'offline' | 'unknown' = 'unknown';
+        let since: string | null = null;
+
+        if (last) {
+          status = last.direction === 'entry' ? 'online' : 'offline';
+          since = last.event_time;
+        }
+
+        return {
+          employee_id: emp.id,
+          full_name: encryptionService.decrypt(emp.full_name_encrypted),
+          department_name: emp.org_department_id ? deptMap.get(emp.org_department_id) || null : null,
+          position_name: emp.position_id ? posMap.get(emp.position_id) || null : null,
+          status,
+          since,
+        };
+      });
+
+      // Сортировка: online первыми, затем offline, unknown последние
+      const statusOrder: Record<string, number> = { online: 0, offline: 1, unknown: 2 };
+      result.sort((a, b) => statusOrder[a.status] - statusOrder[b.status]);
+
+      res.json({ success: true, data: result });
+    } catch (error) {
+      console.error('Get presence error:', error);
+      res.status(500).json({ success: false, error: 'Ошибка получения статусов' });
+    }
+  },
+
+  /**
    * DELETE /api/skud/clear
    * Очистка данных СКУД за период
    */

@@ -160,19 +160,12 @@ export const employeesController = {
       const { id } = req.params;
       const organizationId = req.user.organization_id;
 
-      if (!organizationId) {
-        res.status(400).json({ success: false, error: 'Organization required' });
-        return;
-      }
+      let q = supabase.from('employees').select('*').eq('id', id);
+      if (organizationId) q = q.eq('organization_id', organizationId);
 
       const [employeeResult, structureCache] = await Promise.all([
-        supabase
-          .from('employees')
-          .select('*')
-          .eq('id', id)
-          .eq('organization_id', organizationId)
-          .single(),
-        loadStructureCache(organizationId),
+        q.single(),
+        loadStructureCache(organizationId || undefined),
       ]);
 
       if (employeeResult.error || !employeeResult.data) {
@@ -495,18 +488,11 @@ export const employeesController = {
       const { id } = req.params;
       const organizationId = req.user.organization_id;
 
-      if (!organizationId) {
-        res.status(400).json({ success: false, error: 'Organization required' });
-        return;
-      }
-
       // Проверяем что сотрудник принадлежит организации
-      const { data: emp } = await supabase
-        .from('employees')
-        .select('id')
-        .eq('id', id)
-        .eq('organization_id', organizationId)
-        .single();
+      let empQ = supabase.from('employees').select('id').eq('id', id);
+      if (organizationId) empQ = empQ.eq('organization_id', organizationId);
+
+      const { data: emp } = await empQ.single();
 
       if (!emp) {
         res.status(404).json({ success: false, error: 'Employee not found' });
@@ -525,7 +511,7 @@ export const employeesController = {
         return;
       }
 
-      const structureCache = await loadStructureCache(organizationId);
+      const structureCache = await loadStructureCache(organizationId || undefined);
 
       const events = (data || []).map((row: Record<string, unknown>) => {
         const eventData = row.event_data as Record<string, unknown> || {};

@@ -55,27 +55,11 @@ export const EmployeeInfoSection: FC<IEmployeeInfoSectionProps> = ({
             <span className="form-readonly">{employee.position_name || '—'}</span>
           </div>
           <div className="form-group">
-            <label>Дата найма</label>
-            <input
-              type="date"
-              value={editData.hire_date || ''}
-              onChange={e => onEditDataChange({ ...editData, hire_date: e.target.value })}
-            />
-          </div>
-          <div className="form-group">
             <label>Дата рождения</label>
             <input
               type="date"
               value={editData.birth_date || ''}
               onChange={e => onEditDataChange({ ...editData, birth_date: e.target.value || undefined })}
-            />
-          </div>
-          <div className="form-group">
-            <label>Зарплата</label>
-            <input
-              type="number"
-              value={editData.current_salary || ''}
-              onChange={e => onEditDataChange({ ...editData, current_salary: e.target.value ? Number(e.target.value) : null })}
             />
           </div>
         </div>
@@ -105,24 +89,12 @@ export const EmployeeInfoSection: FC<IEmployeeInfoSectionProps> = ({
         <span className="info-label">Отдел</span>
         <span className="info-value">{employee.department || '—'}</span>
       </div>
-      <div className="info-item">
-        <span className="info-label">Дата найма</span>
-        <span className="info-value">{formatDate(employee.hire_date)}</span>
-      </div>
-      <div className="info-item">
-        <span className="info-label">Стаж</span>
-        <span className="info-value">{calculateTenure(employee.hire_date)}</span>
-      </div>
       {employee.birth_date && (
         <div className="info-item">
           <span className="info-label">Дата рождения</span>
           <span className="info-value">{formatDate(employee.birth_date)}</span>
         </div>
       )}
-      <div className="info-item highlight">
-        <span className="info-label">Зарплата</span>
-        <span className="info-value">{formatSalary(employee.current_salary)}</span>
-      </div>
       {employee.country && (
         <div className="info-item">
           <span className="info-label">Страна</span>
