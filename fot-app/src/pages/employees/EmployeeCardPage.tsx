@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, type FC } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { ArrowLeft, Edit3, Archive, RotateCcw, Trash2 } from 'lucide-react';
 import { employeeService } from '../../services/employeeService';
 import { useAuth } from '../../contexts/AuthContext';
@@ -12,6 +12,9 @@ import '../../styles/EmployeeCardPage.css';
 export const EmployeeCardPage: FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
+  const backPath = (location.state as { from?: string })?.from || '/tender';
+  const backLabel = (location.state as { label?: string })?.label || 'Сотрудники';
   const { canAccess } = useAuth();
   const canEdit = canAccess('header');
 
@@ -91,7 +94,7 @@ export const EmployeeCardPage: FC = () => {
     if (!employee || !confirm('Удалить сотрудника? Это действие необратимо.')) return;
     try {
       await employeeService.delete(employee.id);
-      navigate('/tender');
+      navigate(backPath);
     } catch {
       setError('Ошибка удаления');
     }
@@ -106,7 +109,7 @@ export const EmployeeCardPage: FC = () => {
       <div className="card-page">
         <div className="card-error">
           <p>{error}</p>
-          <button className="btn-back-link" onClick={() => navigate('/tender')}>
+          <button className="btn-back-link" onClick={() => navigate(backPath)}>
             <ArrowLeft size={16} /> Назад к списку
           </button>
         </div>
@@ -119,8 +122,8 @@ export const EmployeeCardPage: FC = () => {
   return (
     <div className="card-page">
       <div className="card-top-bar">
-        <button className="btn-back-link" onClick={() => navigate('/tender')}>
-          <ArrowLeft size={16} /> Сотрудники
+        <button className="btn-back-link" onClick={() => navigate(backPath)}>
+          <ArrowLeft size={16} /> {backLabel}
         </button>
       </div>
 

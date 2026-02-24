@@ -31,7 +31,7 @@ const EmployeeRow: FC<{ employee: IEmployeePresence }> = ({ employee }) => {
   const isOnline = employee.status === 'online';
 
   return (
-    <div className={styles.item} onClick={() => navigate(`/tender/${employee.employee_id}`)}>
+    <div className={styles.item} onClick={() => navigate(`/tender/${employee.employee_id}`, { state: { from: '/dashboard', label: 'Обзор' } })}>
       <div className={styles.avatar}>{getInitials(employee.full_name)}</div>
       <div className={styles.content}>
         <div className={styles.name}>{employee.full_name}</div>

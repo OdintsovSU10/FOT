@@ -20,8 +20,8 @@ interface IDayGroup {
   events: SkudEvent[];
   firstEntry: string | null;
   lastExit: string | null;
-  totalMinutes: number;
-  spanMinutes: number;
+  totalSeconds: number;
+  spanSeconds: number;
 }
 
 const formatDateLabel = (dateStr: string): string => {
@@ -29,20 +29,22 @@ const formatDateLabel = (dateStr: string): string => {
   return d.toLocaleDateString('ru-RU', { weekday: 'short', day: 'numeric', month: 'long', year: 'numeric' });
 };
 
-const formatTime = (time: string): string => time.slice(0, 5);
+const formatTime = (time: string): string => time.slice(0, 8);
 
-const formatDuration = (minutes: number): string => {
-  if (minutes <= 0) return '';
-  const h = Math.floor(minutes / 60);
-  const m = minutes % 60;
-  if (h === 0) return `${m}м`;
-  if (m === 0) return `${h}ч`;
-  return `${h}ч ${m}м`;
+const formatDuration = (seconds: number): string => {
+  if (seconds <= 0) return '';
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = seconds % 60;
+  if (h === 0 && m === 0) return `${s}с`;
+  if (h === 0) return `${m}м ${s}с`;
+  if (m === 0 && s === 0) return `${h}ч`;
+  return `${h}ч ${m}м ${s}с`;
 };
 
-const timeToMinutes = (time: string): number => {
-  const [h, m] = time.split(':').map(Number);
-  return h * 60 + m;
+const timeToSeconds = (time: string): number => {
+  const [h, m, s = 0] = time.split(':').map(Number);
+  return h * 3600 + m * 60 + s;
 };
 
 const calculateWorkMinutes = (events: SkudEvent[]): number => {
@@ -53,10 +55,10 @@ const calculateWorkMinutes = (events: SkudEvent[]): number => {
   for (const ev of sorted) {
     if (ev.direction === 'entry') {
       if (entryTime === null) {
-        entryTime = timeToMinutes(ev.event_time);
+        entryTime = timeToSeconds(ev.event_time);
       }
     } else if (ev.direction === 'exit' && entryTime !== null) {
-      total += timeToMinutes(ev.event_time) - entryTime;
+      total += timeToSeconds(ev.event_time) - entryTime;
       entryTime = null;
     }
   }
@@ -107,9 +109,9 @@ const groupByDay = (events: SkudEvent[]): IDayGroup[] => {
       events: dayEvents,
       firstEntry: entries.length > 0 ? entries[0].event_time : null,
       lastExit: exits.length > 0 ? exits[exits.length - 1].event_time : null,
-      totalMinutes: calculateWorkMinutes(dayEvents),
-      spanMinutes: entries.length > 0 && exits.length > 0
-        ? timeToMinutes(exits[exits.length - 1].event_time) - timeToMinutes(entries[0].event_time)
+      totalSeconds: calculateWorkMinutes(dayEvents),
+      spanSeconds: entries.length > 0 && exits.length > 0
+        ? timeToSeconds(exits[exits.length - 1].event_time) - timeToSeconds(entries[0].event_time)
         : 0,
     });
   }
@@ -122,7 +124,7 @@ export const EmployeeSkudSection: FC<IEmployeeSkudSectionProps> = ({ employeeId 
   const [groups, setGroups] = useState<IDayGroup[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedDays, setExpandedDays] = useState<Set<string>>(new Set());
-  const [period, setPeriod] = useState<Period>('month');
+  const [period, setPeriod] = useState<Period>('today');
   const [syncing, setSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState<string | null>(null);
 
@@ -204,8 +206,8 @@ export const EmployeeSkudSection: FC<IEmployeeSkudSectionProps> = ({ employeeId 
       <div className="skud-days-list">
         {groups.map(group => {
           const expanded = expandedDays.has(group.date);
-          const duration = formatDuration(group.totalMinutes);
-          const span = formatDuration(group.spanMinutes);
+          const duration = formatDuration(group.totalSeconds);
+          const span = formatDuration(group.spanSeconds);
           return (
             <div key={group.date} className="skud-day-card">
               <button className="skud-day-header" onClick={() => toggleDay(group.date)}>
