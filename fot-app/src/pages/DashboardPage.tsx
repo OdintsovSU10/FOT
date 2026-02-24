@@ -2,14 +2,13 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { ChevronDown, Search } from 'lucide-react';
 import { StatCard } from '../components/ui/StatCard';
 import { ActivityList } from '../components/dashboard/ActivityList';
-import { PresenceProgress } from '../components/dashboard/PresenceProgress';
-import { QuickActions } from '../components/dashboard/QuickActions';
 import { usePresence } from '../hooks/usePresence';
 import { apiClient } from '../api/client';
 import {
   UsersIcon,
   MapPinIcon,
   CheckCircleIcon,
+  ChartIcon,
 } from '../components/ui/Icons';
 import '../styles/DashboardPage.css';
 
@@ -93,6 +92,11 @@ export const DashboardPage: React.FC = () => {
     [employees],
   );
 
+  const presencePercent = useMemo(
+    () => employees.length > 0 ? Math.round((onlineCount / employees.length) * 100) : 0,
+    [employees, onlineCount],
+  );
+
   return (
     <>
       <div className="content-header">
@@ -164,15 +168,15 @@ export const DashboardPage: React.FC = () => {
           icon={<CheckCircleIcon />}
           iconType="orange"
         />
+        <StatCard
+          label="Присутствие"
+          value={employees.length > 0 ? `${presencePercent}%` : '—'}
+          icon={<ChartIcon />}
+          iconType="blue"
+        />
       </div>
 
-      <div className="content-grid">
-        <ActivityList employees={employees} loading={loading} />
-        <div className="right-column">
-          <PresenceProgress employees={employees} loading={loading} />
-          <QuickActions />
-        </div>
-      </div>
+      <ActivityList employees={employees} loading={loading} />
     </>
   );
 };

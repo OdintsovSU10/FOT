@@ -777,6 +777,18 @@ export const skudController = {
 
         send({ type: 'day_start', day, dayIndex: dayIdx, totalDays: days.length, percent: Math.round((dayIdx / days.length) * 100) });
 
+        // Пропуск дня если у сотрудника уже есть события
+        const { count: existingCount } = await supabase
+          .from('skud_events')
+          .select('id', { count: 'exact', head: true })
+          .eq('employee_id', employeeId)
+          .eq('event_date', day);
+        if (existingCount && existingCount > 0) {
+          totalSkipped += existingCount;
+          send({ type: 'day_done', day, raw: 0, matched: 0, inserted: 0, cached: true });
+          continue;
+        }
+
         const rawEvents = await sigurService.getEvents(dayStart, dayEnd, connection, 'PASS_DETECTED', { pageSize: 3000 });
         totalRaw += rawEvents.length;
 

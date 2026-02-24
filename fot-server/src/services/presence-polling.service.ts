@@ -10,6 +10,7 @@ const BATCH_SIZE = 500;
 
 let pollingTimer: ReturnType<typeof setInterval> | null = null;
 let fullDaySynced = false;
+let lastSyncedDay = '';
 
 // Кэш сотрудников
 let employeeCache: {
@@ -52,6 +53,12 @@ async function pollEvents(): Promise<void> {
     const now = new Date();
     const pad = (n: number) => String(n).padStart(2, '0');
     const todayStr = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+
+    // Сброс при смене дня (если сервер работает через полночь)
+    if (lastSyncedDay !== todayStr) {
+      fullDaySynced = false;
+      lastSyncedDay = todayStr;
+    }
 
     // При первом запуске — полный fetch за весь день, потом только последние 5 минут
     let startTime: string;

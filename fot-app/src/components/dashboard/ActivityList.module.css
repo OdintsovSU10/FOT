@@ -42,7 +42,7 @@
 }
 
 .list {
-  max-height: 420px;
+  max-height: calc(100vh - 340px);
   overflow-y: auto;
 }
 

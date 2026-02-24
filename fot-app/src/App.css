@@ -6,8 +6,9 @@
 }
 
 .date-display {
-  font-size: 13px;
-  color: var(--text-tertiary);
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-primary);
   text-transform: capitalize;
 }
 
@@ -18,24 +19,9 @@
   margin-bottom: 24px;
 }
 
-.content-grid {
-  display: grid;
-  grid-template-columns: 1fr 380px;
-  gap: 16px;
-}
-
-.right-column {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
 @media (max-width: 1200px) {
   .stats-grid {
     grid-template-columns: repeat(2, 1fr);
-  }
-  .content-grid {
-    grid-template-columns: 1fr;
   }
 }
 
