@@ -764,6 +764,14 @@ export const employeesController = {
         return;
       }
 
+      // Закрываем все активные назначения при увольнении
+      const today = new Date().toISOString().slice(0, 10);
+      await supabase
+        .from('employee_assignments')
+        .update({ effective_to: today })
+        .eq('employee_id', id)
+        .is('effective_to', null);
+
       await auditService.logFromRequest(req, req.user.id, 'FIRE_EMPLOYEE', {
         entityType: 'employee',
         entityId: id,
@@ -796,6 +804,22 @@ export const employeesController = {
         res.status(404).json({ success: false, error: 'Employee not found' });
         return;
       }
+
+      // Создаём новое назначение при восстановлении
+      const today = new Date().toISOString().slice(0, 10);
+      await supabase
+        .from('employee_assignments')
+        .insert({
+          employee_id: Number(id),
+          org_department_id: data.org_department_id || null,
+          org_company_id: data.org_company_id || null,
+          position_id: data.position_id || null,
+          effective_from: today,
+          is_primary: true,
+          assignment_type: 'main',
+          change_reason: 'Восстановление на работу',
+          created_by: req.user.id,
+        });
 
       await auditService.logFromRequest(req, req.user.id, 'REHIRE_EMPLOYEE', {
         entityType: 'employee',

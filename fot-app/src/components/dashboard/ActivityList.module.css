@@ -74,6 +74,30 @@
   cursor: pointer;
 }
 
+.starBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: none;
+  border-radius: 6px;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+
+.starBtn:hover {
+  color: #f59e0b;
+  background: var(--bg-elevated);
+}
+
+.starActive {
+  color: #f59e0b;
+}
+
 .item:last-child {
   border-bottom: none;
 }

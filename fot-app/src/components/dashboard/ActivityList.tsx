@@ -1,11 +1,13 @@
 import { type FC, useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { Star } from 'lucide-react';
 import { Card, CardHeader, CardContent } from '../ui/Card';
 import { formatElapsed } from '../../utils/formatElapsed';
+import { useFavorites } from '../../hooks/useFavorites';
 import type { IEmployeePresence } from '../../types';
 import styles from './ActivityList.module.css';
 
-type TabFilter = 'all' | 'online' | 'offline';
+type TabFilter = 'favorites' | 'all' | 'online' | 'offline';
 
 interface IActivityListProps {
   employees: IEmployeePresence[];
@@ -18,7 +20,11 @@ const getInitials = (name: string): string => {
   return name.slice(0, 2).toUpperCase();
 };
 
-const EmployeeRow: FC<{ employee: IEmployeePresence }> = ({ employee }) => {
+const EmployeeRow: FC<{
+  employee: IEmployeePresence;
+  isFavorite: boolean;
+  onToggleFavorite: (id: number) => void;
+}> = ({ employee, isFavorite, onToggleFavorite }) => {
   const navigate = useNavigate();
   const [elapsed, setElapsed] = useState(() => formatElapsed(employee.since));
 
@@ -32,6 +38,13 @@ const EmployeeRow: FC<{ employee: IEmployeePresence }> = ({ employee }) => {
 
   return (
     <div className={styles.item} onClick={() => navigate(`/tender/${employee.employee_id}`, { state: { from: '/dashboard', label: 'Обзор' } })}>
+      <button
+        className={`${styles.starBtn} ${isFavorite ? styles.starActive : ''}`}
+        onClick={e => { e.stopPropagation(); onToggleFavorite(employee.employee_id); }}
+        title={isFavorite ? 'Убрать из избранного' : 'Добавить в избранное'}
+      >
+        <Star size={14} fill={isFavorite ? 'currentColor' : 'none'} />
+      </button>
       <div className={styles.avatar}>{getInitials(employee.full_name)}</div>
       <div className={styles.content}>
         <div className={styles.name}>{employee.full_name}</div>
@@ -49,15 +62,18 @@ const EmployeeRow: FC<{ employee: IEmployeePresence }> = ({ employee }) => {
 
 export const ActivityList: FC<IActivityListProps> = ({ employees, loading }) => {
   const [tab, setTab] = useState<TabFilter>('all');
+  const { favorites, toggle, isFavorite } = useFavorites();
 
   const onlineCount = useMemo(() => employees.filter(e => e.status === 'online').length, [employees]);
   const offlineCount = useMemo(() => employees.filter(e => e.status === 'offline').length, [employees]);
+  const favCount = useMemo(() => employees.filter(e => favorites.has(e.employee_id)).length, [employees, favorites]);
 
   const filtered = useMemo(() => {
+    if (tab === 'favorites') return employees.filter(e => favorites.has(e.employee_id));
     if (tab === 'online') return employees.filter(e => e.status === 'online');
     if (tab === 'offline') return employees.filter(e => e.status === 'offline');
     return employees;
-  }, [employees, tab]);
+  }, [employees, tab, favorites]);
 
   if (loading) {
     return (
@@ -77,6 +93,15 @@ export const ActivityList: FC<IActivityListProps> = ({ employees, loading }) => 
       <CardHeader title="Присутствие сотрудников" />
       <CardContent>
         <div className={styles.tabs}>
+          {favCount > 0 && (
+            <button
+              className={`${styles.tab} ${tab === 'favorites' ? styles.tabActive : ''}`}
+              onClick={() => setTab('favorites')}
+            >
+              <Star size={13} fill={tab === 'favorites' ? 'currentColor' : 'none'} />
+              Избранные <span className={styles.tabCount}>{favCount}</span>
+            </button>
+          )}
           <button
             className={`${styles.tab} ${tab === 'all' ? styles.tabActive : ''}`}
             onClick={() => setTab('all')}
@@ -100,7 +125,7 @@ export const ActivityList: FC<IActivityListProps> = ({ employees, loading }) => 
           {filtered.length === 0 ? (
             <div className={styles.empty}>
               <span className={styles.emptyText}>
-                {employees.length === 0 ? 'Нет данных' : 'Нет сотрудников'}
+                {tab === 'favorites' ? 'Нет избранных сотрудников' : employees.length === 0 ? 'Нет данных' : 'Нет сотрудников'}
               </span>
               {employees.length === 0 && (
                 <span className={styles.emptyHint}>Выберите отдел для просмотра</span>
@@ -108,7 +133,12 @@ export const ActivityList: FC<IActivityListProps> = ({ employees, loading }) => 
             </div>
           ) : (
             filtered.map(emp => (
-              <EmployeeRow key={emp.employee_id} employee={emp} />
+              <EmployeeRow
+                key={emp.employee_id}
+                employee={emp}
+                isFavorite={isFavorite(emp.employee_id)}
+                onToggleFavorite={toggle}
+              />
             ))
           )}
         </div>
