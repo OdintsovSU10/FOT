@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { ChevronDown, Search } from 'lucide-react';
+import { ChevronDown, Search, Building2 } from 'lucide-react';
 import { StatCard } from '../components/ui/StatCard';
 import { ActivityList } from '../components/dashboard/ActivityList';
 import { usePresence } from '../hooks/usePresence';
@@ -97,86 +97,94 @@ export const DashboardPage: React.FC = () => {
     [employees, onlineCount],
   );
 
+  const deptSelector = (
+    <div className="dash-dept-dropdown" ref={deptDropdownRef}>
+      <button
+        className={`dash-dept-trigger ${selectedDeptId ? 'has-value' : ''} ${!selectedDeptId ? 'dash-dept-trigger--large' : ''}`}
+        onClick={() => { setDeptDropdownOpen(!deptDropdownOpen); setDeptSearchQuery(''); }}
+      >
+        <span className="dash-dept-label">
+          {selectedDept ? selectedDept.name : 'Выберите отдел'}
+        </span>
+        <ChevronDown size={selectedDeptId ? 14 : 18} className={`dash-dept-chevron ${deptDropdownOpen ? 'open' : ''}`} />
+      </button>
+      {deptDropdownOpen && (
+        <div className={`dash-dept-menu ${!selectedDeptId ? 'dash-dept-menu--center' : ''}`}>
+          <div className="dash-dept-search">
+            <Search size={14} />
+            <input
+              type="text"
+              placeholder="Поиск отдела..."
+              value={deptSearchQuery}
+              onChange={e => setDeptSearchQuery(e.target.value)}
+              autoFocus
+            />
+          </div>
+          <div className="dash-dept-list">
+            {filteredDeptOptions.map(dept => (
+              <div
+                key={dept.id}
+                className={`dash-dept-item ${selectedDeptId === dept.id ? 'selected' : ''}`}
+                style={{ paddingLeft: 12 + dept.level * 16 }}
+                onClick={() => { setSelectedDeptId(dept.id); setDeptDropdownOpen(false); }}
+              >
+                {dept.name}
+              </div>
+            ))}
+            {filteredDeptOptions.length === 0 && (
+              <div className="dash-dept-empty">Не найдено</div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
   return (
     <>
-      <div className="content-header">
-        <div className="date-display">{today}</div>
-        <div className="dash-dept-dropdown" ref={deptDropdownRef}>
-          <button
-            className={`dash-dept-trigger ${selectedDeptId ? 'has-value' : ''}`}
-            onClick={() => { setDeptDropdownOpen(!deptDropdownOpen); setDeptSearchQuery(''); }}
-          >
-            <span className="dash-dept-label">
-              {selectedDept ? selectedDept.name : 'Все отделы'}
-            </span>
-            <ChevronDown size={14} className={`dash-dept-chevron ${deptDropdownOpen ? 'open' : ''}`} />
-          </button>
-          {deptDropdownOpen && (
-            <div className="dash-dept-menu">
-              <div className="dash-dept-search">
-                <Search size={14} />
-                <input
-                  type="text"
-                  placeholder="Поиск отдела..."
-                  value={deptSearchQuery}
-                  onChange={e => setDeptSearchQuery(e.target.value)}
-                  autoFocus
-                />
-              </div>
-              <div className="dash-dept-list">
-                <div
-                  className={`dash-dept-item ${!selectedDeptId ? 'selected' : ''}`}
-                  onClick={() => { setSelectedDeptId(null); setDeptDropdownOpen(false); }}
-                >
-                  Все отделы
-                </div>
-                {filteredDeptOptions.map(dept => (
-                  <div
-                    key={dept.id}
-                    className={`dash-dept-item ${selectedDeptId === dept.id ? 'selected' : ''}`}
-                    style={{ paddingLeft: 12 + dept.level * 16 }}
-                    onClick={() => { setSelectedDeptId(dept.id); setDeptDropdownOpen(false); }}
-                  >
-                    {dept.name}
-                  </div>
-                ))}
-                {filteredDeptOptions.length === 0 && (
-                  <div className="dash-dept-empty">Не найдено</div>
-                )}
-              </div>
-            </div>
-          )}
+      {!selectedDeptId ? (
+        <div className="dash-placeholder">
+          <Building2 size={48} strokeWidth={1.2} />
+          <h3>Выберите отдел</h3>
+          <p>Чтобы увидеть статистику присутствия</p>
+          {deptSelector}
         </div>
-      </div>
+      ) : (
+        <>
+          <div className="content-header">
+            <div className="date-display">{today}</div>
+            {deptSelector}
+          </div>
+          <div className="stats-grid">
+            <StatCard
+              label="Всего сотрудников"
+              value={employees.length > 0 ? String(employees.length) : '—'}
+              icon={<UsersIcon />}
+              iconType="blue"
+            />
+            <StatCard
+              label="На работе"
+              value={onlineCount > 0 ? String(onlineCount) : '—'}
+              icon={<MapPinIcon />}
+              iconType="green"
+            />
+            <StatCard
+              label="Ушли"
+              value={offlineCount > 0 ? String(offlineCount) : '—'}
+              icon={<CheckCircleIcon />}
+              iconType="orange"
+            />
+            <StatCard
+              label="Присутствие"
+              value={employees.length > 0 ? `${presencePercent}%` : '—'}
+              icon={<ChartIcon />}
+              iconType="blue"
+            />
+          </div>
 
-      <div className="stats-grid">
-        <StatCard
-          label="Всего сотрудников"
-          value={employees.length > 0 ? String(employees.length) : '—'}
-          icon={<UsersIcon />}
-          iconType="blue"
-        />
-        <StatCard
-          label="На работе"
-          value={onlineCount > 0 ? String(onlineCount) : '—'}
-          icon={<MapPinIcon />}
-          iconType="green"
-        />
-        <StatCard
-          label="Ушли"
-          value={offlineCount > 0 ? String(offlineCount) : '—'}
-          icon={<CheckCircleIcon />}
-          iconType="orange"
-        />
-        <StatCard
-          label="Присутствие"
-          value={employees.length > 0 ? `${presencePercent}%` : '—'}
-          icon={<ChartIcon />}
-          iconType="blue"
-        />
-      </div>
-
-      <ActivityList employees={employees} loading={loading} />
+          <ActivityList employees={employees} loading={loading} />
+        </>
+      )}
     </>
   );
 };

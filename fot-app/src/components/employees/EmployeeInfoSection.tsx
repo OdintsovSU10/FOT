@@ -1,5 +1,5 @@
-import { useState, type FC } from 'react';
-import { X, Check, ChevronDown } from 'lucide-react';
+import { useState, useRef, useEffect, type FC } from 'react';
+import { X, Check, ChevronDown, Search } from 'lucide-react';
 import type { Employee, EmployeeInput, OrgDepartmentNode } from '../../types';
 
 interface IDepartmentOption {
@@ -62,11 +62,38 @@ export const EmployeeInfoSection: FC<IEmployeeInfoSectionProps> = ({
   canEdit,
 }) => {
   const [moving, setMoving] = useState(false);
+  const [deptOpen, setDeptOpen] = useState(false);
+  const [deptSearch, setDeptSearch] = useState('');
+  const deptRef = useRef<HTMLDivElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
   const flatDepts = departments ? flattenDepartments(departments) : [];
+
+  const filteredDepts = deptSearch
+    ? flatDepts.filter(d => d.name.toLowerCase().includes(deptSearch.toLowerCase()))
+    : flatDepts;
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (deptRef.current && !deptRef.current.contains(e.target as Node)) {
+        setDeptOpen(false);
+        setDeptSearch('');
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  useEffect(() => {
+    if (deptOpen && searchRef.current) {
+      searchRef.current.focus();
+    }
+  }, [deptOpen]);
 
   const handleDepartmentChange = async (deptId: string) => {
     if (!onMoveDepartment || !deptId) return;
     setMoving(true);
+    setDeptOpen(false);
+    setDeptSearch('');
     try {
       await onMoveDepartment(deptId);
     } finally {
@@ -123,22 +150,50 @@ export const EmployeeInfoSection: FC<IEmployeeInfoSectionProps> = ({
       <div className="info-item">
         <span className="info-label">Отдел</span>
         {canEdit && flatDepts.length > 0 ? (
-          <div className="info-value-select">
-            <select
-              className="dept-select"
-              value={employee.org_department_id || ''}
-              onChange={e => handleDepartmentChange(e.target.value)}
+          <div className="dept-dropdown" ref={deptRef}>
+            <button
+              className="dept-dropdown-trigger"
+              onClick={() => setDeptOpen(!deptOpen)}
               disabled={moving}
+              type="button"
             >
-              <option value="">— Не назначен —</option>
-              {flatDepts.map(d => (
-                <option key={d.id} value={d.id}>
-                  {'  '.repeat(d.level)}{d.name}
-                </option>
-              ))}
-            </select>
-            <ChevronDown size={14} className="dept-select-icon" />
-            {moving && <span className="dept-moving">Сохранение...</span>}
+              <span className="dept-dropdown-text">
+                {moving ? 'Сохранение...' : (employee.department || '— Не назначен —')}
+              </span>
+              <ChevronDown size={14} className={`dept-dropdown-chevron ${deptOpen ? 'open' : ''}`} />
+            </button>
+            {deptOpen && (
+              <div className="dept-dropdown-menu">
+                <div className="dept-dropdown-search">
+                  <Search size={14} className="dept-search-icon" />
+                  <input
+                    ref={searchRef}
+                    type="text"
+                    className="dept-search-input"
+                    placeholder="Поиск отдела..."
+                    value={deptSearch}
+                    onChange={e => setDeptSearch(e.target.value)}
+                  />
+                </div>
+                <div className="dept-dropdown-list">
+                  {filteredDepts.length === 0 ? (
+                    <div className="dept-dropdown-empty">Ничего не найдено</div>
+                  ) : (
+                    filteredDepts.map(d => (
+                      <button
+                        key={d.id}
+                        type="button"
+                        className={`dept-dropdown-item ${d.id === employee.org_department_id ? 'active' : ''}`}
+                        style={{ paddingLeft: `${12 + d.level * 16}px` }}
+                        onClick={() => handleDepartmentChange(d.id)}
+                      >
+                        {d.name}
+                      </button>
+                    ))
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         ) : (
           <span className="info-value">{employee.department || '—'}</span>

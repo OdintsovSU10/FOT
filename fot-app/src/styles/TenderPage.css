@@ -861,6 +861,204 @@
   color: #ef4444;
 }
 
+/* Department edit column */
+.employees-table.has-dept-edit .table-header,
+.employees-table.has-dept-edit .table-row {
+  grid-template-columns: 40px 2fr 1.2fr 0.8fr 1.4fr;
+}
+
+.col-dept-edit {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.dept-edit-btn {
+  background: none;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+  padding: 4px 10px;
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  text-align: left;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dept-edit-btn:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+  background: rgba(59, 130, 246, 0.04);
+}
+
+.dept-edit-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+}
+
+.dept-edit-picker {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+
+.dept-edit-trigger {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--primary);
+  border-radius: var(--radius-sm);
+  padding: 4px 8px;
+  font-size: 0.82rem;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.dept-edit-trigger-text {
+  flex: 1;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dept-edit-chevron {
+  flex-shrink: 0;
+  color: var(--text-muted);
+  transition: transform 0.15s ease;
+}
+
+.dept-edit-chevron.open {
+  transform: rotate(180deg);
+}
+
+.dept-edit-menu {
+  position: absolute;
+  top: calc(100% + 2px);
+  left: 0;
+  z-index: 100;
+  min-width: 220px;
+  max-width: 320px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+  overflow: hidden;
+}
+
+.dept-edit-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-muted);
+}
+
+.dept-edit-search input {
+  flex: 1;
+  border: none;
+  background: none;
+  outline: none;
+  font-size: 0.82rem;
+  color: var(--text-primary);
+  padding: 0;
+}
+
+.dept-edit-search input::placeholder {
+  color: var(--text-muted);
+}
+
+.dept-edit-list {
+  max-height: 200px;
+  overflow-y: auto;
+  padding: 4px 0;
+}
+
+.dept-edit-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 6px 8px;
+  font-size: 0.82rem;
+  color: var(--text-primary);
+  background: none;
+  border: none;
+  cursor: pointer;
+  transition: background 0.1s ease;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dept-edit-item:hover {
+  background: var(--bg-tertiary);
+}
+
+.dept-edit-item.active {
+  color: var(--primary);
+  font-weight: 500;
+}
+
+.dept-edit-empty {
+  padding: 12px 10px;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.dept-edit-save {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--radius-sm);
+  background: var(--primary);
+  border: none;
+  color: #fff;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: opacity 0.15s ease;
+}
+
+.dept-edit-save:hover {
+  opacity: 0.85;
+}
+
+.dept-edit-save:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.dept-edit-cancel {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 0.15s ease;
+}
+
+.dept-edit-cancel:hover {
+  color: #ef4444;
+  border-color: #ef4444;
+}
+
 /* Edit Mode */
 .employees-table.edit-mode .table-header {
   grid-template-columns: 40px 2fr 1.5fr;
@@ -2364,6 +2562,20 @@
     padding: 8px;
   }
 
+  .employees-table.has-dept-edit .table-header,
+  .employees-table.has-dept-edit .table-row {
+    grid-template-columns: 30px 1.5fr 1fr 0.7fr 1.2fr;
+  }
+
+  .dept-edit-btn {
+    font-size: 0.78rem;
+    padding: 3px 6px;
+  }
+
+  .dept-edit-menu {
+    min-width: 180px;
+  }
+
   .filters-bar {
     flex-direction: column;
     gap: 8px;
@@ -2516,6 +2728,16 @@
 
   .tender-tabs .tab {
     padding: 8px 12px;
+  }
+
+  .col-dept-edit {
+    grid-column: 1 / -1;
+    padding-top: 4px;
+  }
+
+  .employees-table.has-dept-edit .table-header,
+  .employees-table.has-dept-edit .table-row {
+    grid-template-columns: 30px 1fr 1fr 0.7fr;
   }
 }
 

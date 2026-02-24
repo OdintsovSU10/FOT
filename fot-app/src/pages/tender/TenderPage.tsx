@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Users, Plus, Upload, Search, Archive, X, AlertTriangle, FileSpreadsheet, List, GitBranch, ChevronDown } from 'lucide-react';
+import { Users, Plus, Upload, Search, Archive, X, AlertTriangle, FileSpreadsheet, List, GitBranch, ChevronDown, Check } from 'lucide-react';
 import { employeeService } from '../../services/employeeService';
 import { apiClient } from '../../api/client';
 import { useAuth } from '../../contexts/AuthContext';
@@ -51,6 +51,12 @@ export const TenderPage: React.FC = () => {
   const isSuperAdmin = hasPosition('super_admin');
   const canEdit = canAccess('header');
   const [deleting, setDeleting] = useState(false);
+  const [editDeptEmpId, setEditDeptEmpId] = useState<number | null>(null);
+  const [editDeptValue, setEditDeptValue] = useState<string | null>(null);
+  const [editDeptSearch, setEditDeptSearch] = useState('');
+  const [editDeptOpen, setEditDeptOpen] = useState(false);
+  const [editDeptSaving, setEditDeptSaving] = useState(false);
+  const editDeptRef = useRef<HTMLDivElement>(null);
 
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [loading, setLoading] = useState(true);
@@ -137,6 +143,55 @@ export const TenderPage: React.FC = () => {
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
+
+  // Close edit dept dropdown on outside click
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (editDeptRef.current && !editDeptRef.current.contains(e.target as Node)) {
+        setEditDeptOpen(false);
+        setEditDeptSearch('');
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  const filteredEditDepts = useMemo(() => {
+    if (!editDeptSearch.trim()) return deptOptions;
+    const q = editDeptSearch.toLowerCase().trim();
+    return deptOptions.filter(d => d.name.toLowerCase().includes(q));
+  }, [deptOptions, editDeptSearch]);
+
+  const handleStartEditDept = (emp: Employee, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setEditDeptEmpId(emp.id);
+    setEditDeptValue(emp.org_department_id);
+    setEditDeptOpen(false);
+    setEditDeptSearch('');
+  };
+
+  const handleCancelEditDept = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setEditDeptEmpId(null);
+    setEditDeptValue(null);
+    setEditDeptOpen(false);
+    setEditDeptSearch('');
+  };
+
+  const handleSaveEditDept = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (editDeptEmpId === null || editDeptValue === null) return;
+    setEditDeptSaving(true);
+    try {
+      await employeeService.moveDepartment(editDeptEmpId, editDeptValue);
+      await loadEmployees();
+    } catch {
+      // ignore
+    }
+    setEditDeptSaving(false);
+    setEditDeptEmpId(null);
+    setEditDeptValue(null);
+  };
 
   const filteredEmployees = useMemo(() => {
     return employees.filter(emp => {
@@ -373,12 +428,13 @@ export const TenderPage: React.FC = () => {
           <p>Сотрудники не найдены</p>
         </div>
       ) : (
-        <div className="employees-table">
+        <div className={`employees-table ${canEdit ? 'has-dept-edit' : ''}`}>
           <div className="table-header">
             <span style={{ width: '40px', textAlign: 'center' }}>№</span>
             <span>ФИО</span>
             <span>Должность</span>
             <span>Группа</span>
+            {canEdit && <span>Отдел</span>}
           </div>
           {filteredEmployees.map((emp, index) => (
             <div
@@ -392,6 +448,83 @@ export const TenderPage: React.FC = () => {
               <span className="col-name">{emp.full_name}</span>
               <span className="col-position">{emp.position_name || '—'}</span>
               <span className="col-group">{emp.department || '—'}</span>
+              {canEdit && (
+                <span className="col-dept-edit" onClick={e => e.stopPropagation()}>
+                  {editDeptEmpId === emp.id ? (
+                    <div className="dept-edit-row" ref={editDeptEmpId === emp.id ? editDeptRef : undefined}>
+                      <div className="dept-edit-picker">
+                        <button
+                          type="button"
+                          className="dept-edit-trigger"
+                          onClick={() => { setEditDeptOpen(!editDeptOpen); setEditDeptSearch(''); }}
+                        >
+                          <span className="dept-edit-trigger-text">
+                            {deptOptions.find(d => d.id === editDeptValue)?.name || '— Не назначен —'}
+                          </span>
+                          <ChevronDown size={12} className={`dept-edit-chevron ${editDeptOpen ? 'open' : ''}`} />
+                        </button>
+                        {editDeptOpen && (
+                          <div className="dept-edit-menu">
+                            <div className="dept-edit-search">
+                              <Search size={12} />
+                              <input
+                                type="text"
+                                placeholder="Поиск..."
+                                value={editDeptSearch}
+                                onChange={e => setEditDeptSearch(e.target.value)}
+                                autoFocus
+                              />
+                            </div>
+                            <div className="dept-edit-list">
+                              {filteredEditDepts.length === 0 ? (
+                                <div className="dept-edit-empty">Не найдено</div>
+                              ) : (
+                                filteredEditDepts.map(d => (
+                                  <button
+                                    key={d.id}
+                                    type="button"
+                                    className={`dept-edit-item ${d.id === editDeptValue ? 'active' : ''}`}
+                                    style={{ paddingLeft: `${8 + d.level * 14}px` }}
+                                    onClick={() => {
+                                      setEditDeptValue(d.id);
+                                      setEditDeptOpen(false);
+                                      setEditDeptSearch('');
+                                    }}
+                                  >
+                                    {d.name}
+                                  </button>
+                                ))
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                      <button
+                        className="dept-edit-save"
+                        onClick={handleSaveEditDept}
+                        disabled={editDeptSaving || editDeptValue === emp.org_department_id}
+                        title="Сохранить"
+                      >
+                        <Check size={14} />
+                      </button>
+                      <button
+                        className="dept-edit-cancel"
+                        onClick={handleCancelEditDept}
+                        title="Отмена"
+                      >
+                        <X size={14} />
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      className="dept-edit-btn"
+                      onClick={e => handleStartEditDept(emp, e)}
+                    >
+                      {emp.department || '—'}
+                    </button>
+                  )}
+                </span>
+              )}
             </div>
           ))}
         </div>

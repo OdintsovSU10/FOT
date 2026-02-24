@@ -20,8 +20,13 @@ export const usePresence = (departmentId: string | null): IUsePresenceReturn => 
   const intervalRef = useRef<number | null>(null);
 
   const fetchPresence = useCallback(async () => {
+    if (!departmentId) {
+      setEmployees([]);
+      setLoading(false);
+      return;
+    }
     try {
-      const data = await skudService.getPresence(departmentId || undefined);
+      const data = await skudService.getPresence(departmentId);
       setEmployees(data);
       setLastUpdated(new Date());
       setError(null);
@@ -38,11 +43,12 @@ export const usePresence = (departmentId: string | null): IUsePresenceReturn => 
   }, [fetchPresence]);
 
   useEffect(() => {
+    if (!departmentId) return;
     intervalRef.current = window.setInterval(fetchPresence, REFRESH_INTERVAL);
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
-  }, [fetchPresence]);
+  }, [fetchPresence, departmentId]);
 
   return { employees, loading, error, lastUpdated, refresh: fetchPresence };
 };
