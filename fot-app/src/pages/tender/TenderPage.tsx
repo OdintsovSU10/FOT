@@ -209,7 +209,8 @@ export const TenderPage: React.FC = () => {
       const matchesPosition = positionFilter === '' || emp.position_name === positionFilter;
       const matchesDept = !selectedDept ||
         selectedDept.allIds.includes(emp.org_department_id || '');
-      return matchesSearch && matchesPosition && matchesDept;
+      const matchesStatus = emp.employment_status !== 'fired';
+      return matchesSearch && matchesPosition && matchesDept && matchesStatus;
     });
   }, [employees, searchQuery, positionFilter, selectedDept]);
 

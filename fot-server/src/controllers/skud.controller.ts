@@ -163,8 +163,8 @@ export const skudController = {
   /**
    * GET /api/skud/employee-events/:employeeId
    * События СКУД конкретного сотрудника.
-   * 1) Ищем по employee_id — быстрый путь
-   * 2) Если пусто — ищем по ФИО и бэкфиллим employee_id на найденные записи
+   * 1) Ищем по employee_id
+   * 2) Всегда дополняем поиском по ФИО (события без employee_id) + бэкфилл
    */
   async getEmployeeEvents(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
@@ -184,21 +184,32 @@ export const skudController = {
 
       const effectiveOrgId = organizationId || empData?.organization_id || undefined;
 
-      // 1) Быстрый путь — по employee_id
-      let events = await queryEventsByEmployeeId(employeeId, effectiveOrgId, startDate, endDate);
+      // 1) По employee_id
+      const byId = await queryEventsByEmployeeId(employeeId, effectiveOrgId, startDate, endDate);
+      console.log(`[employee-events] id=${employeeId} byId=${byId.length} orgId=${effectiveOrgId} dates=${startDate}..${endDate}`);
 
-      // 2) Фоллбэк — по ФИО + бэкфилл employee_id
-      if (events.length === 0 && empData?.full_name_encrypted && effectiveOrgId) {
+      // 2) Всегда ищем по ФИО (события без employee_id) + бэкфилл
+      let byName: Record<string, unknown>[] = [];
+      if (empData?.full_name_encrypted && effectiveOrgId) {
         const employeeName = encryptionService.decrypt(empData.full_name_encrypted).toLowerCase().trim();
-        events = await searchAndBackfillByName(employeeId, employeeName, effectiveOrgId, startDate, endDate);
+        console.log(`[employee-events] searching by name: "${employeeName}"`);
+        byName = await searchAndBackfillByName(employeeId, employeeName, effectiveOrgId, startDate, endDate);
+        console.log(`[employee-events] byName=${byName.length}`);
+      } else {
+        console.log(`[employee-events] skip name search: empData=${!!empData} orgId=${effectiveOrgId}`);
       }
 
+      // Объединяем, убирая дубли по id
+      const seenIds = new Set(byId.map((e: Record<string, unknown>) => e.id));
+      const events = [...byId, ...byName.filter((e: Record<string, unknown>) => !seenIds.has(e.id))];
+      console.log(`[employee-events] total=${events.length}`);
+
       // Расшифровываем для ответа
-      const result = events.map(event => ({
+      const result = events.map((event: Record<string, unknown>) => ({
         id: event.id,
-        physical_person: encryptionService.decrypt(event.physical_person_encrypted),
+        physical_person: encryptionService.decrypt(event.physical_person_encrypted as string),
         card_number: event.card_number_encrypted
-          ? encryptionService.decrypt(event.card_number_encrypted) : null,
+          ? encryptionService.decrypt(event.card_number_encrypted as string) : null,
         event_date: event.event_date,
         event_time: event.event_time,
         access_point: event.access_point,
