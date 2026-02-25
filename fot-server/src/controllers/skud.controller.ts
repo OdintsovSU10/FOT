@@ -1517,7 +1517,7 @@ export const skudController = {
         const rows = internalSettings.map(s => ({
           organization_id: organizationId,
           department_id,
-          access_point_name: s.access_point_name,
+          access_point_name: s.access_point_name.trim(),
           is_internal: true,
         }));
 

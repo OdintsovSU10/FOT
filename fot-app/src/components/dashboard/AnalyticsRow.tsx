@@ -98,7 +98,7 @@ const AvgArrivalCard: FC<{ data: IDashboardStats['avgArrivalByDay'] }> = ({ data
     </div>
     <div className={styles.bars}>
       {data.map(item => (
-        <div key={item.date} className={styles.barRow}>
+        <div key={item.day} className={styles.barRow}>
           <span className={styles.barLabel}>{item.day}</span>
           <div className={styles.barTrack}>
             {item.avgTime ? (
