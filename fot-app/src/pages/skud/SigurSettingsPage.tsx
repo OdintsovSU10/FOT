@@ -689,7 +689,7 @@ export const SigurSettingsPage = () => {
       </>}
 
       {activeTab === 'access-points' && (
-      <div className="sigur-section">
+      <div className="sigur-section sigur-section--full-height">
         <div className="sigur-ap-dept-selector">
           <label>Отдел:</label>
           <div className="sigur-ap-dept-dropdown" ref={deptDropdownRef}>
@@ -756,7 +756,7 @@ export const SigurSettingsPage = () => {
             Нет точек доступа
           </div>
         ) : (
-          <div className="sigur-preview-table-wrap" style={{ maxHeight: 400 }}>
+          <div className="sigur-preview-table-wrap">
             <table className="sigur-preview-table">
               <thead>
                 <tr>
