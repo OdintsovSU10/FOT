@@ -58,7 +58,7 @@ const isWeekend = (year: number, month: number, day: number): boolean => {
   return dow === 0 || dow === 6;
 };
 
-const calcWorkSeconds = (events: SkudEvent[], internalPoints: Set<string>): number => {
+const calcWorkSeconds = (events: SkudEvent[], internalPoints: Set<string>, isToday = false): number => {
   const ext = events.filter(e => !e.access_point || !internalPoints.has(e.access_point));
   const sorted = [...ext].sort((a, b) => a.event_time.localeCompare(b.event_time));
   let total = 0;
@@ -70,6 +70,12 @@ const calcWorkSeconds = (events: SkudEvent[], internalPoints: Set<string>): numb
       total += timeToSeconds(ev.event_time) - entryTime;
       entryTime = null;
     }
+  }
+  // Если последний вход без выхода и это сегодня — считаем до текущего момента
+  if (entryTime !== null && isToday) {
+    const now = new Date();
+    const nowSec = now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds();
+    total += nowSec - entryTime;
   }
   return total;
 };
@@ -145,7 +151,8 @@ export const calculateAttendance = (
       late = mins > WORK_START_MINUTES;
     }
 
-    const workSecs = calcWorkSeconds(dayEvs, internalPoints);
+    const isTodayDay = isCurrentMonth && d === todayDate;
+    const workSecs = calcWorkSeconds(dayEvs, internalPoints, isTodayDay);
     totalWorkSecs += workSecs;
 
     if (late) lateCount++;

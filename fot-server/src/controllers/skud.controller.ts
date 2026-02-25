@@ -409,7 +409,8 @@ export const skudController = {
         lastWeek: calcWeekMetrics(lastWeekSummaries, empIds.length * lastWeekWorkDays),
       };
 
-      // Top late
+      // Top late (только приходы после 09:15)
+      const topLateCountByEmp = new Map<number, number>();
       const avgArrivalByEmp = new Map<number, number>();
       const arrivalCountByEmp = new Map<number, number>();
       for (const s of thisWeekAllSummaries) {
@@ -418,9 +419,12 @@ export const skudController = {
           const min = h * 60 + m;
           avgArrivalByEmp.set(s.employee_id, (avgArrivalByEmp.get(s.employee_id) || 0) + min);
           arrivalCountByEmp.set(s.employee_id, (arrivalCountByEmp.get(s.employee_id) || 0) + 1);
+          if (s.first_entry > SLIGHTLY_LATE_THRESHOLD) {
+            topLateCountByEmp.set(s.employee_id, (topLateCountByEmp.get(s.employee_id) || 0) + 1);
+          }
         }
       }
-      const topLate = [...lateCountByEmp.entries()]
+      const topLate = [...topLateCountByEmp.entries()]
         .filter(([, count]) => count > 0)
         .sort((a, b) => b[1] - a[1])
         .slice(0, 5)
