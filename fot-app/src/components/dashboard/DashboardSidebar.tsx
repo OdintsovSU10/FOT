@@ -1,0 +1,146 @@
+import type { FC } from 'react';
+import { TrendingUp, TrendingDown } from 'lucide-react';
+import type { IDashboardStats } from '../../types';
+import styles from './DashboardSidebar.module.css';
+
+interface IDashboardSidebarProps {
+  stats: IDashboardStats;
+}
+
+const getInitials = (name: string): string => {
+  const parts = name.split(' ');
+  if (parts.length >= 2) return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
+  return name.slice(0, 2).toUpperCase();
+};
+
+const HourlyActivityCard: FC<{ data: IDashboardStats['hourlyActivity'] }> = ({ data }) => {
+  const maxCount = Math.max(...data.map(d => d.count), 1);
+
+  return (
+    <div className={styles.card}>
+      <div className={styles.cardTitle}>Активность по часам</div>
+      <div className={styles.hourlyBars}>
+        {data.map(item => (
+          <div
+            key={item.hour}
+            className={`${styles.hourlyBar} ${item.count === maxCount && item.count > 0 ? styles.peak : ''}`}
+            style={{ height: `${Math.max(4, (item.count / maxCount) * 100)}%` }}
+            title={`${item.hour}:00 — ${item.count} чел.`}
+          />
+        ))}
+      </div>
+      <div className={styles.hourlyLabels}>
+        {data.map(item => (
+          <span key={item.hour} className={styles.hourlyLabel}>
+            {item.hour}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+interface IComparisonItem {
+  label: string;
+  current: string;
+  delta: number;
+  suffix?: string;
+  invertColors?: boolean;
+}
+
+const WeekComparisonCard: FC<{ comparison: IDashboardStats['weekComparison'] }> = ({ comparison }) => {
+  if (!comparison) return null;
+
+  const { thisWeek, lastWeek } = comparison;
+
+  const items: IComparisonItem[] = [
+    {
+      label: 'Присутствие',
+      current: `${thisWeek.attendanceRate}%`,
+      delta: thisWeek.attendanceRate - lastWeek.attendanceRate,
+      suffix: '%',
+    },
+    {
+      label: 'Ср. приход',
+      current: thisWeek.avgArrival,
+      delta: compareTimes(lastWeek.avgArrival, thisWeek.avgArrival),
+      suffix: 'м',
+    },
+    {
+      label: 'Ср. часов',
+      current: `${thisWeek.avgHours}ч`,
+      delta: Math.round((thisWeek.avgHours - lastWeek.avgHours) * 10) / 10,
+      suffix: 'ч',
+    },
+    {
+      label: 'Опоздания',
+      current: String(thisWeek.lateCount),
+      delta: thisWeek.lateCount - lastWeek.lateCount,
+      invertColors: true,
+    },
+  ];
+
+  return (
+    <div className={styles.card}>
+      <div className={styles.cardTitle}>Сравнение с прошлой неделей</div>
+      {items.map(item => {
+        const isUp = item.delta > 0;
+        const isNeutral = item.delta === 0;
+        let colorClass = isNeutral ? styles.neutral : isUp ? styles.up : styles.down;
+        if (item.invertColors && !isNeutral) {
+          colorClass = isUp ? styles.down : styles.up;
+        }
+
+        return (
+          <div key={item.label} className={styles.compItem}>
+            <span className={styles.compLabel}>{item.label}</span>
+            <div className={styles.compValues}>
+              <span className={styles.compCurrent}>{item.current}</span>
+              <span className={`${styles.compChange} ${colorClass}`}>
+                {!isNeutral && (isUp ? <TrendingUp size={12} /> : <TrendingDown size={12} />)}
+                {isNeutral ? '—' : `${isUp ? '+' : ''}${item.delta}${item.suffix || ''}`}
+              </span>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+};
+
+const TopLateCard: FC<{ data: IDashboardStats['topLate'] }> = ({ data }) => (
+  <div className={styles.card}>
+    <div className={styles.cardTitle}>Топ опаздывающих</div>
+    {data.length === 0 ? (
+      <div className={styles.empty}>Нет опозданий за неделю</div>
+    ) : (
+      data.map((item, i) => (
+        <div key={item.employee_id} className={styles.lateItem}>
+          <span className={styles.lateRank}>{i + 1}</span>
+          <div className={styles.lateAvatar}>{getInitials(item.full_name)}</div>
+          <div className={styles.lateInfo}>
+            <div className={styles.lateName}>{item.full_name}</div>
+          </div>
+          <span className={styles.lateCount}>{item.lateCount}×</span>
+        </div>
+      ))
+    )}
+  </div>
+);
+
+/** Сравнение двух времён в минутах (положительное = раньше = лучше) */
+function compareTimes(a: string, b: string): number {
+  const toMin = (t: string) => {
+    const [h, m] = t.split(':').map(Number);
+    return (h || 0) * 60 + (m || 0);
+  };
+  return toMin(a) - toMin(b);
+}
+
+export const DashboardSidebar: FC<IDashboardSidebarProps> = ({ stats }) => (
+  <div className={styles.sidebar}>
+    <HourlyActivityCard data={stats.hourlyActivity} />
+    <WeekComparisonCard comparison={stats.weekComparison} />
+    <TopLateCard data={stats.topLate} />
+  </div>
+);

@@ -29,6 +29,13 @@ router.use(authenticate as any);
 router.use(injectOrganizationFromQuery as any);
 router.use(requireOrganization as any);
 
+// GET /api/skud/dashboard-stats - аналитика дашборда (header+)
+router.get(
+  '/dashboard-stats',
+  requireRole('header', 'viewer', 'manager', 'owner', 'super_admin') as any,
+  skudController.getDashboardStats as any
+);
+
 // GET /api/skud/daily-summary - дневные сводки (viewer+)
 router.get(
   '/daily-summary',

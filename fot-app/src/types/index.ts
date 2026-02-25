@@ -398,6 +398,21 @@ export interface EmployeeHistoryEvent {
   created_by: string | null;
 }
 
+// Dashboard analytics
+export interface IDashboardStats {
+  lateToday: number;
+  lateYesterday: number;
+  punctuality: { onTime: number; slightlyLate: number; veryLate: number };
+  avgArrivalByDay: Array<{ day: string; avgTime: string | null; date: string }>;
+  risks: Array<{ employee_id: number; full_name: string; reason: string; severity: 'high' | 'medium' }>;
+  hourlyActivity: Array<{ hour: number; count: number }>;
+  weekComparison: {
+    thisWeek: { attendanceRate: number; avgArrival: string; avgHours: number; lateCount: number };
+    lastWeek: { attendanceRate: number; avgArrival: string; avgHours: number; lateCount: number };
+  } | null;
+  topLate: Array<{ employee_id: number; full_name: string; lateCount: number }>;
+}
+
 // Элемент дерева организационной структуры
 export type OrgUnitType = 'department' | 'site';
 

@@ -46,6 +46,11 @@
   color: var(--warning);
 }
 
+.icon.red {
+  background: var(--error-muted, rgba(239, 68, 68, 0.1));
+  color: var(--error);
+}
+
 .value {
   font-size: 28px;
   font-weight: 700;
@@ -71,6 +76,10 @@
 
 .change.negative {
   color: var(--error);
+}
+
+.change.neutral {
+  color: var(--text-tertiary);
 }
 
 [data-theme="light"] .card {

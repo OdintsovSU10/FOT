@@ -26,8 +26,8 @@
 
 .skud-db-count {
   font-size: 0.8125rem;
-  color: var(--text-2);
-  background: var(--surface-2);
+  color: var(--text-secondary);
+  background: var(--surface-hover);
   padding: 2px 8px;
   border-radius: 10px;
 }
@@ -37,18 +37,18 @@
   align-items: center;
   gap: 6px;
   padding: 0.375rem 0.75rem;
-  background: var(--surface-1);
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 6px;
   cursor: pointer;
   font-size: 0.8125rem;
-  color: var(--text-2);
+  color: var(--text-secondary);
   transition: all 0.15s;
 }
 
 .skud-db-refresh:hover {
-  background: var(--surface-2);
-  color: var(--text-1);
+  background: var(--surface-hover);
+  color: var(--text-primary);
 }
 
 .skud-db-refresh:disabled {
@@ -81,19 +81,19 @@
 
 .skud-db-tab {
   padding: 0.5rem 0.875rem;
-  background: var(--surface-1);
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 6px;
   cursor: pointer;
   font-size: 0.8125rem;
-  color: var(--text-2);
+  color: var(--text-secondary);
   white-space: nowrap;
   transition: all 0.15s;
 }
 
 .skud-db-tab:hover {
-  background: var(--surface-2);
-  color: var(--text-1);
+  background: var(--surface-hover);
+  color: var(--text-primary);
 }
 
 .skud-db-tab.active {
@@ -114,15 +114,15 @@
   align-items: center;
   gap: 6px;
   font-size: 0.8125rem;
-  color: var(--text-2);
+  color: var(--text-secondary);
 }
 
 .skud-db-dates input[type="date"] {
   padding: 0.375rem 0.5rem;
-  background: var(--surface-1);
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 6px;
-  color: var(--text-1);
+  color: var(--text-primary);
   font-size: 0.8125rem;
   outline: none;
 }
@@ -133,7 +133,7 @@
 
 .skud-db-limit {
   font-size: 0.75rem;
-  color: var(--text-3);
+  color: var(--text-tertiary);
 }
 
 /* Filters row */
@@ -153,10 +153,10 @@
 
 .skud-db-org-select {
   padding: 0.375rem 0.5rem;
-  background: var(--surface-1);
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 6px;
-  color: var(--text-1);
+  color: var(--text-primary);
   font-size: 0.8125rem;
   outline: none;
   cursor: pointer;
@@ -180,16 +180,16 @@
   left: 10px;
   top: 50%;
   transform: translateY(-50%);
-  color: var(--text-3);
+  color: var(--text-tertiary);
 }
 
 .skud-db-search-input {
   width: 100%;
   padding: 0.5rem 2rem 0.5rem 2rem;
-  background: var(--surface-1);
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 6px;
-  color: var(--text-1);
+  color: var(--text-primary);
   font-size: 0.875rem;
   outline: none;
   transition: border-color 0.15s;
@@ -208,13 +208,13 @@
   background: none;
   border: none;
   cursor: pointer;
-  color: var(--text-3);
+  color: var(--text-tertiary);
   padding: 2px;
   display: flex;
 }
 
 .skud-db-search-clear:hover {
-  color: var(--text-1);
+  color: var(--text-primary);
 }
 
 /* Error */
@@ -250,7 +250,7 @@
   justify-content: center;
   gap: 0.75rem;
   padding: 3rem;
-  color: var(--text-2);
+  color: var(--text-secondary);
   flex: 1;
 }
 
@@ -259,11 +259,32 @@
   font-size: 0.875rem;
 }
 
+.skud-db-cancel {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0.375rem 0.875rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+  transition: all 0.15s;
+  margin-top: 0.25rem;
+}
+
+.skud-db-cancel:hover {
+  background: rgba(239, 68, 68, 0.1);
+  border-color: rgba(239, 68, 68, 0.3);
+  color: var(--error);
+}
+
 /* Empty */
 .skud-db-empty {
   text-align: center;
   padding: 2rem;
-  color: var(--text-3);
+  color: var(--text-tertiary);
   font-size: 0.875rem;
 }
 
@@ -288,11 +309,11 @@
 }
 
 .skud-db-table th {
-  background: var(--surface-2);
+  background: var(--surface-hover);
   padding: 0.5rem 0.75rem;
   text-align: left;
   font-weight: 600;
-  color: var(--text-1);
+  color: var(--text-primary);
   white-space: nowrap;
   border-bottom: 1px solid var(--border);
 }
@@ -300,7 +321,7 @@
 .skud-db-table td {
   padding: 0.4rem 0.75rem;
   border-bottom: 1px solid var(--border);
-  color: var(--text-2);
+  color: var(--text-secondary);
   max-width: 300px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -308,203 +329,14 @@
 }
 
 .skud-db-table tr:hover td {
-  background: var(--surface-1);
+  background: var(--surface);
 }
 
 .skud-db-th-num,
 .skud-db-td-num {
   width: 40px;
   text-align: center;
-  color: var(--text-3);
-}
-
-/* Access Point Settings */
-.skud-ap-settings {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-
-.skud-ap-dept-selector {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  margin-bottom: 0.75rem;
-  flex-shrink: 0;
-}
-
-.skud-ap-dept-selector label {
-  font-size: 0.8125rem;
-  color: var(--text-2);
-  white-space: nowrap;
-}
-
-.skud-ap-dept-dropdown {
-  position: relative;
-}
-
-.skud-ap-dept-trigger {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 0.375rem 0.625rem;
-  background: var(--surface-1);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  color: var(--text-1);
-  font-size: 0.8125rem;
-  cursor: pointer;
-  min-width: 200px;
-  max-width: 400px;
-  transition: border-color 0.15s;
-}
-
-.skud-ap-dept-trigger:hover {
-  border-color: var(--primary);
-}
-
-.skud-ap-dept-menu {
-  position: absolute;
-  top: calc(100% + 4px);
-  left: 0;
-  z-index: 50;
-  min-width: 100%;
-  max-width: 400px;
-  background: var(--surface-1);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
-  overflow: hidden;
-}
-
-.skud-ap-dept-search-wrap {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 10px;
-  border-bottom: 1px solid var(--border);
-  color: var(--text-3);
-}
-
-.skud-ap-dept-search-wrap input {
-  flex: 1;
-  border: none;
-  background: transparent;
-  color: var(--text-1);
-  font-size: 0.8125rem;
-  outline: none;
-}
-
-.skud-ap-dept-list {
-  max-height: 240px;
-  overflow-y: auto;
-  padding: 4px 0;
-}
-
-.skud-ap-dept-option {
-  display: block;
-  width: 100%;
-  text-align: left;
-  padding: 6px 12px;
-  border: none;
-  background: transparent;
-  color: var(--text-1);
-  font-size: 0.8125rem;
-  cursor: pointer;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  transition: background 0.1s;
-}
-
-.skud-ap-dept-option:hover {
-  background: var(--surface-2);
-}
-
-.skud-ap-dept-option.active {
-  background: rgba(var(--primary-rgb, 59, 130, 246), 0.1);
-  color: var(--primary);
-  font-weight: 500;
-}
-
-.skud-ap-dept-empty {
-  padding: 12px;
-  text-align: center;
-  font-size: 0.8125rem;
-  color: var(--text-3);
-}
-
-.skud-ap-save-btn {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 0.375rem 0.75rem;
-  background: var(--primary);
-  border: 1px solid var(--primary);
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 0.8125rem;
-  color: #fff;
-  transition: all 0.15s;
-  white-space: nowrap;
-}
-
-.skud-ap-save-btn:hover {
-  opacity: 0.9;
-}
-
-.skud-ap-save-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.skud-ap-save-btn.saved {
-  background: #22c55e;
-  border-color: #22c55e;
-}
-
-.skud-ap-type-btn {
-  padding: 0.25rem 0.625rem;
-  border-radius: 12px;
-  border: 1px solid var(--border);
-  cursor: pointer;
-  font-size: 0.75rem;
-  transition: all 0.15s;
-}
-
-.skud-ap-type-btn.external {
-  background: rgba(34, 197, 94, 0.1);
-  color: #22c55e;
-  border-color: rgba(34, 197, 94, 0.3);
-}
-
-.skud-ap-type-btn.external:hover {
-  background: rgba(34, 197, 94, 0.2);
-}
-
-.skud-ap-type-btn.internal {
-  background: rgba(249, 115, 22, 0.1);
-  color: #f97316;
-  border-color: rgba(249, 115, 22, 0.3);
-}
-
-.skud-ap-type-btn.internal:hover {
-  background: rgba(249, 115, 22, 0.2);
-}
-
-.skud-ap-type-label {
-  font-size: 0.75rem;
-  color: var(--text-3);
-}
-
-.skud-ap-type-label.external {
-  color: #22c55e;
-}
-
-.skud-ap-type-label.internal {
-  color: #f97316;
+  color: var(--text-tertiary);
 }
 
 /* Mobile */
@@ -545,14 +377,5 @@
   .skud-db-header {
     flex-wrap: wrap;
     gap: 0.5rem;
-  }
-
-  .skud-ap-dept-selector {
-    flex-wrap: wrap;
-  }
-
-  .skud-ap-dept-trigger {
-    min-width: 0;
-    width: 100%;
   }
 }

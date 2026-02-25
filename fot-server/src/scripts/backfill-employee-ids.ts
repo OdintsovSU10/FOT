@@ -1,5 +1,6 @@
 /**
  * Бэкфилл employee_id для всех событий без привязки.
+ * Учитывает organization_id для корректного маппинга при дубликатах ФИО.
  * Запуск: npx tsx src/scripts/backfill-employee-ids.ts
  */
 import { supabase } from '../config/database.js';
@@ -9,23 +10,25 @@ const BATCH = 1000;
 const CONCURRENCY = 50;
 
 async function main() {
-  // 1. Загружаем всех сотрудников → маппинг name → employee_id
+  // 1. Загружаем всех сотрудников → маппинг "name|org_id" → employee_id
   console.log('[backfill-emp] Загрузка сотрудников...');
   const { data: employees } = await supabase
     .from('employees')
-    .select('id, full_name_encrypted')
+    .select('id, full_name_encrypted, organization_id')
     .eq('is_archived', false);
 
-  const employeeMap = new Map<string, number>();
+  // Ключ: "name|org_id" → employee_id (точное совпадение по организации)
+  const empByNameOrg = new Map<string, number>();
   for (const emp of employees || []) {
     const name = encryptionService.decrypt(emp.full_name_encrypted).toLowerCase().trim();
-    if (!employeeMap.has(name)) {
-      employeeMap.set(name, emp.id);
+    const key = `${name}|${emp.organization_id}`;
+    if (!empByNameOrg.has(key)) {
+      empByNameOrg.set(key, emp.id);
     }
   }
-  console.log(`[backfill-emp] Сотрудников: ${employeeMap.size}`);
+  console.log(`[backfill-emp] Записей name|org: ${empByNameOrg.size}`);
 
-  // 2. Сканируем события без employee_id, курсор по id
+  // 2. Сканируем события без employee_id
   let lastId = 0;
   let totalScanned = 0;
   let totalUpdated = 0;
@@ -33,7 +36,7 @@ async function main() {
   while (true) {
     const { data: rows, error } = await supabase
       .from('skud_events')
-      .select('id, physical_person_encrypted')
+      .select('id, physical_person_encrypted, organization_id')
       .is('employee_id', null)
       .gt('id', lastId)
       .order('id')
@@ -51,7 +54,8 @@ async function main() {
     const updates: { id: number; employee_id: number }[] = [];
     for (const row of rows) {
       const name = encryptionService.decrypt(row.physical_person_encrypted).toLowerCase().trim();
-      const empId = employeeMap.get(name);
+      const key = `${name}|${row.organization_id}`;
+      const empId = empByNameOrg.get(key);
       if (empId) {
         updates.push({ id: row.id, employee_id: empId });
       }

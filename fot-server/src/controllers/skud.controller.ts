@@ -112,7 +112,263 @@ async function searchAndBackfillByName(
   return matched;
 }
 
+/** Собирает ID отдела + все дочерние */
+async function collectDeptIds(departmentId: string, organizationId: string | undefined): Promise<string[]> {
+  let deptQuery = supabase.from('org_departments').select('id, parent_id');
+  if (organizationId) deptQuery = deptQuery.eq('organization_id', organizationId);
+  const { data: allDepts } = await deptQuery;
+
+  const ids = [departmentId];
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const d of allDepts || []) {
+      if (d.parent_id && ids.includes(d.parent_id) && !ids.includes(d.id)) {
+        ids.push(d.id);
+        changed = true;
+      }
+    }
+  }
+  return ids;
+}
+
+/** Вычисляет понедельник текущей/указанной недели */
+function getMonday(d: Date): Date {
+  const date = new Date(d);
+  const day = date.getDay();
+  const diff = day === 0 ? -6 : 1 - day;
+  date.setDate(date.getDate() + diff);
+  return date;
+}
+
+const DAY_NAMES = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт'];
+
 export const skudController = {
+  /**
+   * GET /api/skud/dashboard-stats?department_id=uuid
+   * Агрегированная аналитика для дашборда руководителя
+   */
+  async getDashboardStats(req: AuthenticatedRequest, res: Response): Promise<void> {
+    try {
+      const organizationId = getOrgId(req);
+      const departmentId = typeof req.query.department_id === 'string' ? req.query.department_id : null;
+
+      if (!departmentId) {
+        res.status(400).json({ success: false, error: 'department_id обязателен' });
+        return;
+      }
+
+      const deptIds = await collectDeptIds(departmentId, organizationId);
+
+      // Загрузить сотрудников отдела
+      let empQuery = supabase
+        .from('employees')
+        .select('id, full_name_encrypted')
+        .eq('is_archived', false)
+        .eq('employment_status', 'active')
+        .in('org_department_id', deptIds);
+      if (organizationId) empQuery = empQuery.eq('organization_id', organizationId);
+
+      const { data: employees } = await empQuery;
+      if (!employees || employees.length === 0) {
+        res.json({ success: true, data: { lateToday: 0, lateYesterday: 0, punctuality: { onTime: 0, slightlyLate: 0, veryLate: 0 }, avgArrivalByDay: [], risks: [], hourlyActivity: [], weekComparison: null, topLate: [] } });
+        return;
+      }
+
+      const empIds = employees.map(e => e.id);
+      const empNameMap = new Map<number, string>();
+      for (const e of employees) {
+        empNameMap.set(e.id, encryptionService.decrypt(e.full_name_encrypted));
+      }
+
+      // Даты
+      const today = new Date();
+      const todayStr = formatDateToISO(today);
+      const monday = getMonday(today);
+      const lastMonday = new Date(monday);
+      lastMonday.setDate(lastMonday.getDate() - 7);
+      const lastFriday = new Date(lastMonday);
+      lastFriday.setDate(lastFriday.getDate() + 4);
+
+      const mondayStr = formatDateToISO(monday);
+      const lastMondayStr = formatDateToISO(lastMonday);
+      const lastFridayStr = formatDateToISO(lastFriday);
+
+      // Вчера (рабочий день — пропускаем выходные)
+      const yesterday = new Date(today);
+      yesterday.setDate(yesterday.getDate() - 1);
+      while (yesterday.getDay() === 0 || yesterday.getDay() === 6) {
+        yesterday.setDate(yesterday.getDate() - 1);
+      }
+      const yesterdayStr = formatDateToISO(yesterday);
+
+      // Запрос daily_summary за 2 недели
+      const { data: summaries } = await supabase
+        .from('skud_daily_summary')
+        .select('employee_id, date, first_entry, last_exit, total_hours, is_present')
+        .in('employee_id', empIds)
+        .gte('date', lastMondayStr)
+        .lte('date', todayStr);
+
+      // Запрос entry-событий за сегодня для hourly activity
+      let eventsQuery = supabase
+        .from('skud_events')
+        .select('event_time, employee_id')
+        .eq('event_date', todayStr)
+        .eq('direction', 'entry')
+        .in('employee_id', empIds);
+      if (organizationId) eventsQuery = eventsQuery.eq('organization_id', organizationId);
+      const { data: todayEvents } = await eventsQuery;
+
+      // --- Агрегация ---
+      const LATE_THRESHOLD = '09:00:00';
+      const SLIGHTLY_LATE_THRESHOLD = '09:15:00';
+
+      // Late today / yesterday
+      let lateToday = 0;
+      let lateYesterday = 0;
+      for (const s of summaries || []) {
+        if (!s.first_entry) continue;
+        if (s.date === todayStr && s.first_entry > LATE_THRESHOLD) lateToday++;
+        if (s.date === yesterdayStr && s.first_entry > LATE_THRESHOLD) lateYesterday++;
+      }
+
+      // Punctuality (this week only)
+      const thisWeekSummaries = (summaries || []).filter(s => s.date >= mondayStr && s.date <= todayStr && s.first_entry);
+      let onTimeCount = 0;
+      let slightlyLateCount = 0;
+      let veryLateCount = 0;
+      for (const s of thisWeekSummaries) {
+        if (s.first_entry! <= LATE_THRESHOLD) onTimeCount++;
+        else if (s.first_entry! <= SLIGHTLY_LATE_THRESHOLD) slightlyLateCount++;
+        else veryLateCount++;
+      }
+      const totalPunct = thisWeekSummaries.length || 1;
+      const punctuality = {
+        onTime: Math.round((onTimeCount / totalPunct) * 100),
+        slightlyLate: Math.round((slightlyLateCount / totalPunct) * 100),
+        veryLate: Math.round((veryLateCount / totalPunct) * 100),
+      };
+
+      // Average arrival by day (this week)
+      const avgArrivalByDay: { day: string; avgTime: string | null; date: string }[] = [];
+      for (let i = 0; i < 5; i++) {
+        const d = new Date(monday);
+        d.setDate(d.getDate() + i);
+        const dateStr = formatDateToISO(d);
+        if (dateStr > todayStr) {
+          avgArrivalByDay.push({ day: DAY_NAMES[i], avgTime: null, date: dateStr });
+          continue;
+        }
+        const dayEntries = (summaries || []).filter(s => s.date === dateStr && s.first_entry);
+        if (dayEntries.length === 0) {
+          avgArrivalByDay.push({ day: DAY_NAMES[i], avgTime: null, date: dateStr });
+          continue;
+        }
+        const totalMinutes = dayEntries.reduce((sum, s) => {
+          const [h, m] = s.first_entry!.split(':').map(Number);
+          return sum + h * 60 + m;
+        }, 0);
+        const avgMin = Math.round(totalMinutes / dayEntries.length);
+        const avgH = String(Math.floor(avgMin / 60)).padStart(2, '0');
+        const avgM = String(avgMin % 60).padStart(2, '0');
+        avgArrivalByDay.push({ day: DAY_NAMES[i], avgTime: `${avgH}:${avgM}`, date: dateStr });
+      }
+
+      // Risks (employees with most lates this week)
+      const lateCountByEmp = new Map<number, number>();
+      const earlyLeaveByEmp = new Map<number, number>();
+      for (const s of thisWeekSummaries) {
+        if (s.first_entry && s.first_entry > LATE_THRESHOLD) {
+          lateCountByEmp.set(s.employee_id, (lateCountByEmp.get(s.employee_id) || 0) + 1);
+        }
+        if (s.last_exit && s.last_exit < '17:00:00' && s.is_present) {
+          earlyLeaveByEmp.set(s.employee_id, (earlyLeaveByEmp.get(s.employee_id) || 0) + 1);
+        }
+      }
+
+      const risks: { employee_id: number; full_name: string; reason: string; severity: 'high' | 'medium' }[] = [];
+      for (const [empId, count] of lateCountByEmp) {
+        if (count >= 3) {
+          risks.push({ employee_id: empId, full_name: empNameMap.get(empId) || '', reason: `${count} опозданий за неделю`, severity: count >= 4 ? 'high' : 'medium' });
+        }
+      }
+      for (const [empId, count] of earlyLeaveByEmp) {
+        if (count >= 2 && !risks.find(r => r.employee_id === empId)) {
+          risks.push({ employee_id: empId, full_name: empNameMap.get(empId) || '', reason: `Ранние уходы ${count} дня`, severity: 'medium' });
+        }
+      }
+      risks.sort((a, b) => (a.severity === 'high' ? -1 : 1) - (b.severity === 'high' ? -1 : 1));
+
+      // Hourly activity
+      const hourlyMap = new Map<number, number>();
+      for (let h = 7; h <= 19; h++) hourlyMap.set(h, 0);
+      for (const evt of todayEvents || []) {
+        if (!evt.event_time) continue;
+        const hour = parseInt(evt.event_time.split(':')[0], 10);
+        if (hour >= 7 && hour <= 19) {
+          hourlyMap.set(hour, (hourlyMap.get(hour) || 0) + 1);
+        }
+      }
+      const hourlyActivity = [...hourlyMap.entries()].map(([hour, count]) => ({ hour, count }));
+
+      // Week comparison
+      const lastWeekSummaries = (summaries || []).filter(s => s.date >= lastMondayStr && s.date <= lastFridayStr);
+
+      const calcWeekMetrics = (weekData: typeof thisWeekSummaries) => {
+        const withEntry = weekData.filter(s => s.first_entry);
+        const presentDays = weekData.filter(s => s.is_present).length;
+        const totalDays = weekData.length || 1;
+        const attendanceRate = Math.round((presentDays / totalDays) * 100);
+
+        let avgArrivalMin = 0;
+        if (withEntry.length > 0) {
+          const totalMin = withEntry.reduce((sum, s) => {
+            const [h, m] = s.first_entry!.split(':').map(Number);
+            return sum + h * 60 + m;
+          }, 0);
+          avgArrivalMin = Math.round(totalMin / withEntry.length);
+        }
+        const avgArrival = withEntry.length > 0
+          ? `${String(Math.floor(avgArrivalMin / 60)).padStart(2, '0')}:${String(avgArrivalMin % 60).padStart(2, '0')}`
+          : '--:--';
+
+        const withHours = weekData.filter(s => s.total_hours != null && s.total_hours > 0);
+        const avgHours = withHours.length > 0
+          ? Math.round((withHours.reduce((sum, s) => sum + (s.total_hours || 0), 0) / withHours.length) * 10) / 10
+          : 0;
+
+        const lateCount = withEntry.filter(s => s.first_entry! > LATE_THRESHOLD).length;
+
+        return { attendanceRate, avgArrival, avgHours, lateCount };
+      };
+
+      const weekComparison = {
+        thisWeek: calcWeekMetrics(thisWeekSummaries),
+        lastWeek: calcWeekMetrics(lastWeekSummaries),
+      };
+
+      // Top late
+      const topLate = [...lateCountByEmp.entries()]
+        .filter(([, count]) => count > 0)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 5)
+        .map(([empId, lateCount]) => ({
+          employee_id: empId,
+          full_name: empNameMap.get(empId) || '',
+          lateCount,
+        }));
+
+      res.json({
+        success: true,
+        data: { lateToday, lateYesterday, punctuality, avgArrivalByDay, risks, hourlyActivity, weekComparison, topLate },
+      });
+    } catch (error) {
+      console.error('getDashboardStats error:', error);
+      res.status(500).json({ success: false, error: 'Ошибка получения аналитики дашборда' });
+    }
+  },
+
   /**
    * GET /api/skud/daily-summary
    * Получение дневных сводок за месяц
@@ -307,16 +563,33 @@ export const skudController = {
 
   /**
    * GET /api/skud/access-points
-   * Получение списка точек доступа
+   * Получение списка точек доступа из Sigur API (фоллбэк — база)
    */
   async getAccessPoints(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
+      // 1) Попытка получить из Sigur API
+      if (sigurService.isConfigured()) {
+        try {
+          const sigurAPs = await sigurService.getAccessPoints();
+          const names = (sigurAPs as Record<string, unknown>[])
+            .map(ap => (ap.name as string) || '')
+            .filter(Boolean);
+          const unique = [...new Set(names)].sort();
+          res.json({ success: true, data: unique });
+          return;
+        } catch (sigurErr) {
+          console.warn('Sigur access points fallback to DB:', (sigurErr as Error).message);
+        }
+      }
+
+      // 2) Фоллбэк: уникальные точки из базы (с лимитом)
       const organizationId = getOrgId(req);
 
       let query = supabase
         .from('skud_events')
         .select('access_point')
-        .not('access_point', 'is', null);
+        .not('access_point', 'is', null)
+        .limit(5000);
 
       if (organizationId) {
         query = query.eq('organization_id', organizationId);
@@ -330,8 +603,7 @@ export const skudController = {
         return;
       }
 
-      // Уникальные точки доступа
-      const unique = [...new Set((data || []).map((d: { access_point: string }) => d.access_point))];
+      const unique = [...new Set((data || []).map((d: { access_point: string }) => d.access_point))].sort();
 
       res.json({ success: true, data: unique });
     } catch (error) {
@@ -1043,12 +1315,18 @@ export const skudController = {
    */
   async getAccessPointSettings(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
-      const organizationId = getOrgId(req);
+      let organizationId = getOrgId(req);
       const departmentId = typeof req.query.department_id === 'string' ? req.query.department_id : null;
 
       if (!departmentId) {
         res.status(400).json({ success: false, error: 'department_id обязателен' });
         return;
+      }
+
+      // Если org не определён (super_admin), берём из отдела
+      if (!organizationId) {
+        const { data: dept } = await supabase.from('org_departments').select('organization_id').eq('id', departmentId).single();
+        organizationId = dept?.organization_id;
       }
 
       let query = supabase
@@ -1082,12 +1360,7 @@ export const skudController = {
    */
   async saveAccessPointSettings(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
-      const organizationId = getOrgId(req);
-
-      if (!organizationId) {
-        res.status(400).json({ success: false, error: 'Organization required' });
-        return;
-      }
+      let organizationId = getOrgId(req);
 
       const { department_id, settings } = req.body as {
         department_id: string;
@@ -1096,6 +1369,17 @@ export const skudController = {
 
       if (!department_id || !Array.isArray(settings)) {
         res.status(400).json({ success: false, error: 'department_id и settings обязательны' });
+        return;
+      }
+
+      // Если org не определён (super_admin без привязки), берём из отдела
+      if (!organizationId) {
+        const { data: dept } = await supabase.from('org_departments').select('organization_id').eq('id', department_id).single();
+        organizationId = dept?.organization_id;
+      }
+
+      if (!organizationId) {
+        res.status(400).json({ success: false, error: 'Organization required' });
         return;
       }
 

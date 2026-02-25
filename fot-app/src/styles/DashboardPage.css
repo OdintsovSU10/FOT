@@ -161,8 +161,60 @@
   color: var(--text-secondary);
 }
 
+/* Content header with date */
+.content-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 20px;
+}
+
+.date-display {
+  font-size: 14px;
+  font-weight: 600;
+  text-transform: capitalize;
+}
+
+.date-subtitle {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  margin-top: 2px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Stats row — 5 cards */
+.stats-row {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 14px;
+  margin-bottom: 20px;
+}
+
+/* Main content grid */
+.main-grid {
+  display: grid;
+  grid-template-columns: 1fr 340px;
+  gap: 14px;
+}
+
 /* Responsive */
+@media (max-width: 1400px) {
+  .stats-row {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+@media (max-width: 1200px) {
+  .main-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 @media (max-width: 768px) {
+  .stats-row {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
   .dash-dept-trigger {
     min-width: 120px;
     max-width: 200px;
@@ -175,9 +227,19 @@
     right: 0;
     left: auto;
   }
+
+  .content-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
 }
 
 @media (max-width: 430px) {
+  .stats-row {
+    grid-template-columns: 1fr;
+  }
+
   .dash-dept-trigger {
     min-width: 100px;
     max-width: 160px;
@@ -192,5 +254,9 @@
 
   .dash-dept-menu--center {
     min-width: 280px;
+  }
+
+  .main-grid {
+    gap: 12px;
   }
 }

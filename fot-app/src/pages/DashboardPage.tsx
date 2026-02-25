@@ -1,15 +1,18 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { ChevronDown, Search, Building2 } from 'lucide-react';
+import { ChevronDown, Search, Building2, LogOut } from 'lucide-react';
 import { StatCard } from '../components/ui/StatCard';
 import { ActivityList } from '../components/dashboard/ActivityList';
+import { AnalyticsRow } from '../components/dashboard/AnalyticsRow';
+import { DashboardSidebar } from '../components/dashboard/DashboardSidebar';
 import { usePresence } from '../hooks/usePresence';
+import { useDashboardStats } from '../hooks/useDashboardStats';
 import { apiClient } from '../api/client';
 import {
   UsersIcon,
   MapPinIcon,
   CheckCircleIcon,
-  ChartIcon,
+  ClockIcon,
 } from '../components/ui/Icons';
 import '../styles/DashboardPage.css';
 
@@ -35,6 +38,16 @@ const flattenDbTree = (nodes: IDbDepartment[], level = 0): IDeptFlatOption[] => 
   return result;
 };
 
+const getWeekInfo = (): { weekNumber: number; workDay: number } => {
+  const now = new Date();
+  const start = new Date(now.getFullYear(), 0, 1);
+  const diff = now.getTime() - start.getTime();
+  const weekNumber = Math.ceil((diff / 86400000 + start.getDay() + 1) / 7);
+  const day = now.getDay();
+  const workDay = day === 0 ? 0 : day === 6 ? 0 : day;
+  return { weekNumber, workDay };
+};
+
 export const DashboardPage: React.FC = () => {
   const today = new Date().toLocaleDateString('ru-RU', {
     weekday: 'long',
@@ -42,6 +55,7 @@ export const DashboardPage: React.FC = () => {
     month: 'long',
     year: 'numeric',
   });
+  const { weekNumber, workDay } = useMemo(() => getWeekInfo(), []);
 
   // Department selector
   const [searchParams, setSearchParams] = useSearchParams();
@@ -81,8 +95,9 @@ export const DashboardPage: React.FC = () => {
     return deptOptions.filter(d => d.name.toLowerCase().includes(q));
   }, [deptOptions, deptSearchQuery]);
 
-  // Presence data
+  // Data
   const { employees, loading } = usePresence(selectedDeptId);
+  const { stats, loading: statsLoading } = useDashboardStats(selectedDeptId);
 
   const onlineCount = useMemo(
     () => employees.filter(e => e.status === 'online').length,
@@ -154,37 +169,60 @@ export const DashboardPage: React.FC = () => {
       ) : (
         <>
           <div className="content-header">
-            <div className="date-display">{today}</div>
+            <div>
+              <div className="date-display">{today}</div>
+              <div className="date-subtitle">Неделя {weekNumber} · Рабочий день {workDay}/5</div>
+            </div>
             {deptSelector}
           </div>
-          <div className="stats-grid">
+
+          <div className="stats-row">
             <StatCard
               label="Всего сотрудников"
               value={employees.length > 0 ? String(employees.length) : '—'}
               icon={<UsersIcon />}
               iconType="blue"
+              change="Без изменений"
+              changeType="neutral"
             />
             <StatCard
               label="На работе"
               value={onlineCount > 0 ? String(onlineCount) : '—'}
               icon={<MapPinIcon />}
               iconType="green"
+              change={stats && stats.lateYesterday !== undefined ? `${onlineCount > 0 ? '+' : ''}${onlineCount} сегодня` : undefined}
+              changeType="positive"
             />
             <StatCard
               label="Ушли"
               value={offlineCount > 0 ? String(offlineCount) : '—'}
-              icon={<CheckCircleIcon />}
-              iconType="orange"
+              icon={<LogOut size={18} />}
+              iconType="red"
+              change={offlineCount === 0 ? 'Никто не ушёл' : undefined}
+              changeType="neutral"
             />
             <StatCard
               label="Присутствие"
               value={employees.length > 0 ? `${presencePercent}%` : '—'}
-              icon={<ChartIcon />}
-              iconType="blue"
+              icon={<CheckCircleIcon />}
+              iconType="green"
+            />
+            <StatCard
+              label="Опоздания сегодня"
+              value={stats ? String(stats.lateToday) : '—'}
+              icon={<ClockIcon />}
+              iconType="orange"
+              change={stats ? `${stats.lateToday > stats.lateYesterday ? '+' : ''}${stats.lateToday - stats.lateYesterday} к вчера` : undefined}
+              changeType={stats ? (stats.lateToday > stats.lateYesterday ? 'negative' : stats.lateToday < stats.lateYesterday ? 'positive' : 'neutral') : 'neutral'}
             />
           </div>
 
-          <ActivityList employees={employees} loading={loading} />
+          {stats && !statsLoading && <AnalyticsRow stats={stats} />}
+
+          <div className="main-grid">
+            <ActivityList employees={employees} loading={loading} />
+            {stats && !statsLoading && <DashboardSidebar stats={stats} />}
+          </div>
         </>
       )}
     </>

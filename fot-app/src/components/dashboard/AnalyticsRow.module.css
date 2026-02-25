@@ -1,0 +1,265 @@
+.row {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 14px;
+  margin-bottom: 20px;
+}
+
+.card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 18px;
+}
+
+.title {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.title svg {
+  width: 16px;
+  height: 16px;
+  color: var(--text-tertiary);
+}
+
+/* Punctuality */
+.punctChart {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+
+.ring {
+  width: 100px;
+  height: 100px;
+  position: relative;
+  flex-shrink: 0;
+}
+
+.ring svg {
+  transform: rotate(-90deg);
+}
+
+.ringValue {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  text-align: center;
+}
+
+.ringValue span {
+  font-size: 22px;
+  font-weight: 700;
+  display: block;
+}
+
+.ringValue small {
+  font-size: 10px;
+  color: var(--text-tertiary);
+}
+
+.legend {
+  flex: 1;
+}
+
+.legendItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+
+.legendItem:last-child {
+  border-bottom: none;
+}
+
+.legendLabel {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-secondary);
+}
+
+.legendDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+.legendDot.green { background: var(--success); }
+.legendDot.orange { background: var(--warning); }
+.legendDot.red { background: var(--error); }
+
+.legendVal {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Average arrival bars */
+.bars {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.barRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.barLabel {
+  width: 24px;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  text-align: right;
+  flex-shrink: 0;
+}
+
+.barTrack {
+  flex: 1;
+  height: 24px;
+  background: var(--bg-tertiary);
+  border-radius: 4px;
+  position: relative;
+  overflow: hidden;
+}
+
+.barFill {
+  height: 100%;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  padding-left: 8px;
+  transition: width 0.4s ease;
+}
+
+.barFill.early {
+  background: var(--success-muted);
+  border: 1px solid rgba(34, 197, 94, 0.3);
+}
+
+.barFill.ontime {
+  background: var(--primary-light, rgba(59, 130, 246, 0.15));
+  border: 1px solid rgba(59, 130, 246, 0.3);
+}
+
+.barFill.late {
+  background: var(--error-muted, rgba(239, 68, 68, 0.1));
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.barText {
+  font-size: 11px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.barFill.early .barText { color: var(--success); }
+.barFill.ontime .barText { color: var(--primary); }
+.barFill.late .barText { color: var(--error); }
+
+.barEmpty {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  padding-left: 8px;
+  line-height: 24px;
+}
+
+/* Risks */
+.risksList {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.riskItem {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  background: var(--bg-tertiary);
+  border-radius: 8px;
+  border-left: 3px solid;
+}
+
+.riskItem.high { border-left-color: var(--error); }
+.riskItem.medium { border-left-color: var(--warning); }
+
+.riskAvatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  background: var(--bg-elevated);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+.riskInfo {
+  flex: 1;
+  min-width: 0;
+}
+
+.riskName {
+  font-size: 12px;
+  font-weight: 600;
+  margin-bottom: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.riskReason {
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+.riskBadge {
+  font-size: 10px;
+  font-weight: 500;
+  padding: 4px 8px;
+  border-radius: 4px;
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.riskBadge.high {
+  background: var(--error-muted, rgba(239, 68, 68, 0.1));
+  color: var(--error);
+}
+
+.riskBadge.medium {
+  background: var(--warning-muted);
+  color: var(--warning);
+}
+
+.empty {
+  text-align: center;
+  padding: 24px 0;
+  color: var(--text-tertiary);
+  font-size: 12px;
+}
+
+@media (max-width: 1400px) {
+  .row { grid-template-columns: 1fr 1fr; }
+}
+
+@media (max-width: 768px) {
+  .row { grid-template-columns: 1fr; }
+  .punctChart { flex-direction: column; align-items: flex-start; }
+}

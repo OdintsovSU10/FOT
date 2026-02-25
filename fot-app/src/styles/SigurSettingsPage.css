@@ -6,12 +6,45 @@
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  margin-bottom: 1.5rem;
+  margin-bottom: 0.75rem;
 }
 
 .sigur-header h1 {
   margin: 0;
   font-size: 1.25rem;
+}
+
+/* Tabs */
+.sigur-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 1rem;
+}
+
+.sigur-tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0.5rem 0.875rem;
+  background: var(--surface-hover);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  transition: all 0.15s;
+}
+
+.sigur-tab:hover {
+  background: var(--surface-elevated);
+  color: var(--text-primary);
+}
+
+.sigur-tab.active {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #fff;
 }
 
 /* Секция */
@@ -488,4 +521,162 @@
   margin-top: 0.25rem;
   font-size: 0.8rem;
   color: var(--text-secondary, #64748b);
+}
+
+/* Точки доступа */
+.sigur-ap-dept-selector {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.sigur-ap-dept-selector label {
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.sigur-ap-dept-dropdown {
+  position: relative;
+}
+
+.sigur-ap-dept-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0.375rem 0.625rem;
+  background: var(--surface-hover);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-size: 0.8125rem;
+  cursor: pointer;
+  min-width: 200px;
+  max-width: 400px;
+  transition: border-color 0.15s;
+}
+
+.sigur-ap-dept-trigger:hover {
+  border-color: var(--primary);
+}
+
+.sigur-ap-dept-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 50;
+  min-width: 100%;
+  max-width: 400px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+  overflow: hidden;
+}
+
+.sigur-ap-dept-search-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-tertiary);
+}
+
+.sigur-ap-dept-search-wrap input {
+  flex: 1;
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 0.8125rem;
+  outline: none;
+}
+
+.sigur-ap-dept-list {
+  max-height: 240px;
+  overflow-y: auto;
+  padding: 4px 0;
+}
+
+.sigur-ap-dept-option {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 6px 12px;
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 0.8125rem;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: background 0.1s;
+}
+
+.sigur-ap-dept-option:hover {
+  background: var(--surface-hover);
+}
+
+.sigur-ap-dept-option.active {
+  background: rgba(59, 130, 246, 0.1);
+  color: var(--primary);
+  font-weight: 500;
+}
+
+.sigur-ap-dept-empty {
+  padding: 12px;
+  text-align: center;
+  font-size: 0.8125rem;
+  color: var(--text-tertiary);
+}
+
+.sigur-btn-saved {
+  background: #22c55e !important;
+  border-color: #22c55e !important;
+}
+
+.sigur-ap-type-btn {
+  padding: 0.25rem 0.625rem;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  cursor: pointer;
+  font-size: 0.75rem;
+  transition: all 0.15s;
+}
+
+.sigur-ap-type-btn.external {
+  background: rgba(34, 197, 94, 0.1);
+  color: #22c55e;
+  border-color: rgba(34, 197, 94, 0.3);
+}
+
+.sigur-ap-type-btn.external:hover {
+  background: rgba(34, 197, 94, 0.2);
+}
+
+.sigur-ap-type-btn.internal {
+  background: rgba(249, 115, 22, 0.1);
+  color: #f97316;
+  border-color: rgba(249, 115, 22, 0.3);
+}
+
+.sigur-ap-type-btn.internal:hover {
+  background: rgba(249, 115, 22, 0.2);
+}
+
+.sigur-ap-type-label {
+  font-size: 0.75rem;
+  color: var(--text-tertiary);
+}
+
+.sigur-ap-type-label.external {
+  color: #22c55e;
+}
+
+.sigur-ap-type-label.internal {
+  color: #f97316;
 }

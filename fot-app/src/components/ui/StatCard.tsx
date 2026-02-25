@@ -6,9 +6,9 @@ interface IStatCardProps {
   label: string;
   value: string;
   change?: string;
-  changeType?: 'positive' | 'negative';
+  changeType?: 'positive' | 'negative' | 'neutral';
   icon: ReactNode;
-  iconType: 'blue' | 'green' | 'orange';
+  iconType: 'blue' | 'green' | 'orange' | 'red';
 }
 
 export const StatCard: FC<IStatCardProps> = ({
@@ -29,7 +29,7 @@ export const StatCard: FC<IStatCardProps> = ({
     <div className={styles.value}>{value}</div>
     {change && (
       <div className={`${styles.change} ${styles[changeType]}`}>
-        {changeType === 'positive' ? <TrendUpIcon /> : <TrendDownIcon />}
+        {changeType === 'positive' ? <TrendUpIcon /> : changeType === 'negative' ? <TrendDownIcon /> : null}
         {change}
       </div>
     )}

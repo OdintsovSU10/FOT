@@ -1,5 +1,5 @@
 import { apiClient } from '../api/client';
-import type { SkudEvent, SkudDailySummary, IEmployeePresence, IAccessPointSetting } from '../types';
+import type { SkudEvent, SkudDailySummary, IEmployeePresence, IAccessPointSetting, IDashboardStats } from '../types';
 
 interface ApiResponse<T> {
   success: boolean;
@@ -23,7 +23,7 @@ interface SkudFilters {
 }
 
 export const skudService = {
-  async getEvents(filters?: SkudFilters): Promise<SkudEvent[]> {
+  async getEvents(filters?: SkudFilters, signal?: AbortSignal): Promise<SkudEvent[]> {
     const params = new URLSearchParams();
     if (filters?.startDate) params.append('startDate', filters.startDate);
     if (filters?.endDate) params.append('endDate', filters.endDate);
@@ -33,7 +33,7 @@ export const skudService = {
     if (filters?.search) params.append('search', filters.search);
 
     const query = params.toString();
-    const response = await apiClient.get<ApiResponse<SkudEvent[]>>(`/skud/events${query ? `?${query}` : ''}`);
+    const response = await apiClient.get<ApiResponse<SkudEvent[]>>(`/skud/events${query ? `?${query}` : ''}`, { signal });
     return response.data || [];
   },
 
@@ -48,10 +48,10 @@ export const skudService = {
     return response.data || [];
   },
 
-  async getDailySummary(date: string, organizationId?: string): Promise<SkudDailySummary[]> {
+  async getDailySummary(date: string, organizationId?: string, signal?: AbortSignal): Promise<SkudDailySummary[]> {
     const params = new URLSearchParams({ date });
     if (organizationId) params.append('organization_id', organizationId);
-    const response = await apiClient.get<ApiResponse<SkudDailySummary[]>>(`/skud/daily-summary?${params.toString()}`);
+    const response = await apiClient.get<ApiResponse<SkudDailySummary[]>>(`/skud/daily-summary?${params.toString()}`, { signal });
     return response.data || [];
   },
 
@@ -143,6 +143,14 @@ export const skudService = {
       department_id: departmentId,
       settings,
     });
+  },
+
+  async getDashboardStats(departmentId: string, signal?: AbortSignal): Promise<IDashboardStats> {
+    const response = await apiClient.get<ApiResponse<IDashboardStats>>(
+      `/skud/dashboard-stats?department_id=${departmentId}`,
+      { signal },
+    );
+    return response.data;
   },
 
   async exportEvents(filters?: SkudFilters): Promise<Blob> {

@@ -1,13 +1,12 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { Search, X, HardDrive, RefreshCw, AlertCircle, Save, Check, ChevronDown } from 'lucide-react';
+import { Search, X, HardDrive, RefreshCw, AlertCircle } from 'lucide-react';
 import { skudService } from '../../services/skudService';
-import { structureApi } from '../../api/structure';
 import { adminService } from '../../services/adminService';
 import { useAuth } from '../../contexts/AuthContext';
-import type { SkudEvent, SkudDailySummary, Organization, OrgDepartmentNode, IAccessPointSetting } from '../../types';
+import type { SkudEvent, SkudDailySummary, Organization } from '../../types';
 import '../../styles/SkudSupabasePage.css';
 
-type TabId = 'events' | 'summary' | 'access-points';
+type TabId = 'events' | 'summary';
 
 interface ITab {
   id: TabId;
@@ -17,7 +16,6 @@ interface ITab {
 const TABS: ITab[] = [
   { id: 'events', label: 'События' },
   { id: 'summary', label: 'Сводка' },
-  { id: 'access-points', label: 'Точки доступа' },
 ];
 
 const today = () => {
@@ -37,19 +35,9 @@ const formatCellValue = (value: unknown): string => {
   return String(value);
 };
 
-const flattenDepts = (nodes: OrgDepartmentNode[], depth = 0): { id: string; name: string; depth: number }[] => {
-  const result: { id: string; name: string; depth: number }[] = [];
-  for (const n of nodes) {
-    result.push({ id: n.id, name: n.name, depth });
-    if (n.children?.length) result.push(...flattenDepts(n.children, depth + 1));
-  }
-  return result;
-};
-
 export const SkudSupabasePage: React.FC = () => {
   const { hasPosition } = useAuth();
   const isSuperAdmin = hasPosition('super_admin');
-  const canEdit = hasPosition('manager') || hasPosition('owner') || isSuperAdmin;
 
   const [activeTab, setActiveTab] = useState<TabId>('events');
   const [loading, setLoading] = useState(false);
@@ -57,6 +45,7 @@ export const SkudSupabasePage: React.FC = () => {
   const [searchInput, setSearchInput] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const debounceRef = useRef<ReturnType<typeof setTimeout>>();
+  const abortRef = useRef<AbortController | null>(null);
 
   // Даты
   const [startDate, setStartDate] = useState(monthStart);
@@ -69,59 +58,12 @@ export const SkudSupabasePage: React.FC = () => {
   // Данные
   const [events, setEvents] = useState<SkudEvent[]>([]);
   const [summary, setSummary] = useState<SkudDailySummary[]>([]);
-  const [accessPoints, setAccessPoints] = useState<string[]>([]);
-
-  // Настройки точек доступа
-  const [departments, setDepartments] = useState<{ id: string; name: string; depth: number }[]>([]);
-  const [selectedDeptId, setSelectedDeptId] = useState('');
-  const [apSettings, setApSettings] = useState<Map<string, boolean>>(new Map());
-  const [savingSettings, setSavingSettings] = useState(false);
-  const [settingsSaved, setSettingsSaved] = useState(false);
-  const [deptDropdownOpen, setDeptDropdownOpen] = useState(false);
-  const [deptSearch, setDeptSearch] = useState('');
-  const deptDropdownRef = useRef<HTMLDivElement>(null);
 
   // Загрузка организаций
   useEffect(() => {
     if (!isSuperAdmin) return;
     adminService.getOrganizations().then(setOrganizations).catch(() => {});
   }, [isSuperAdmin]);
-
-  // Загрузка отделов
-  useEffect(() => {
-    structureApi.getTree().then(res => {
-      if (res.success && res.data) {
-        setDepartments(flattenDepts(res.data.departments));
-      }
-    }).catch(() => {});
-  }, []);
-
-  // Закрытие dropdown при клике вне
-  useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (deptDropdownRef.current && !deptDropdownRef.current.contains(e.target as Node)) {
-        setDeptDropdownOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
-
-  // Загрузка настроек при выборе отдела
-  useEffect(() => {
-    if (!selectedDeptId) {
-      setApSettings(new Map());
-      return;
-    }
-    skudService.getAccessPointSettings(selectedDeptId).then(settings => {
-      const map = new Map<string, boolean>();
-      for (const s of settings) {
-        map.set(s.access_point_name, s.is_internal);
-      }
-      setApSettings(map);
-      setSettingsSaved(false);
-    }).catch(() => {});
-  }, [selectedDeptId]);
 
   // Debounce поиска (для табa events — серверный поиск)
   const handleSearchChange = useCallback((value: string) => {
@@ -130,7 +72,17 @@ export const SkudSupabasePage: React.FC = () => {
     debounceRef.current = setTimeout(() => setSearchQuery(value), 400);
   }, []);
 
+  const cancelLoading = useCallback(() => {
+    if (abortRef.current) {
+      abortRef.current.abort();
+      abortRef.current = null;
+    }
+  }, []);
+
   const loadEvents = useCallback(async () => {
+    cancelLoading();
+    const controller = new AbortController();
+    abortRef.current = controller;
     setLoading(true);
     setError(null);
     try {
@@ -139,55 +91,52 @@ export const SkudSupabasePage: React.FC = () => {
         endDate,
         organizationId: orgFilter || undefined,
         search: searchQuery || undefined,
-      });
+      }, controller.signal);
       setEvents(data);
     } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') return;
       setError(err instanceof Error ? err.message : 'Ошибка загрузки');
       setEvents([]);
     } finally {
-      setLoading(false);
+      if (!controller.signal.aborted) setLoading(false);
     }
-  }, [startDate, endDate, orgFilter, searchQuery]);
+  }, [startDate, endDate, orgFilter, searchQuery, cancelLoading]);
 
   const loadSummary = useCallback(async () => {
+    cancelLoading();
+    const controller = new AbortController();
+    abortRef.current = controller;
     setLoading(true);
     setError(null);
     try {
-      const data = await skudService.getDailySummary(startDate, orgFilter || undefined);
+      const data = await skudService.getDailySummary(startDate, orgFilter || undefined, controller.signal);
       setSummary(data);
     } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') return;
       setError(err instanceof Error ? err.message : 'Ошибка загрузки');
       setSummary([]);
     } finally {
-      setLoading(false);
+      if (!controller.signal.aborted) setLoading(false);
     }
-  }, [startDate, orgFilter]);
-
-  const loadAccessPoints = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const data = await skudService.getAccessPoints(orgFilter || undefined);
-      setAccessPoints(data);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Ошибка загрузки');
-      setAccessPoints([]);
-    } finally {
-      setLoading(false);
-    }
-  }, [orgFilter]);
+  }, [startDate, orgFilter, cancelLoading]);
 
   const loadData = useCallback(() => {
     if (activeTab === 'events') loadEvents();
-    else if (activeTab === 'summary') loadSummary();
-    else loadAccessPoints();
-  }, [activeTab, loadEvents, loadSummary, loadAccessPoints]);
+    else loadSummary();
+  }, [activeTab, loadEvents, loadSummary]);
 
+  // Для events — не загружать автоматически, только при наличии фильтра
   useEffect(() => {
+    if (activeTab === 'events') {
+      if (!searchQuery && !orgFilter) {
+        setEvents([]);
+        return;
+      }
+    }
     loadData();
-  }, [loadData]);
+  }, [loadData, activeTab, searchQuery, orgFilter]);
 
-  // Данные для таблицы (для events/summary)
+  // Данные для таблицы
   const tableData: Record<string, unknown>[] = useMemo(() => {
     if (activeTab === 'events') return events as unknown as Record<string, unknown>[];
     if (activeTab === 'summary') return summary as unknown as Record<string, unknown>[];
@@ -203,7 +152,7 @@ export const SkudSupabasePage: React.FC = () => {
     return Array.from(keys);
   }, [tableData]);
 
-  // Для табов summary — локальная фильтрация
+  // Для summary — локальная фильтрация
   const displayData = useMemo(() => {
     if (activeTab === 'events') return tableData;
     if (!searchInput.trim()) return tableData;
@@ -224,158 +173,13 @@ export const SkudSupabasePage: React.FC = () => {
     setSearchQuery('');
   };
 
-  const filteredDepts = useMemo(() => {
-    if (!deptSearch.trim()) return departments;
-    const q = deptSearch.toLowerCase();
-    return departments.filter(d => d.name.toLowerCase().includes(q));
-  }, [departments, deptSearch]);
-
-  const selectedDeptName = useMemo(() => {
-    return departments.find(d => d.id === selectedDeptId)?.name || '';
-  }, [departments, selectedDeptId]);
-
-  const selectDept = (id: string) => {
-    setSelectedDeptId(id);
-    setDeptDropdownOpen(false);
-    setDeptSearch('');
-  };
-
-  const toggleApInternal = (apName: string) => {
-    setApSettings(prev => {
-      const next = new Map(prev);
-      next.set(apName, !next.get(apName));
-      return next;
-    });
-    setSettingsSaved(false);
-  };
-
-  const handleSaveSettings = async () => {
-    if (!selectedDeptId) return;
-    setSavingSettings(true);
-    try {
-      const settings: IAccessPointSetting[] = accessPoints.map(ap => ({
-        access_point_name: ap,
-        is_internal: apSettings.get(ap) || false,
-      }));
-      await skudService.saveAccessPointSettings(selectedDeptId, settings);
-      setSettingsSaved(true);
-      setTimeout(() => setSettingsSaved(false), 3000);
-    } catch {
-      setError('Ошибка сохранения настроек');
-    } finally {
-      setSavingSettings(false);
-    }
-  };
-
-  const renderAccessPointsTab = () => (
-    <div className="skud-ap-settings">
-      <div className="skud-ap-dept-selector">
-        <label>Отдел:</label>
-        <div className="skud-ap-dept-dropdown" ref={deptDropdownRef}>
-          <button
-            className="skud-ap-dept-trigger"
-            onClick={() => setDeptDropdownOpen(!deptDropdownOpen)}
-          >
-            <span>{selectedDeptName || '— Выберите отдел —'}</span>
-            <ChevronDown size={14} />
-          </button>
-          {deptDropdownOpen && (
-            <div className="skud-ap-dept-menu">
-              <div className="skud-ap-dept-search-wrap">
-                <Search size={14} />
-                <input
-                  type="text"
-                  placeholder="Поиск отдела..."
-                  value={deptSearch}
-                  onChange={e => setDeptSearch(e.target.value)}
-                  autoFocus
-                />
-              </div>
-              <div className="skud-ap-dept-list">
-                <button
-                  className={`skud-ap-dept-option ${!selectedDeptId ? 'active' : ''}`}
-                  onClick={() => selectDept('')}
-                >
-                  — Все —
-                </button>
-                {filteredDepts.map(d => (
-                  <button
-                    key={d.id}
-                    className={`skud-ap-dept-option ${selectedDeptId === d.id ? 'active' : ''}`}
-                    style={{ paddingLeft: `${12 + d.depth * 16}px` }}
-                    onClick={() => selectDept(d.id)}
-                  >
-                    {d.name}
-                  </button>
-                ))}
-                {filteredDepts.length === 0 && (
-                  <div className="skud-ap-dept-empty">Не найдено</div>
-                )}
-              </div>
-            </div>
-          )}
-        </div>
-        {selectedDeptId && canEdit && (
-          <button
-            className={`skud-ap-save-btn ${settingsSaved ? 'saved' : ''}`}
-            onClick={handleSaveSettings}
-            disabled={savingSettings}
-          >
-            {settingsSaved ? <><Check size={14} /> Сохранено</> : <><Save size={14} /> Сохранить</>}
-          </button>
-        )}
-      </div>
-
-      {accessPoints.length === 0 ? (
-        <div className="skud-db-empty">Нет точек доступа</div>
-      ) : (
-        <div className="skud-db-table-wrap">
-          <table className="skud-db-table">
-            <thead>
-              <tr>
-                <th className="skud-db-th-num">#</th>
-                <th>Точка доступа</th>
-                <th>Тип</th>
-              </tr>
-            </thead>
-            <tbody>
-              {accessPoints.map((ap, idx) => {
-                const isInternal = apSettings.get(ap) || false;
-                return (
-                  <tr key={ap}>
-                    <td className="skud-db-td-num">{idx + 1}</td>
-                    <td>{ap}</td>
-                    <td>
-                      {selectedDeptId && canEdit ? (
-                        <button
-                          className={`skud-ap-type-btn ${isInternal ? 'internal' : 'external'}`}
-                          onClick={() => toggleApInternal(ap)}
-                        >
-                          {isInternal ? 'Внутренняя' : 'Внешняя'}
-                        </button>
-                      ) : (
-                        <span className={`skud-ap-type-label ${isInternal ? 'internal' : 'external'}`}>
-                          {selectedDeptId ? (isInternal ? 'Внутренняя' : 'Внешняя') : '—'}
-                        </span>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </div>
-  );
-
   return (
     <div className="skud-db">
       <div className="skud-db-header">
         <div className="skud-db-title">
           <HardDrive size={22} />
           <h1>Просмотр СКУД (база)</h1>
-          {!loading && activeTab !== 'access-points' && tableData.length > 0 && (
+          {!loading && tableData.length > 0 && (
             <span className="skud-db-count">
               {activeTab !== 'events' && searchInput
                 ? `${displayData.length} / ${tableData.length}`
@@ -406,53 +210,49 @@ export const SkudSupabasePage: React.FC = () => {
         ))}
       </div>
 
-      {activeTab !== 'access-points' && (
-        <div className="skud-db-filters">
-          <div className="skud-db-dates">
-            <label>
-              С:
-              <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} />
-            </label>
-            <label>
-              По:
-              <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} />
-            </label>
+      <div className="skud-db-filters">
+        <div className="skud-db-dates">
+          <label>
+            С:
+            <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} />
+          </label>
+          <label>
+            По:
+            <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} />
+          </label>
+        </div>
+
+        {isSuperAdmin && organizations.length > 0 && (
+          <div className="skud-db-org-filter">
+            <select
+              value={orgFilter}
+              onChange={e => setOrgFilter(e.target.value)}
+              className="skud-db-org-select"
+            >
+              <option value="">Все организации</option>
+              {organizations.map(org => (
+                <option key={org.id} value={org.id}>{org.name}</option>
+              ))}
+            </select>
           </div>
+        )}
+      </div>
 
-          {isSuperAdmin && organizations.length > 0 && (
-            <div className="skud-db-org-filter">
-              <select
-                value={orgFilter}
-                onChange={e => setOrgFilter(e.target.value)}
-                className="skud-db-org-select"
-              >
-                <option value="">Все организации</option>
-                {organizations.map(org => (
-                  <option key={org.id} value={org.id}>{org.name}</option>
-                ))}
-              </select>
-            </div>
-          )}
-        </div>
-      )}
-
-      {activeTab !== 'access-points' && (
-        <div className="skud-db-search-wrap">
-          <Search size={16} className="skud-db-search-icon" />
-          <input
-            type="text"
-            placeholder={activeTab === 'events' ? 'Поиск по ФИО (все записи)...' : 'Поиск по всем полям...'}
-            value={searchInput}
-            onChange={e => handleSearchChange(e.target.value)}
-            className="skud-db-search-input"
-          />
-          {searchInput && (
-            <button className="skud-db-search-clear" onClick={clearSearch}>
-              <X size={14} />
-            </button>
-          )}
-        </div>
-      )}
+      <div className="skud-db-search-wrap">
+        <Search size={16} className="skud-db-search-icon" />
+        <input
+          type="text"
+          placeholder={activeTab === 'events' ? 'Поиск по ФИО (все записи)...' : 'Поиск по всем полям...'}
+          value={searchInput}
+          onChange={e => handleSearchChange(e.target.value)}
+          className="skud-db-search-input"
+        />
+        {searchInput && (
+          <button className="skud-db-search-clear" onClick={clearSearch}>
+            <X size={14} />
+          </button>
+        )}
+      </div>
 
       {error && (
         <div className="skud-db-error">
@@ -461,23 +261,20 @@ export const SkudSupabasePage: React.FC = () => {
         </div>
       )}
 
-      {activeTab === 'access-points' ? (
-        loading ? (
-          <div className="skud-db-loading">
-            <div className="spinner"></div>
-            <p>Загрузка из базы...</p>
-          </div>
-        ) : (
-          renderAccessPointsTab()
-        )
-      ) : loading ? (
+      {loading ? (
         <div className="skud-db-loading">
           <div className="spinner"></div>
           <p>Загрузка из базы...</p>
+          <button className="skud-db-cancel" onClick={() => { cancelLoading(); setLoading(false); }}>
+            <X size={14} />
+            Отменить
+          </button>
         </div>
       ) : displayData.length === 0 && !error ? (
         <div className="skud-db-empty">
-          {searchInput ? 'Ничего не найдено' : 'Нет данных за выбранный период'}
+          {activeTab === 'events' && !searchQuery && !orgFilter
+            ? 'Введите ФИО для поиска событий'
+            : searchInput ? 'Ничего не найдено' : 'Нет данных за выбранный период'}
         </div>
       ) : (
         <div className="skud-db-table-wrap">
