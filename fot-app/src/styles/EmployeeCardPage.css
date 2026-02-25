@@ -146,8 +146,33 @@
 /* Info Grid */
 .card-info-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  grid-template-columns: repeat(3, 1fr);
   gap: 12px;
+}
+
+.card-info-grid .info-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 16px;
+  background: var(--bg-tertiary);
+  border-radius: 10px;
+  border: 1px solid var(--border);
+}
+
+.card-info-grid .info-label {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.card-info-grid .info-value {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-primary);
+  word-break: break-word;
 }
 
 /* Edit form */
@@ -622,6 +647,10 @@
     grid-template-columns: 1fr 1fr;
   }
 
+  .card-info-grid .info-item {
+    padding: 14px;
+  }
+
   .card-history {
     padding: 16px;
   }
@@ -652,6 +681,11 @@
 
   .card-info-grid {
     grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  .card-info-grid .info-item {
+    padding: 12px;
   }
 
   .card-actions {

@@ -5,6 +5,7 @@
   max-width: 1200px;
   margin: 0 auto;
   padding: 28px;
+  overflow-x: hidden;
 }
 
 /* Back button */
@@ -479,7 +480,8 @@
   position: absolute;
   bottom: 2px;
   font-family: 'Space Mono', monospace;
-  font-size: 8px;
+  font-size: 10px;
+  font-weight: 500;
 }
 
 /* ==================== Timeline ==================== */
@@ -844,44 +846,211 @@
 
 @media (max-width: 430px) {
   .ec-content {
-    padding: 12px;
+    padding: 8px;
+  }
+  .ec-back-btn {
+    margin-bottom: 8px;
+    padding: 6px 8px;
+    font-size: 12px;
   }
   .ec-avatar {
-    width: 80px;
-    height: 80px;
-    font-size: 28px;
-    border-radius: 16px;
+    width: 72px;
+    height: 72px;
+    font-size: 24px;
+    border-radius: 14px;
   }
   .ec-avatar-status {
-    width: 16px;
-    height: 16px;
+    width: 14px;
+    height: 14px;
     bottom: 4px;
     right: 4px;
+    border-width: 2px;
+  }
+  .ec-profile {
+    margin-bottom: 14px;
+    gap: 12px;
   }
   .ec-profile-name {
-    font-size: 22px;
+    font-size: 20px;
+    letter-spacing: -0.3px;
   }
   .ec-profile-meta {
-    gap: 8px;
+    gap: 6px;
+    flex-direction: column;
+    align-items: center;
+  }
+  .ec-meta-item {
+    font-size: 12px;
+    gap: 6px;
+  }
+  .ec-meta-item.clickable {
+    padding: 4px 10px;
+  }
+  .ec-profile-id {
+    font-size: 10px;
+    padding: 4px 10px;
   }
   .ec-profile-actions {
     flex-direction: column;
     align-items: stretch;
+    margin-top: 4px;
+    gap: 8px;
   }
   .ec-action-btn {
     justify-content: center;
+    padding: 10px 14px;
+    font-size: 13px;
   }
   .ec-stats-row {
-    grid-template-columns: 1fr;
+    grid-template-columns: 1fr 1fr;
+    margin-bottom: 12px;
+    gap: 8px;
+  }
+  .ec-stat-card {
+    padding: 12px;
+  }
+  .ec-stat-header {
+    margin-bottom: 8px;
+  }
+  .ec-stat-label {
+    font-size: 11px;
+  }
+  .ec-stat-icon {
+    width: 30px;
+    height: 30px;
+    border-radius: 8px;
+  }
+  .ec-stat-icon svg {
+    width: 14px;
+    height: 14px;
   }
   .ec-stat-value {
-    font-size: 22px;
+    font-size: 20px;
+    margin-bottom: 2px;
+  }
+  .ec-stat-trend {
+    font-size: 10px;
+  }
+  .ec-tabs-container {
+    margin-bottom: 12px;
   }
   .ec-tabs {
     padding: 3px;
+    width: 100%;
   }
   .ec-tab {
-    padding: 8px 14px;
+    padding: 8px 12px;
     font-size: 12px;
+    flex: 1;
+    text-align: center;
+  }
+  .ec-card {
+    border-radius: 10px;
+  }
+  .ec-card-header {
+    padding: 12px 14px;
+  }
+  .ec-card-title {
+    font-size: 13px;
+    gap: 6px;
+  }
+  .ec-card-title svg {
+    width: 16px;
+    height: 16px;
+  }
+  .ec-calendar {
+    padding: 10px;
+  }
+  .ec-cal-header {
+    margin-bottom: 12px;
+  }
+  .ec-cal-month {
+    font-size: 13px;
+  }
+  .ec-cal-nav-btn {
+    width: 28px;
+    height: 28px;
+  }
+  .ec-cal-grid {
+    gap: 3px;
+  }
+  .ec-cal-day-header {
+    font-size: 10px;
+    padding: 4px 0;
+  }
+  .ec-cal-day {
+    font-size: 11px;
+    border-radius: 6px;
+  }
+  .ec-cal-day .ec-time-badge {
+    font-size: 8px;
+  }
+  .ec-timeline {
+    padding: 0 12px 12px;
+  }
+  .ec-tl-item {
+    padding: 10px 0;
+    gap: 10px;
+  }
+  .ec-tl-icon {
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+  }
+  .ec-tl-title {
+    font-size: 12px;
+  }
+  .ec-tl-meta {
+    font-size: 11px;
+  }
+  .ec-tl-time {
+    font-size: 11px;
+  }
+  .ec-weekly {
+    padding: 12px 14px;
+  }
+  .ec-weekly-title {
+    font-size: 11px;
+  }
+  .ec-weekly-bars {
+    height: 60px;
+    gap: 6px;
+  }
+  .ec-info-item {
+    padding: 10px 14px;
+  }
+  .ec-info-label {
+    font-size: 12px;
+  }
+  .ec-info-value {
+    font-size: 12px;
+  }
+  .ec-tab-content-full {
+    padding: 12px;
+    border-radius: 10px;
+  }
+  .ec-alerts-list {
+    padding: 8px;
+  }
+  .ec-alert-item {
+    padding: 10px;
+    gap: 8px;
+    border-radius: 8px;
+  }
+  .ec-alert-icon {
+    width: 28px;
+    height: 28px;
+  }
+  .ec-alert-title {
+    font-size: 11px;
+  }
+  .ec-alert-desc {
+    font-size: 10px;
+  }
+  .ec-badge-archived,
+  .ec-badge-fired {
+    font-size: 10px;
+    padding: 2px 6px;
+    margin-left: 6px;
   }
 }

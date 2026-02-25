@@ -39,6 +39,14 @@ const getTimelinePercent = (employee: IEmployeePresence): number => {
   return 0;
 };
 
+/** Форматирование минут вне офиса */
+const formatOutsideTime = (minutes: number): string => {
+  if (minutes < 1) return '0м';
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return h > 0 ? `${h}ч ${m}м` : `${m}м`;
+};
+
 /** Форматирование часов/минут из total_hours (число) */
 const formatWorkTime = (hours: number): string => {
   const h = Math.floor(hours);
@@ -128,6 +136,11 @@ const EmployeeRow: FC<{
       <div className={styles.times}>
         {workTime && <span className={`${styles.time} ${isOffline ? styles.timeStopped : ''}`}>{workTime}</span>}
         {isOffline && absentTime && <span className={styles.absentTime}>−{absentTime}</span>}
+        {employee.exit_count > 0 && (
+          <span className={styles.exitInfo}>
+            {employee.exit_count} вых. · {formatOutsideTime(employee.time_outside_minutes)}
+          </span>
+        )}
       </div>
     </div>
   );

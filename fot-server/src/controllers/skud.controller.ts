@@ -410,15 +410,31 @@ export const skudController = {
       };
 
       // Top late
+      const avgArrivalByEmp = new Map<number, number>();
+      const arrivalCountByEmp = new Map<number, number>();
+      for (const s of thisWeekAllSummaries) {
+        if (s.first_entry) {
+          const [h, m] = s.first_entry.split(':').map(Number);
+          const min = h * 60 + m;
+          avgArrivalByEmp.set(s.employee_id, (avgArrivalByEmp.get(s.employee_id) || 0) + min);
+          arrivalCountByEmp.set(s.employee_id, (arrivalCountByEmp.get(s.employee_id) || 0) + 1);
+        }
+      }
       const topLate = [...lateCountByEmp.entries()]
         .filter(([, count]) => count > 0)
         .sort((a, b) => b[1] - a[1])
         .slice(0, 5)
-        .map(([empId, lateCount]) => ({
-          employee_id: empId,
-          full_name: empNameMap.get(empId) || '',
-          lateCount,
-        }));
+        .map(([empId, lateCount]) => {
+          const totalMin = avgArrivalByEmp.get(empId) || 0;
+          const cnt = arrivalCountByEmp.get(empId) || 1;
+          const avg = Math.round(totalMin / cnt);
+          return {
+            employee_id: empId,
+            full_name: empNameMap.get(empId) || '',
+            lateCount,
+            avgArrival: `${String(Math.floor(avg / 60)).padStart(2, '0')}:${String(avg % 60).padStart(2, '0')}`,
+          };
+        });
 
       res.json({
         success: true,
@@ -1000,12 +1016,27 @@ export const skudController = {
         .order('event_time', { ascending: false });
 
       const latestEvent = new Map<number, { event_time: string; direction: string | null }>();
+      // Собираем ВСЕ внешние события по сотруднику (ASC для расчёта выходов)
+      const allExternalEvents = new Map<number, Array<{ event_time: string; direction: string | null }>>();
+
       for (const evt of eventsByEmpId || []) {
-        if (!evt.employee_id || latestEvent.has(evt.employee_id)) continue;
+        if (!evt.employee_id) continue;
         // Пропускаем события от внутренних точек доступа
         const internal = empInternalPoints.get(evt.employee_id);
         if (internal && evt.access_point && internal.has(evt.access_point)) continue;
-        latestEvent.set(evt.employee_id, { event_time: evt.event_time, direction: evt.direction });
+
+        if (!latestEvent.has(evt.employee_id)) {
+          latestEvent.set(evt.employee_id, { event_time: evt.event_time, direction: evt.direction });
+        }
+        if (!allExternalEvents.has(evt.employee_id)) {
+          allExternalEvents.set(evt.employee_id, []);
+        }
+        allExternalEvents.get(evt.employee_id)!.push({ event_time: evt.event_time, direction: evt.direction });
+      }
+
+      // eventsByEmpId отсортирован DESC — переворачиваем массивы в ASC
+      for (const events of allExternalEvents.values()) {
+        events.reverse();
       }
 
       // 2) Фоллбэк: если есть сотрудники без событий — ищем по ФИО
@@ -1037,12 +1068,18 @@ export const skudController = {
             continue;
           }
 
-          if (!latestEvent.has(empId)) {
-            // Пропускаем события от внутренних точек доступа
-            const internal = empInternalPoints.get(empId);
-            if (!(internal && evt.access_point && internal.has(evt.access_point))) {
+          // Пропускаем события от внутренних точек доступа
+          const internal = empInternalPoints.get(empId);
+          const isInternal = !!(internal && evt.access_point && internal.has(evt.access_point));
+
+          if (!isInternal) {
+            if (!latestEvent.has(empId)) {
               latestEvent.set(empId, { event_time: evt.event_time, direction: evt.direction });
             }
+            if (!allExternalEvents.has(empId)) {
+              allExternalEvents.set(empId, []);
+            }
+            allExternalEvents.get(empId)!.push({ event_time: evt.event_time, direction: evt.direction });
           }
           backfillPairs.push({ eventId: evt.id, employeeId: empId });
         }
@@ -1067,6 +1104,11 @@ export const skudController = {
         }
       }
 
+      // Пересортировка fallback-событий в ASC
+      for (const events of allExternalEvents.values()) {
+        events.sort((a, b) => a.event_time.localeCompare(b.event_time));
+      }
+
       // Загружаем daily summary за сегодня для total_hours и first_entry
       const { data: dailySummaries } = await supabase
         .from('skud_daily_summary')
@@ -1078,6 +1120,31 @@ export const skudController = {
       for (const s of dailySummaries || []) {
         summaryMap.set(s.employee_id, { first_entry: s.first_entry, total_hours: s.total_hours });
       }
+
+      // Хелпер: подсчёт выходов и времени вне офиса
+      const computeExitMetrics = (events: Array<{ event_time: string; direction: string | null }>) => {
+        let exitCount = 0;
+        let timeOutsideMs = 0;
+        let lastExitTime: Date | null = null;
+
+        for (const evt of events) {
+          if (evt.direction === 'exit') {
+            exitCount++;
+            lastExitTime = new Date(`${today}T${evt.event_time}`);
+          } else if (evt.direction === 'entry' && lastExitTime) {
+            const entryTime = new Date(`${today}T${evt.event_time}`);
+            timeOutsideMs += entryTime.getTime() - lastExitTime.getTime();
+            lastExitTime = null;
+          }
+        }
+
+        // Если сотрудник сейчас вне офиса — считаем до текущего момента
+        if (lastExitTime) {
+          timeOutsideMs += Date.now() - lastExitTime.getTime();
+        }
+
+        return { exit_count: exitCount, time_outside_minutes: Math.round(timeOutsideMs / 60_000) };
+      };
 
       // Формируем ответ
       const result = employees.map(emp => {
@@ -1091,6 +1158,8 @@ export const skudController = {
         }
 
         const summary = summaryMap.get(emp.id);
+        const empEvents = allExternalEvents.get(emp.id) || [];
+        const { exit_count, time_outside_minutes } = computeExitMetrics(empEvents);
 
         return {
           employee_id: emp.id,
@@ -1101,6 +1170,8 @@ export const skudController = {
           since,
           first_entry: summary?.first_entry || null,
           total_hours: summary?.total_hours || null,
+          exit_count,
+          time_outside_minutes,
         };
       });
 

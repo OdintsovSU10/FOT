@@ -145,6 +145,8 @@
   padding: 4px 8px;
   border-radius: 4px;
   flex-shrink: 0;
+  min-width: 64px;
+  text-align: center;
 }
 
 .status.in {
@@ -190,6 +192,7 @@
   align-items: flex-end;
   flex-shrink: 0;
   gap: 2px;
+  min-width: 64px;
 }
 
 .time {
@@ -207,6 +210,13 @@
 .absentTime {
   font-size: 11px;
   color: var(--error);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.exitInfo {
+  font-size: 11px;
+  color: var(--text-tertiary);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }

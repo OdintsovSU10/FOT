@@ -120,6 +120,7 @@ const TopLateCard: FC<{ data: IDashboardStats['topLate'] }> = ({ data }) => (
           <div className={styles.lateAvatar}>{getInitials(item.full_name)}</div>
           <div className={styles.lateInfo}>
             <div className={styles.lateName}>{item.full_name}</div>
+            <div className={styles.lateArrival}>~{item.avgArrival}</div>
           </div>
           <span className={styles.lateCount}>{item.lateCount}×</span>
         </div>

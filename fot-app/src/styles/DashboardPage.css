@@ -16,7 +16,7 @@
   cursor: pointer;
   transition: border-color var(--transition);
   min-width: 160px;
-  max-width: 280px;
+  max-width: 340px;
 }
 
 .dash-dept-trigger:hover {
@@ -193,8 +193,9 @@
 /* Main content grid */
 .main-grid {
   display: grid;
-  grid-template-columns: 1fr 340px;
+  grid-template-columns: 1fr minmax(0, 340px);
   gap: 14px;
+  overflow: hidden;
 }
 
 /* Responsive */

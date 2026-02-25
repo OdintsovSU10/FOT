@@ -178,6 +178,8 @@ export interface IEmployeePresence {
   since: string | null;
   first_entry: string | null;
   total_hours: number | null;
+  exit_count: number;
+  time_outside_minutes: number;
 }
 
 export interface SkudDailySummary {
@@ -412,7 +414,7 @@ export interface IDashboardStats {
     thisWeek: { attendanceRate: number; avgArrival: string; avgHours: number; lateCount: number };
     lastWeek: { attendanceRate: number; avgArrival: string; avgHours: number; lateCount: number };
   } | null;
-  topLate: Array<{ employee_id: number; full_name: string; lateCount: number }>;
+  topLate: Array<{ employee_id: number; full_name: string; lateCount: number; avgArrival: string }>;
 }
 
 // Элемент дерева организационной структуры

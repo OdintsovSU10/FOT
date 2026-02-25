@@ -48,7 +48,17 @@ const timeToSeconds = (time: string): number => {
   return h * 3600 + m * 60 + s;
 };
 
-const calculateWorkMinutes = (events: SkudEvent[], internalPoints: Set<string>): number => {
+const isToday = (dateStr: string): boolean => {
+  const now = new Date();
+  return dateStr === now.toISOString().slice(0, 10);
+};
+
+const nowSeconds = (): number => {
+  const now = new Date();
+  return now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds();
+};
+
+const calculateWorkMinutes = (events: SkudEvent[], internalPoints: Set<string>, dateStr?: string): number => {
   const filtered = events.filter(e => !e.access_point || !internalPoints.has(e.access_point));
   const sorted = [...filtered].sort((a, b) => a.event_time.localeCompare(b.event_time));
   let total = 0;
@@ -63,6 +73,11 @@ const calculateWorkMinutes = (events: SkudEvent[], internalPoints: Set<string>):
       total += timeToSeconds(ev.event_time) - entryTime;
       entryTime = null;
     }
+  }
+
+  // Если последний вход без выхода и это сегодня — считаем до текущего момента
+  if (entryTime !== null && dateStr && isToday(dateStr)) {
+    total += nowSeconds() - entryTime;
   }
 
   return total;
@@ -108,15 +123,28 @@ const groupByDay = (events: SkudEvent[], internalPoints: Set<string>): IDayGroup
     const extEvents = dayEvents.filter(e => !e.access_point || !internalPoints.has(e.access_point));
     const entries = extEvents.filter(e => e.direction === 'entry');
     const exits = extEvents.filter(e => e.direction === 'exit');
+
+    // Определяем последнее внешнее событие
+    const lastExtEvent = extEvents.length > 0 ? extEvents[extEvents.length - 1] : null;
+    const stillOnSite = lastExtEvent?.direction === 'entry' && isToday(date);
+
+    // Если человек ещё на объекте (сегодня, последний вход без выхода) — span до текущего момента
+    let spanSeconds = 0;
+    if (entries.length > 0) {
+      if (stillOnSite) {
+        spanSeconds = nowSeconds() - timeToSeconds(entries[0].event_time);
+      } else if (exits.length > 0) {
+        spanSeconds = timeToSeconds(exits[exits.length - 1].event_time) - timeToSeconds(entries[0].event_time);
+      }
+    }
+
     groups.push({
       date,
-      events: dayEvents, // все события для отображения
+      events: dayEvents,
       firstEntry: entries.length > 0 ? entries[0].event_time : null,
-      lastExit: exits.length > 0 ? exits[exits.length - 1].event_time : null,
-      totalSeconds: calculateWorkMinutes(dayEvents, internalPoints),
-      spanSeconds: entries.length > 0 && exits.length > 0
-        ? timeToSeconds(exits[exits.length - 1].event_time) - timeToSeconds(entries[0].event_time)
-        : 0,
+      lastExit: stillOnSite ? null : (exits.length > 0 ? exits[exits.length - 1].event_time : null),
+      totalSeconds: calculateWorkMinutes(dayEvents, internalPoints, date),
+      spanSeconds,
     });
   }
 
