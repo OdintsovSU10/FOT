@@ -186,7 +186,7 @@ export const DashboardPage: React.FC = () => {
               changeType="neutral"
             />
             <StatCard
-              label="На работе"
+              label="В офисе"
               value={onlineCount > 0 ? String(onlineCount) : '—'}
               icon={<MapPinIcon />}
               iconType="green"
@@ -194,7 +194,7 @@ export const DashboardPage: React.FC = () => {
               changeType="positive"
             />
             <StatCard
-              label="Ушли"
+              label="Вышли"
               value={offlineCount > 0 ? String(offlineCount) : '—'}
               icon={<LogOut size={18} />}
               iconType="red"

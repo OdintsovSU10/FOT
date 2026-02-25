@@ -20,19 +20,50 @@ const getInitials = (name: string): string => {
   return name.slice(0, 2).toUpperCase();
 };
 
-/** Простая оценка прогресса рабочего дня (0-100%) по since-времени */
+/** Прогресс рабочего дня (0-100%) по total_hours или first_entry */
 const getTimelinePercent = (employee: IEmployeePresence): number => {
-  if (employee.status !== 'online' && employee.status !== 'offline') return 0;
-  if (!employee.since) return employee.status === 'online' ? 50 : 0;
-  const now = new Date();
-  const [h, m] = employee.since.split(':').map(Number);
-  const sinceDate = new Date();
-  sinceDate.setHours(h, m, 0, 0);
+  if (employee.status === 'unknown') return 0;
+  if (employee.total_hours != null && employee.total_hours > 0) {
+    return Math.min(100, Math.round((employee.total_hours / 8) * 100));
+  }
+  if (!employee.first_entry) return 0;
   if (employee.status === 'online') {
-    const hoursWorked = (now.getTime() - sinceDate.getTime()) / (1000 * 60 * 60);
+    const now = new Date();
+    const [h, m] = employee.first_entry.split(':').map(Number);
+    const entry = new Date();
+    entry.setHours(h, m, 0, 0);
+    const hoursWorked = (now.getTime() - entry.getTime()) / (1000 * 60 * 60);
     return Math.min(100, Math.round((hoursWorked / 8) * 100));
   }
   return 0;
+};
+
+/** Форматирование часов/минут из total_hours (число) */
+const formatWorkTime = (hours: number): string => {
+  const h = Math.floor(hours);
+  const m = Math.round((hours - h) * 60);
+  if (h > 0) return `${h}ч ${m}м`;
+  return `${m}м`;
+};
+
+/** Время присутствия: для online считаем от first_entry, для offline берём total_hours */
+const getWorkElapsed = (employee: IEmployeePresence): string => {
+  if (employee.status === 'online' && employee.first_entry) {
+    const now = new Date();
+    const [h, m] = employee.first_entry.split(':').map(Number);
+    const entry = new Date();
+    entry.setHours(h, m, 0, 0);
+    const diffMs = now.getTime() - entry.getTime();
+    if (diffMs < 0) return '0м';
+    const totalMin = Math.floor(diffMs / 60_000);
+    const hours = Math.floor(totalMin / 60);
+    const mins = totalMin % 60;
+    return hours > 0 ? `${hours}ч ${mins}м` : `${mins}м`;
+  }
+  if (employee.total_hours != null && employee.total_hours > 0) {
+    return formatWorkTime(employee.total_hours);
+  }
+  return '';
 };
 
 const EmployeeRow: FC<{
@@ -41,13 +72,23 @@ const EmployeeRow: FC<{
   onToggleFavorite: (id: number) => void;
 }> = ({ employee, isFavorite, onToggleFavorite }) => {
   const navigate = useNavigate();
-  const [elapsed, setElapsed] = useState(() => formatElapsed(employee.since));
+
+  // Время присутствия (обновляем каждую минуту для online)
+  const [workTime, setWorkTime] = useState(() => getWorkElapsed(employee));
+  // Время отсутствия для offline (с момента выхода)
+  const [absentTime, setAbsentTime] = useState(() =>
+    employee.status === 'offline' ? formatElapsed(employee.since) : '',
+  );
 
   useEffect(() => {
-    setElapsed(formatElapsed(employee.since));
-    const timer = setInterval(() => setElapsed(formatElapsed(employee.since)), 60_000);
+    setWorkTime(getWorkElapsed(employee));
+    setAbsentTime(employee.status === 'offline' ? formatElapsed(employee.since) : '');
+    const timer = setInterval(() => {
+      setWorkTime(getWorkElapsed(employee));
+      setAbsentTime(employee.status === 'offline' ? formatElapsed(employee.since) : '');
+    }, 60_000);
     return () => clearInterval(timer);
-  }, [employee.since]);
+  }, [employee.since, employee.status, employee.first_entry, employee.total_hours]);
 
   const isOnline = employee.status === 'online';
   const isOffline = employee.status === 'offline';
@@ -72,15 +113,18 @@ const EmployeeRow: FC<{
       {timelineWidth > 0 && (
         <div className={styles.timeline}>
           <div
-            className={`${styles.timelineFill} ${isOnline ? styles.full : styles.partial}`}
+            className={`${styles.timelineFill} ${isOffline ? styles.stopped : styles.full}`}
             style={{ width: `${timelineWidth}%` }}
           />
         </div>
       )}
-      <span className={`${styles.status} ${isOnline ? styles.in : isOffline ? styles.out : styles.out}`}>
-        {isOnline ? 'Онлайн' : isOffline ? 'Оффлайн' : '—'}
+      <span className={`${styles.status} ${isOnline ? styles.in : isOffline ? styles.out : styles.unknown}`}>
+        {isOnline ? 'В офисе' : isOffline ? 'Вышел' : '—'}
       </span>
-      {elapsed && <span className={styles.time}>{elapsed}</span>}
+      <div className={styles.times}>
+        {workTime && <span className={`${styles.time} ${isOffline ? styles.timeStopped : ''}`}>{workTime}</span>}
+        {isOffline && absentTime && <span className={styles.absentTime}>−{absentTime}</span>}
+      </div>
     </div>
   );
 };
@@ -139,13 +183,13 @@ export const ActivityList: FC<IActivityListProps> = ({ employees, loading }) => 
             className={`${styles.tab} ${tab === 'online' ? styles.tabActive : ''}`}
             onClick={() => setTab('online')}
           >
-            На работе <span className={styles.tabCount}>{onlineCount}</span>
+            В офисе <span className={styles.tabCount}>{onlineCount}</span>
           </button>
           <button
             className={`${styles.tab} ${tab === 'offline' ? styles.tabActive : ''}`}
             onClick={() => setTab('offline')}
           >
-            Ушли <span className={styles.tabCount}>{offlineCount}</span>
+            Вышли <span className={styles.tabCount}>{offlineCount}</span>
           </button>
           <button
             className={`${styles.tab} ${tab === 'absent' ? styles.tabActive : ''}`}

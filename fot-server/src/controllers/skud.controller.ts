@@ -144,6 +144,19 @@ function getMonday(d: Date): Date {
 
 const DAY_NAMES = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт'];
 
+/** Считает рабочие дни (Пн–Пт) между двумя ISO-датами включительно */
+function countWorkingDays(startStr: string, endStr: string): number {
+  let count = 0;
+  const cur = new Date(startStr);
+  const end = new Date(endStr);
+  while (cur <= end) {
+    const dow = cur.getDay();
+    if (dow !== 0 && dow !== 6) count++;
+    cur.setDate(cur.getDate() + 1);
+  }
+  return count;
+}
+
 // Кэш access points (TTL 10 минут)
 const AP_CACHE_TTL = 10 * 60_000;
 const accessPointCache = new Map<string, { data: string[]; at: number }>();
@@ -239,20 +252,24 @@ export const skudController = {
       }
 
       // Punctuality (this week only)
-      const thisWeekSummaries = (summaries || []).filter(s => s.date >= mondayStr && s.date <= todayStr && s.first_entry);
+      const thisWeekAllSummaries = (summaries || []).filter(s => s.date >= mondayStr && s.date <= todayStr);
+      const thisWeekWithEntry = thisWeekAllSummaries.filter(s => s.first_entry);
       let onTimeCount = 0;
       let slightlyLateCount = 0;
       let veryLateCount = 0;
-      for (const s of thisWeekSummaries) {
+      for (const s of thisWeekWithEntry) {
         if (s.first_entry! <= LATE_THRESHOLD) onTimeCount++;
         else if (s.first_entry! <= SLIGHTLY_LATE_THRESHOLD) slightlyLateCount++;
         else veryLateCount++;
       }
-      const totalPunct = thisWeekSummaries.length || 1;
+      const thisWeekWorkDays = countWorkingDays(mondayStr, todayStr);
+      const expectedTotal = empIds.length * thisWeekWorkDays || 1;
+      const absentCount = Math.max(0, expectedTotal - thisWeekWithEntry.length);
       const punctuality = {
-        onTime: Math.round((onTimeCount / totalPunct) * 100),
-        slightlyLate: Math.round((slightlyLateCount / totalPunct) * 100),
-        veryLate: Math.round((veryLateCount / totalPunct) * 100),
+        onTime: Math.round((onTimeCount / expectedTotal) * 100),
+        slightlyLate: Math.round((slightlyLateCount / expectedTotal) * 100),
+        veryLate: Math.round((veryLateCount / expectedTotal) * 100),
+        absent: Math.round((absentCount / expectedTotal) * 100),
       };
 
       // Average arrival by day (this week)
@@ -283,7 +300,7 @@ export const skudController = {
       // Risks (employees with most lates this week)
       const lateCountByEmp = new Map<number, number>();
       const earlyLeaveByEmp = new Map<number, number>();
-      for (const s of thisWeekSummaries) {
+      for (const s of thisWeekAllSummaries) {
         if (s.first_entry && s.first_entry > LATE_THRESHOLD) {
           lateCountByEmp.set(s.employee_id, (lateCountByEmp.get(s.employee_id) || 0) + 1);
         }
@@ -320,11 +337,11 @@ export const skudController = {
       // Week comparison
       const lastWeekSummaries = (summaries || []).filter(s => s.date >= lastMondayStr && s.date <= lastFridayStr);
 
-      const calcWeekMetrics = (weekData: typeof thisWeekSummaries) => {
+      const calcWeekMetrics = (weekData: typeof thisWeekAllSummaries, expectedRecords: number) => {
         const withEntry = weekData.filter(s => s.first_entry);
         const presentDays = weekData.filter(s => s.is_present).length;
-        const totalDays = weekData.length || 1;
-        const attendanceRate = Math.round((presentDays / totalDays) * 100);
+        const total = expectedRecords > 0 ? expectedRecords : 1;
+        const attendanceRate = Math.round((presentDays / total) * 100);
 
         let avgArrivalMin = 0;
         if (withEntry.length > 0) {
@@ -348,9 +365,10 @@ export const skudController = {
         return { attendanceRate, avgArrival, avgHours, lateCount };
       };
 
+      const lastWeekWorkDays = countWorkingDays(lastMondayStr, lastFridayStr);
       const weekComparison = {
-        thisWeek: calcWeekMetrics(thisWeekSummaries),
-        lastWeek: calcWeekMetrics(lastWeekSummaries),
+        thisWeek: calcWeekMetrics(thisWeekAllSummaries, empIds.length * thisWeekWorkDays),
+        lastWeek: calcWeekMetrics(lastWeekSummaries, empIds.length * lastWeekWorkDays),
       };
 
       // Top late
@@ -996,6 +1014,18 @@ export const skudController = {
         }
       }
 
+      // Загружаем daily summary за сегодня для total_hours и first_entry
+      const { data: dailySummaries } = await supabase
+        .from('skud_daily_summary')
+        .select('employee_id, first_entry, total_hours')
+        .eq('date', today)
+        .in('employee_id', empIds);
+
+      const summaryMap = new Map<number, { first_entry: string | null; total_hours: number | null }>();
+      for (const s of dailySummaries || []) {
+        summaryMap.set(s.employee_id, { first_entry: s.first_entry, total_hours: s.total_hours });
+      }
+
       // Формируем ответ
       const result = employees.map(emp => {
         const last = latestEvent.get(emp.id);
@@ -1007,6 +1037,8 @@ export const skudController = {
           since = last.event_time;
         }
 
+        const summary = summaryMap.get(emp.id);
+
         return {
           employee_id: emp.id,
           full_name: encryptionService.decrypt(emp.full_name_encrypted),
@@ -1014,6 +1046,8 @@ export const skudController = {
           position_name: emp.position_id ? posMap.get(emp.position_id) || null : null,
           status,
           since,
+          first_entry: summary?.first_entry || null,
+          total_hours: summary?.total_hours || null,
         };
       });
 

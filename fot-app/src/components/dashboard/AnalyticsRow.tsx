@@ -77,6 +77,13 @@ const PunctualityCard: FC<{ punctuality: IDashboardStats['punctuality'] }> = ({ 
             </span>
             <span className={styles.legendVal}>{punctuality.veryLate}%</span>
           </div>
+          <div className={styles.legendItem}>
+            <span className={styles.legendLabel}>
+              <span className={`${styles.legendDot} ${styles.gray}`} />
+              Отсутствовали
+            </span>
+            <span className={styles.legendVal}>{punctuality.absent}%</span>
+          </div>
         </div>
       </div>
     </div>

@@ -18,8 +18,8 @@ import { OrganizationsPage } from './pages/super-admin/OrganizationsPage';
 import { ManagePage } from './pages/super-admin/ManagePage';
 import { DataAuditPage } from './pages/super-admin/DataAuditPage';
 
-// Tender & SKUD
-import { TenderPage } from './pages/tender/TenderPage';
+// Employees & SKUD
+import { EmployeesPage } from './pages/employees/EmployeesPage';
 import { EmployeeCardPage } from './pages/employees/EmployeeCardPage';
 import { SigurSettingsPage } from './pages/skud/SigurSettingsPage';
 import { SigurRawDataPage } from './pages/skud/SigurRawDataPage';
@@ -130,7 +130,7 @@ const AppRoutes = () => {
           path="/tender"
           element={
             <Layout title="Сотрудники" theme={theme} onToggleTheme={toggleTheme}>
-              <TenderPage />
+              <EmployeesPage />
             </Layout>
           }
         />

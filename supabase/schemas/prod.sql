@@ -2038,6 +2038,7 @@ $function$
 
 -- Function: public.recalculate_skud_daily_summary
 -- Считает сумму интервалов вход→выход (реальное время на работе)
+-- Фильтрует внутренние точки доступа по настройкам отдела
 CREATE OR REPLACE FUNCTION public.recalculate_skud_daily_summary(p_organization_id uuid, p_employee_id bigint, p_date date)
  RETURNS void
  LANGUAGE plpgsql
@@ -2052,43 +2053,67 @@ DECLARE
     v_break_hours DECIMAL(5,2);
     v_prev_exit TIME := NULL;
     v_rec RECORD;
+    v_dept_id uuid;
 BEGIN
-    -- Первый вход и последний выход (для отчётности)
+    -- Получить отдел сотрудника
+    SELECT org_department_id INTO v_dept_id
+    FROM employees
+    WHERE id = p_employee_id;
+
+    -- Первый вход (только по внешним точкам доступа)
     SELECT event_time INTO v_first_entry
-    FROM skud_events
-    WHERE organization_id = p_organization_id
-      AND employee_id = p_employee_id
-      AND event_date = p_date
-      AND direction = 'entry'
+    FROM skud_events e
+    WHERE e.organization_id = p_organization_id
+      AND e.employee_id = p_employee_id
+      AND e.event_date = p_date
+      AND e.direction = 'entry'
+      AND NOT EXISTS (
+        SELECT 1 FROM skud_access_point_settings s
+        WHERE s.organization_id = p_organization_id
+          AND s.department_id = v_dept_id
+          AND s.access_point_name = e.access_point
+          AND s.is_internal = true
+      )
     ORDER BY event_time ASC
     LIMIT 1;
 
+    -- Последний выход (только по внешним точкам доступа)
     SELECT event_time INTO v_last_exit
-    FROM skud_events
-    WHERE organization_id = p_organization_id
-      AND employee_id = p_employee_id
-      AND event_date = p_date
-      AND direction = 'exit'
+    FROM skud_events e
+    WHERE e.organization_id = p_organization_id
+      AND e.employee_id = p_employee_id
+      AND e.event_date = p_date
+      AND e.direction = 'exit'
+      AND NOT EXISTS (
+        SELECT 1 FROM skud_access_point_settings s
+        WHERE s.organization_id = p_organization_id
+          AND s.department_id = v_dept_id
+          AND s.access_point_name = e.access_point
+          AND s.is_internal = true
+      )
     ORDER BY event_time DESC
     LIMIT 1;
 
-    -- Суммируем интервалы вход→выход
-    -- Сортируем все события по времени, парим вход с ближайшим выходом
+    -- Суммируем интервалы вход→выход (только внешние точки)
     FOR v_rec IN
         SELECT event_time, direction
-        FROM skud_events
-        WHERE organization_id = p_organization_id
-          AND employee_id = p_employee_id
-          AND event_date = p_date
+        FROM skud_events e
+        WHERE e.organization_id = p_organization_id
+          AND e.employee_id = p_employee_id
+          AND e.event_date = p_date
+          AND NOT EXISTS (
+            SELECT 1 FROM skud_access_point_settings s
+            WHERE s.organization_id = p_organization_id
+              AND s.department_id = v_dept_id
+              AND s.access_point_name = e.access_point
+              AND s.is_internal = true
+          )
         ORDER BY event_time ASC
     LOOP
         IF v_rec.direction = 'entry' THEN
-            -- Если был предыдущий выход, считаем перерыв
             IF v_prev_exit IS NOT NULL THEN
                 v_break_seconds := v_break_seconds + EXTRACT(EPOCH FROM (v_rec.event_time - v_prev_exit));
             END IF;
-            -- Запоминаем время входа для текущего интервала
-            -- (используем переменную v_prev_exit как маркер: NULL = сейчас внутри)
             v_prev_exit := NULL;
         ELSIF v_rec.direction = 'exit' THEN
             v_prev_exit := v_rec.event_time;

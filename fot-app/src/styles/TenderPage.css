@@ -692,6 +692,17 @@
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.employees-table-body {
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+  max-height: calc(100vh - 200px);
 }
 
 .table-header {
@@ -721,11 +732,12 @@
   display: grid;
   grid-template-columns: 40px 2fr 1.5fr 0.8fr 1fr;
   gap: 12px;
-  padding: 16px 20px;
-  border-top: 1px solid var(--border);
+  padding: 0 20px;
+  border-bottom: 1px solid var(--border);
   cursor: pointer;
   transition: background var(--transition);
   align-items: center;
+  box-sizing: border-box;
 }
 
 .table-row.expanded {

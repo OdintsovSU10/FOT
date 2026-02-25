@@ -98,6 +98,7 @@
 .legendDot.green { background: var(--success); }
 .legendDot.orange { background: var(--warning); }
 .legendDot.red { background: var(--error); }
+.legendDot.gray { background: var(--text-muted); }
 
 .legendVal {
   font-weight: 600;

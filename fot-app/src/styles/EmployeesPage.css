@@ -1,0 +1,896 @@
+/* EmployeesPage — Two-panel layout */
+.employees-page {
+  display: flex;
+  margin: -24px;
+  height: calc(100vh - var(--header-height));
+  overflow: hidden;
+}
+
+/* ========== Department Panel ========== */
+.ep-dept-panel {
+  width: 320px;
+  background: var(--bg-secondary);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+}
+
+.ep-dept-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--border);
+}
+
+.ep-panel-title {
+  font-size: 13px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-primary);
+}
+
+.ep-panel-title svg {
+  color: var(--text-tertiary);
+}
+
+.ep-panel-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.ep-panel-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all var(--transition);
+  color: var(--text-secondary);
+}
+
+.ep-panel-btn:hover {
+  background: var(--surface-hover);
+  border-color: var(--border-light);
+}
+
+.ep-dept-search {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.ep-dept-search input {
+  width: 100%;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 10px 14px;
+  font-size: 13px;
+  color: var(--text-primary);
+  outline: none;
+  transition: all var(--transition);
+  font-family: inherit;
+}
+
+.ep-dept-search input::placeholder {
+  color: var(--text-tertiary);
+}
+
+.ep-dept-search input:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-light);
+}
+
+/* Department Tree */
+.ep-dept-tree {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px;
+}
+
+.ep-dept-item {
+  margin-bottom: 2px;
+}
+
+.ep-dept-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: all var(--transition);
+  color: var(--text-secondary);
+}
+
+.ep-dept-header:hover {
+  background: var(--surface);
+  color: var(--text-primary);
+}
+
+.ep-dept-header.active {
+  background: var(--primary-light);
+  color: var(--primary);
+}
+
+.ep-dept-all {
+  margin-bottom: 8px;
+  padding-left: 12px;
+}
+
+.ep-dept-toggle {
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.2s ease;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  color: inherit;
+  flex-shrink: 0;
+}
+
+.ep-dept-toggle svg {
+  width: 14px;
+  height: 14px;
+}
+
+.ep-dept-toggle.expanded {
+  transform: rotate(90deg);
+}
+
+.ep-dept-toggle.empty {
+  visibility: hidden;
+}
+
+.ep-dept-icon {
+  color: var(--text-tertiary);
+  flex-shrink: 0;
+}
+
+.ep-dept-header.active .ep-dept-icon {
+  color: var(--primary);
+}
+
+.ep-dept-name {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ep-dept-count {
+  font-family: 'Space Mono', monospace;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  background: var(--surface);
+  padding: 2px 8px;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+.ep-dept-header.active .ep-dept-count {
+  background: rgba(59, 130, 246, 0.2);
+  color: var(--primary);
+}
+
+.ep-dept-children {
+  /* rendered by React, no special styles needed */
+}
+
+/* ========== Employees Panel ========== */
+.ep-emp-panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-primary);
+  overflow: hidden;
+  min-width: 0;
+}
+
+.ep-emp-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 24px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-secondary);
+  flex-shrink: 0;
+}
+
+.ep-emp-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.ep-emp-title h2 {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.ep-emp-count {
+  font-family: 'Space Mono', monospace;
+  font-size: 12px;
+  color: var(--text-tertiary);
+  background: var(--surface);
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+}
+
+/* Tabs */
+.ep-emp-tabs {
+  display: flex;
+  gap: 4px;
+  background: var(--surface);
+  padding: 4px;
+  border-radius: var(--radius-md);
+}
+
+.ep-tab {
+  padding: 8px 14px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-tertiary);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all var(--transition);
+  background: none;
+  border: none;
+  font-family: inherit;
+}
+
+.ep-tab:hover {
+  color: var(--text-secondary);
+}
+
+.ep-tab.active {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  box-shadow: var(--shadow-sm);
+}
+
+.ep-tab-num {
+  font-family: 'Space Mono', monospace;
+  margin-left: 6px;
+  opacity: 0.6;
+}
+
+/* Toolbar */
+.ep-emp-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 24px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-secondary);
+  flex-shrink: 0;
+}
+
+.ep-toolbar-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 9px 14px;
+  width: 280px;
+}
+
+.ep-toolbar-search svg {
+  color: var(--text-tertiary);
+  flex-shrink: 0;
+}
+
+.ep-toolbar-search input {
+  flex: 1;
+  background: none;
+  border: none;
+  outline: none;
+  font-size: 13px;
+  color: var(--text-primary);
+  font-family: inherit;
+}
+
+.ep-toolbar-search input::placeholder {
+  color: var(--text-tertiary);
+}
+
+.ep-toolbar-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.ep-toolbar-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 16px;
+  border-radius: var(--radius-md);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--transition);
+  font-family: inherit;
+}
+
+.ep-toolbar-btn svg {
+  width: 16px;
+  height: 16px;
+}
+
+.ep-toolbar-btn.secondary {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+}
+
+.ep-toolbar-btn.secondary:hover {
+  background: var(--surface-hover);
+  border-color: var(--border-light);
+}
+
+.ep-toolbar-btn.primary {
+  background: var(--primary);
+  border: none;
+  color: white;
+}
+
+.ep-toolbar-btn.primary:hover {
+  background: var(--primary-hover);
+}
+
+/* Error */
+.ep-error {
+  margin: 12px 24px 0;
+  padding: 10px 16px;
+  background: var(--error-muted);
+  color: var(--error);
+  border-radius: var(--radius-md);
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+}
+
+.ep-error button {
+  background: none;
+  border: none;
+  color: var(--error);
+  cursor: pointer;
+  font-size: 18px;
+  padding: 0 4px;
+}
+
+/* Employee List */
+.ep-emp-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+}
+
+.ep-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 200px;
+  color: var(--text-tertiary);
+  font-size: 14px;
+}
+
+.ep-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 60px 40px;
+  text-align: center;
+}
+
+.ep-empty-icon {
+  width: 64px;
+  height: 64px;
+  background: var(--surface);
+  border-radius: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 20px;
+  color: var(--text-tertiary);
+}
+
+.ep-empty h3 {
+  font-size: 15px;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.ep-empty p {
+  font-size: 13px;
+  color: var(--text-tertiary);
+  max-width: 280px;
+}
+
+/* Employee Card */
+.ep-emp-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 18px;
+  margin-bottom: 6px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  transition: all var(--transition);
+  cursor: pointer;
+}
+
+.ep-emp-card:hover {
+  background: var(--surface);
+  border-color: var(--border-light);
+}
+
+.ep-emp-card.selected {
+  border-color: var(--primary);
+  background: var(--primary-light);
+}
+
+/* Checkbox */
+.ep-emp-checkbox {
+  width: 20px;
+  height: 20px;
+  border: 2px solid var(--border-light);
+  border-radius: 5px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all var(--transition);
+  flex-shrink: 0;
+}
+
+.ep-emp-checkbox:hover {
+  border-color: var(--primary);
+}
+
+.ep-emp-checkbox.checked {
+  background: var(--primary);
+  border-color: var(--primary);
+}
+
+.ep-emp-checkbox svg {
+  width: 12px;
+  height: 12px;
+  color: white;
+  opacity: 0;
+}
+
+.ep-emp-checkbox.checked svg {
+  opacity: 1;
+}
+
+/* Avatar */
+.ep-emp-avatar {
+  width: 42px;
+  height: 42px;
+  border-radius: 10px;
+  background: var(--surface-elevated);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+/* Info */
+.ep-emp-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.ep-emp-name {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 3px;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ep-emp-badge {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  display: inline-block;
+}
+
+.ep-emp-badge.online {
+  background: #22c55e;
+  box-shadow: 0 0 6px rgba(34, 197, 94, 0.5);
+}
+
+.ep-emp-badge.offline {
+  background: #71717a;
+}
+
+.ep-emp-badge.unknown {
+  background: #f59e0b;
+  box-shadow: 0 0 6px rgba(245, 158, 11, 0.4);
+}
+
+.ep-emp-position {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Meta stats */
+.ep-emp-meta {
+  display: flex;
+  gap: 16px;
+  flex-shrink: 0;
+  margin-right: 8px;
+}
+
+.ep-emp-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.ep-emp-stat-value {
+  font-family: 'Space Mono', monospace;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.ep-emp-stat-label {
+  font-size: 10px;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+/* Actions */
+.ep-emp-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.ep-action-btn {
+  padding: 8px 14px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--transition);
+  font-family: inherit;
+}
+
+.ep-action-btn.dismiss {
+  background: var(--error-muted);
+  border: 1px solid rgba(239, 68, 68, 0.2);
+  color: var(--error);
+}
+
+.ep-action-btn.dismiss:hover {
+  background: rgba(239, 68, 68, 0.2);
+}
+
+.ep-action-btn.move {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+}
+
+.ep-action-btn.move:hover {
+  background: var(--surface-hover);
+  border-color: var(--border-light);
+}
+
+/* ========== Modal ========== */
+.ep-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  animation: ep-fade-in 0.15s ease;
+}
+
+@keyframes ep-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.ep-modal {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  width: 100%;
+  max-width: 440px;
+  animation: ep-scale-in 0.15s ease;
+}
+
+@keyframes ep-scale-in {
+  from { transform: scale(0.95); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+
+.ep-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 22px;
+  border-bottom: 1px solid var(--border);
+}
+
+.ep-modal-title {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.ep-modal-close {
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all var(--transition);
+  color: var(--text-secondary);
+}
+
+.ep-modal-close:hover {
+  background: var(--error-muted);
+  border-color: rgba(239, 68, 68, 0.3);
+  color: var(--error);
+}
+
+.ep-modal-body {
+  padding: 22px;
+}
+
+.ep-modal-body label {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+}
+
+.ep-modal-select,
+.ep-modal-input {
+  width: 100%;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 12px 16px;
+  font-size: 14px;
+  color: var(--text-primary);
+  outline: none;
+  font-family: inherit;
+  transition: all var(--transition);
+}
+
+.ep-modal-select:focus,
+.ep-modal-input:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-light);
+}
+
+.ep-modal-select {
+  cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2371717a' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 14px center;
+}
+
+.ep-modal-footer {
+  display: flex;
+  gap: 10px;
+  padding: 18px 22px;
+  border-top: 1px solid var(--border);
+}
+
+.ep-modal-btn {
+  flex: 1;
+  padding: 12px;
+  border-radius: var(--radius-md);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--transition);
+  font-family: inherit;
+}
+
+.ep-modal-btn.secondary {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+}
+
+.ep-modal-btn.secondary:hover {
+  background: var(--surface-hover);
+}
+
+.ep-modal-btn.primary {
+  background: var(--primary);
+  border: none;
+  color: white;
+}
+
+.ep-modal-btn.primary:hover {
+  background: var(--primary-hover);
+}
+
+.ep-modal-btn.primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ========== Responsive ========== */
+@media (max-width: 1200px) {
+  .ep-dept-panel {
+    width: 280px;
+  }
+
+  .ep-emp-actions {
+    display: none;
+  }
+
+  .ep-emp-meta {
+    display: none;
+  }
+}
+
+@media (max-width: 900px) {
+  .ep-dept-panel {
+    width: 240px;
+  }
+
+  .ep-toolbar-search {
+    width: 200px;
+  }
+
+  .ep-toolbar-btn span {
+    display: none;
+  }
+
+  .ep-toolbar-btn {
+    padding: 9px 12px;
+  }
+}
+
+@media (max-width: 768px) {
+  .employees-page {
+    margin: -16px;
+    flex-direction: column;
+    height: auto;
+    min-height: calc(100vh - var(--header-height));
+  }
+
+  .ep-dept-panel {
+    width: 100%;
+    max-height: 50vh;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .ep-emp-header {
+    flex-direction: column;
+    gap: 12px;
+    align-items: flex-start;
+    padding: 14px 16px;
+  }
+
+  .ep-emp-toolbar {
+    padding: 12px 16px;
+  }
+
+  .ep-toolbar-search {
+    width: 100%;
+    flex: 1;
+  }
+
+  .ep-emp-list {
+    padding: 6px;
+  }
+
+  .ep-emp-card {
+    padding: 12px 14px;
+    gap: 10px;
+  }
+
+  .ep-emp-checkbox {
+    display: none;
+  }
+
+  .ep-emp-actions {
+    display: none;
+  }
+}
+
+@media (max-width: 430px) {
+  .employees-page {
+    margin: -12px;
+  }
+
+  .ep-dept-panel {
+    max-height: 40vh;
+  }
+
+  .ep-emp-header {
+    padding: 12px;
+  }
+
+  .ep-emp-tabs {
+    width: 100%;
+  }
+
+  .ep-tab {
+    flex: 1;
+    text-align: center;
+    padding: 8px 10px;
+  }
+
+  .ep-emp-toolbar {
+    padding: 10px 12px;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .ep-emp-card {
+    padding: 10px 12px;
+  }
+
+  .ep-emp-avatar {
+    width: 36px;
+    height: 36px;
+    font-size: 12px;
+  }
+
+  .ep-emp-name {
+    font-size: 13px;
+  }
+
+  .ep-modal {
+    margin: 16px;
+  }
+}

@@ -176,6 +176,8 @@ export interface IEmployeePresence {
   position_name: string | null;
   status: 'online' | 'offline' | 'unknown';
   since: string | null;
+  first_entry: string | null;
+  total_hours: number | null;
 }
 
 export interface SkudDailySummary {
@@ -402,7 +404,7 @@ export interface EmployeeHistoryEvent {
 export interface IDashboardStats {
   lateToday: number;
   lateYesterday: number;
-  punctuality: { onTime: number; slightlyLate: number; veryLate: number };
+  punctuality: { onTime: number; slightlyLate: number; veryLate: number; absent: number };
   avgArrivalByDay: Array<{ day: string; avgTime: string | null; date: string }>;
   risks: Array<{ employee_id: number; full_name: string; reason: string; severity: 'high' | 'medium' }>;
   hourlyActivity: Array<{ hour: number; count: number }>;

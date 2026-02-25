@@ -67,6 +67,7 @@ export const TenderPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [searchQuery, setSearchQuery] = useState(searchParams.get('q') || '');
+  const [debouncedSearch, setDebouncedSearch] = useState(searchQuery);
   const [showArchived, setShowArchived] = useState(searchParams.get('archived') === '1');
   const [viewMode, setViewMode] = useState<'list' | 'tree'>((searchParams.get('view') as 'list' | 'tree') || 'list');
 
@@ -91,6 +92,11 @@ export const TenderPage: React.FC = () => {
   const [showAddModal, setShowAddModal] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(searchQuery), 200);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
 
   const [formData, setFormData] = useState<EmployeeInput>({
     full_name: '',
@@ -213,17 +219,18 @@ export const TenderPage: React.FC = () => {
   };
 
   const filteredEmployees = useMemo(() => {
+    const q = debouncedSearch.toLowerCase();
     return employees.filter(emp => {
-      const matchesSearch = searchQuery === '' ||
-        emp.full_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        (emp.position_name || '').toLowerCase().includes(searchQuery.toLowerCase());
+      const matchesSearch = !q ||
+        emp.full_name.toLowerCase().includes(q) ||
+        (emp.position_name || '').toLowerCase().includes(q);
       const matchesPosition = positionFilter === '' || emp.position_name === positionFilter;
       const matchesDept = !selectedDept ||
         selectedDept.allIds.includes(emp.org_department_id || '');
       const matchesStatus = emp.employment_status !== 'fired';
       return matchesSearch && matchesPosition && matchesDept && matchesStatus;
     });
-  }, [employees, searchQuery, positionFilter, selectedDept]);
+  }, [employees, debouncedSearch, positionFilter, selectedDept]);
 
   const virtualizer = useVirtualizer({
     count: filteredEmployees.length,
