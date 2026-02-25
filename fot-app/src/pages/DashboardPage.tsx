@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { ChevronDown, Search, Building2 } from 'lucide-react';
 import { StatCard } from '../components/ui/StatCard';
 import { ActivityList } from '../components/dashboard/ActivityList';
@@ -43,8 +44,9 @@ export const DashboardPage: React.FC = () => {
   });
 
   // Department selector
+  const [searchParams, setSearchParams] = useSearchParams();
+  const selectedDeptId = searchParams.get('dept');
   const [deptOptions, setDeptOptions] = useState<IDeptFlatOption[]>([]);
-  const [selectedDeptId, setSelectedDeptId] = useState<string | null>(null);
   const [deptDropdownOpen, setDeptDropdownOpen] = useState(false);
   const [deptSearchQuery, setDeptSearchQuery] = useState('');
   const deptDropdownRef = useRef<HTMLDivElement>(null);
@@ -126,7 +128,7 @@ export const DashboardPage: React.FC = () => {
                 key={dept.id}
                 className={`dash-dept-item ${selectedDeptId === dept.id ? 'selected' : ''}`}
                 style={{ paddingLeft: 12 + dept.level * 16 }}
-                onClick={() => { setSelectedDeptId(dept.id); setDeptDropdownOpen(false); }}
+                onClick={() => { setSearchParams({ dept: dept.id }, { replace: true }); setDeptDropdownOpen(false); }}
               >
                 {dept.name}
               </div>

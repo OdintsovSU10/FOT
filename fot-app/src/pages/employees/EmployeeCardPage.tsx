@@ -100,7 +100,7 @@ export const EmployeeCardPage: FC = () => {
     if (!employee || !confirm('Удалить сотрудника? Это действие необратимо.')) return;
     try {
       await employeeService.delete(employee.id);
-      navigate(backPath);
+      navigate(-1);
     } catch {
       setError('Ошибка удаления');
     }
@@ -125,7 +125,7 @@ export const EmployeeCardPage: FC = () => {
       <div className="card-page">
         <div className="card-error">
           <p>{error}</p>
-          <button className="btn-back-link" onClick={() => navigate(backPath)}>
+          <button className="btn-back-link" onClick={() => navigate(-1)}>
             <ArrowLeft size={16} /> Назад к списку
           </button>
         </div>
@@ -138,7 +138,7 @@ export const EmployeeCardPage: FC = () => {
   return (
     <div className="card-page">
       <div className="card-top-bar">
-        <button className="btn-back-link" onClick={() => navigate(backPath)}>
+        <button className="btn-back-link" onClick={() => navigate(-1)}>
           <ArrowLeft size={16} /> {backLabel}
         </button>
       </div>
