@@ -1,11 +1,12 @@
 import { useState, useEffect, useCallback, useMemo, useRef, type FC } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Search, Upload, ChevronRight, Folder, Users, UserPlus, X, RefreshCw } from 'lucide-react';
+import { Search, Upload, ChevronRight, Folder, Users, UserPlus, X, RefreshCw, FileSpreadsheet } from 'lucide-react';
 import { employeeService } from '../../services/employeeService';
 import { skudService } from '../../services/skudService';
 import { structureApi } from '../../api/structure';
 import { useAuth } from '../../contexts/AuthContext';
-import type { Employee, EmployeeInput, OrgDepartmentNode, IEmployeePresence } from '../../types';
+import { EnrichPreviewModal } from '../../components/employees/EnrichPreviewModal';
+import type { Employee, EmployeeInput, OrgDepartmentNode, IEmployeePresence, EnrichPreview } from '../../types';
 import '../../styles/EmployeesPage.css';
 
 const getInitials = (name: string): string => {
@@ -31,6 +32,7 @@ export const EmployeesPage: FC = () => {
   const { canAccess } = useAuth();
   const canEdit = canAccess('header');
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const enrichInputRef = useRef<HTMLInputElement>(null);
 
   // Data
   const [employees, setEmployees] = useState<Employee[]>([]);
@@ -54,6 +56,11 @@ export const EmployeesPage: FC = () => {
     full_name: '',
     hire_date: new Date().toISOString().split('T')[0],
   });
+
+  // Enrich
+  const [enrichPreview, setEnrichPreview] = useState<EnrichPreview | null>(null);
+  const [enrichFile, setEnrichFile] = useState<File | null>(null);
+  const [enrichLoading, setEnrichLoading] = useState(false);
 
   // Selection
   const [selectedEmps, setSelectedEmps] = useState<Set<number>>(new Set());
@@ -257,6 +264,38 @@ export const EmployeesPage: FC = () => {
     finally { e.target.value = ''; }
   };
 
+  const handleEnrichUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      setEnrichLoading(true);
+      const preview = await employeeService.enrichPreview(file);
+      setEnrichPreview(preview);
+      setEnrichFile(file);
+    } catch {
+      setError('Ошибка чтения файла');
+    } finally {
+      setEnrichLoading(false);
+      e.target.value = '';
+    }
+  };
+
+  const handleEnrichApply = async () => {
+    if (!enrichFile) return;
+    try {
+      setEnrichLoading(true);
+      const result = await employeeService.enrichApply(enrichFile);
+      setEnrichPreview(null);
+      setEnrichFile(null);
+      alert(`Обновлено: ${result.updated} сотрудников`);
+      loadEmployees();
+    } catch {
+      setError('Ошибка обогащения данных');
+    } finally {
+      setEnrichLoading(false);
+    }
+  };
+
   const toggleEmpSelection = (id: number, e: React.MouseEvent) => {
     e.stopPropagation();
     setSelectedEmps(prev => {
@@ -372,6 +411,11 @@ export const EmployeesPage: FC = () => {
           </div>
           {canEdit && (
             <div className="ep-toolbar-actions">
+              <button className="ep-toolbar-btn secondary" onClick={() => enrichInputRef.current?.click()}>
+                <FileSpreadsheet size={16} />
+                <span>Импорт сотрудников</span>
+              </button>
+              <input ref={enrichInputRef} type="file" accept=".xlsx,.xls" onChange={handleEnrichUpload} hidden />
               <button className="ep-toolbar-btn secondary" onClick={() => fileInputRef.current?.click()}>
                 <Upload size={16} />
                 <span>Импорт</span>
@@ -514,6 +558,16 @@ export const EmployeesPage: FC = () => {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Enrich Preview Modal */}
+      {enrichPreview && (
+        <EnrichPreviewModal
+          preview={enrichPreview}
+          loading={enrichLoading}
+          onApply={handleEnrichApply}
+          onClose={() => { setEnrichPreview(null); setEnrichFile(null); }}
+        />
       )}
 
       {/* Add Employee Modal */}

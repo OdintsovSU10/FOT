@@ -34,4 +34,12 @@ router.delete(
   structureController.deleteDepartment as any
 );
 
+// DELETE /api/structure/clear - очистка структуры (отделы + сотрудники)
+router.delete(
+  '/clear',
+  requirePosition('super_admin') as any,
+  require2FA as any,
+  structureController.clearStructure as any
+);
+
 export default router;

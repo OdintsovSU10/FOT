@@ -1,0 +1,362 @@
+.card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+  margin-bottom: 14px;
+  font-weight: 500;
+}
+
+.titleIcon {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.titleIcon svg {
+  width: 18px;
+  height: 18px;
+}
+
+.titleIcon.green {
+  background: var(--success-muted);
+  color: var(--success);
+}
+
+.titleIcon.orange {
+  background: var(--warning-muted);
+  color: var(--warning);
+}
+
+.titleIcon.red {
+  background: var(--error-muted, rgba(239, 68, 68, 0.1));
+  color: var(--error);
+}
+
+.titleIcon.purple {
+  background: rgba(139, 92, 246, 0.1);
+  color: #8b5cf6;
+}
+
+.titleIcon.blue {
+  background: var(--accent-muted);
+  color: var(--accent);
+}
+
+/* Presence card */
+.mainValue {
+  font-size: 1.6rem;
+  font-weight: 700;
+  letter-spacing: -0.5px;
+  margin-bottom: 4px;
+}
+
+.mainValue .highlight {
+  color: var(--success);
+}
+
+.mainValue .total {
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.sub {
+  font-size: 0.8rem;
+  color: var(--text-tertiary);
+}
+
+/* Lateness card */
+.lateValue {
+  font-size: 1.4rem;
+  font-weight: 700;
+  color: var(--warning);
+  margin-bottom: 6px;
+}
+
+.lateRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.lateSub {
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+}
+
+.miniStats {
+  display: flex;
+  gap: 14px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.miniStat {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.75rem;
+  color: var(--text-tertiary);
+}
+
+.miniStat svg {
+  width: 14px;
+  height: 14px;
+}
+
+.miniStatValue {
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+/* Anomalies card */
+.anomalyRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.anomalyValue {
+  font-size: 1.2rem;
+  font-weight: 700;
+}
+
+.anomalyValue.red {
+  color: var(--error);
+}
+
+.anomalyValue.orange {
+  color: var(--warning);
+}
+
+.anomalyLabel {
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+}
+
+/* Live events card */
+.eventsHeader {
+  font-size: 0.78rem;
+  color: var(--text-tertiary);
+  margin-bottom: 10px;
+}
+
+.eventsList {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  flex: 1;
+  overflow-y: auto;
+}
+
+.eventItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 0;
+  font-size: 0.78rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.eventItem:last-child {
+  border-bottom: none;
+}
+
+.eventTime {
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+  min-width: 36px;
+}
+
+.eventName {
+  color: var(--text-primary);
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.eventArrow {
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.eventPoint {
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.eventRefusal {
+  color: var(--error);
+  font-weight: 500;
+}
+
+/* Goal bar (inside presence card) */
+.goalBar {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.goalBarInfo {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.goalBarLabel {
+  font-size: 0.75rem;
+  color: var(--text-tertiary);
+}
+
+.goalBarValue {
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.goalBarValue.good {
+  color: var(--success);
+}
+
+.goalBarValue.warn {
+  color: var(--warning);
+}
+
+.goalBarValue.bad {
+  color: var(--error);
+}
+
+.goalBarTrack {
+  height: 6px;
+  background: var(--border);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.goalBarFill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.4s ease;
+}
+
+.goalBarFill.good {
+  background: var(--success);
+}
+
+.goalBarFill.warn {
+  background: var(--warning);
+}
+
+.goalBarFill.bad {
+  background: var(--error);
+}
+
+/* Wide card variant */
+.cardWide {
+  grid-column: span 1;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .card {
+    padding: 14px;
+    border-radius: 10px;
+  }
+
+  .title {
+    font-size: 0.78rem;
+    margin-bottom: 10px;
+    gap: 6px;
+  }
+
+  .titleIcon {
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+  }
+
+  .titleIcon svg {
+    width: 14px;
+    height: 14px;
+  }
+
+  .mainValue {
+    font-size: 1.3rem;
+  }
+
+  .lateValue {
+    font-size: 1.2rem;
+  }
+
+  .goalValue {
+    font-size: 1.8rem;
+  }
+
+}
+
+@media (max-width: 430px) {
+  .card {
+    padding: 10px;
+    border-radius: 8px;
+  }
+
+  .title {
+    font-size: 0.72rem;
+    margin-bottom: 8px;
+  }
+
+  .titleIcon {
+    width: 24px;
+    height: 24px;
+    border-radius: 5px;
+  }
+
+  .titleIcon svg {
+    width: 12px;
+    height: 12px;
+  }
+
+  .mainValue {
+    font-size: 1.1rem;
+  }
+
+  .lateValue {
+    font-size: 1rem;
+  }
+
+  .eventItem {
+    font-size: 0.7rem;
+  }
+
+  .miniStats {
+    gap: 8px;
+    margin-top: 6px;
+    padding-top: 6px;
+  }
+}
+
+[data-theme="light"] .card {
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}

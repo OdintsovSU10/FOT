@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import multer from 'multer';
 import { employeesController } from '../controllers/employees.controller.js';
+import { employeeEnrichController } from '../controllers/employee-enrich.controller.js';
 import { authenticate, requirePosition, requireOrganization, require2FA, injectOrganizationFromQuery } from '../middleware/auth.js';
 
 const router = Router();
@@ -43,6 +44,15 @@ router.post(
   require2FA as any,
   upload.single('file'),
   employeesController.import as any
+);
+
+// POST /api/employees/enrich - обогащение данных из Excel (header+, требуется 2FA)
+router.post(
+  '/enrich',
+  requirePosition('header', 'admin', 'super_admin') as any,
+  require2FA as any,
+  upload.single('file'),
+  employeeEnrichController.enrich as any
 );
 
 // DELETE /api/employees/all - удаление ВСЕХ (super_admin, только для разработки)

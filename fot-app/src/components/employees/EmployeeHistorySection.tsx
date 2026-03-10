@@ -1,4 +1,5 @@
 import { type FC } from 'react';
+import { DollarSign, Briefcase } from 'lucide-react';
 import type { EmployeeHistoryEvent } from '../../types';
 
 interface IEmployeeHistorySectionProps {
@@ -13,78 +14,61 @@ const formatSalary = (salary: number | null | undefined) => {
   return salary.toLocaleString('ru-RU') + ' ₽';
 };
 
+const getEventTitle = (event: EmployeeHistoryEvent): string => {
+  if (event.event_type === 'salary') return 'Изменение оклада';
+  const data = event.event_data as Record<string, unknown>;
+  if (data.type === 'hire' || data.type === 'Прием') return 'Принят на работу';
+  if (data.type === 'transfer' || data.type === 'Перевод') return 'Перевод';
+  if (data.type === 'dismiss' || data.type === 'Увольнение') return 'Увольнение';
+  return 'Назначение';
+};
+
+const getEventDesc = (event: EmployeeHistoryEvent): string => {
+  const data = event.event_data as Record<string, unknown>;
+  const parts: string[] = [];
+
+  if (event.event_type === 'salary') {
+    parts.push(`Оклад: ${formatSalary(data.salary as number | null)}`);
+    if (data.reason) parts.push(String(data.reason));
+    if (data.note) parts.push(String(data.note));
+  } else {
+    if (data.position) parts.push(`Должность: ${data.position}`);
+    if (data.department) parts.push(`Отдел: ${data.department}`);
+    if (data.reason) parts.push(String(data.reason));
+  }
+
+  return parts.join(' · ');
+};
+
 export const EmployeeHistorySection: FC<IEmployeeHistorySectionProps> = ({ history }) => {
   if (history.length === 0) {
-    return (
-      <div className="card-history-empty">
-        <p>Нет записей в истории</p>
-      </div>
-    );
+    return <div className="ec-history-empty">Нет записей в истории</div>;
   }
 
   return (
-    <div className="card-history">
-      <div className="history-timeline">
-        {history.map((event, i) => {
-          const data = event.event_data as Record<string, unknown>;
-          const isCurrent = i === 0;
+    <div className="ec-history-timeline">
+      {history.map(event => {
+        const iconColor = event.event_type === 'salary' ? 'green' : 'blue';
+        const Icon = event.event_type === 'salary' ? DollarSign : Briefcase;
 
-          return (
-            <div key={event.event_id} className={`timeline-item ${isCurrent ? 'current' : ''}`}>
-              <div className="timeline-dot" />
-              <div className="timeline-content">
-                <span className={`timeline-type-badge ${event.event_type}`}>
-                  {event.event_type === 'salary' ? 'Зарплата' : 'Назначение'}
-                </span>
-                <span className="timeline-date">{formatDate(event.event_date)}</span>
-
-                {event.event_type === 'salary' && (
-                  <div className="timeline-details">
-                    <span className="timeline-salary">
-                      {formatSalary(data.salary as number | null)}
-                    </span>
-                    {data.reason && (
-                      <span className="timeline-note">{data.reason as string}</span>
-                    )}
-                    {data.note && (
-                      <span className="timeline-note">{data.note as string}</span>
-                    )}
-                  </div>
-                )}
-
-                {event.event_type === 'assignment' && (
-                  <div className="timeline-details">
-                    {data.position && (
-                      <span className="timeline-detail-item">
-                        Должность: <strong>{data.position as string}</strong>
-                      </span>
-                    )}
-                    {data.department && (
-                      <span className="timeline-detail-item">
-                        Отдел: <strong>{data.department as string}</strong>
-                      </span>
-                    )}
-                    {data.type && (
-                      <span className="timeline-detail-item">
-                        Тип: {data.type as string}
-                      </span>
-                    )}
-                    {data.reason && (
-                      <span className="timeline-note">{data.reason as string}</span>
-                    )}
-                  </div>
-                )}
-
-                {event.event_end_date && (
-                  <span className="timeline-end-date">
-                    до {formatDate(event.event_end_date)}
-                  </span>
-                )}
-              </div>
+        return (
+          <div key={event.event_id} className="ec-history-item">
+            <div className={`ec-history-icon ${iconColor}`}>
+              <Icon size={18} />
             </div>
-          );
-        })}
-      </div>
+            <div className="ec-history-content">
+              <div className="ec-history-title">{getEventTitle(event)}</div>
+              <div className="ec-history-desc">{getEventDesc(event)}</div>
+            </div>
+            <div className="ec-history-date">
+              {formatDate(event.event_date)}
+              {event.event_end_date && (
+                <> — {formatDate(event.event_end_date)}</>
+              )}
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 };

@@ -2,9 +2,9 @@
 
 /* Content wrapper */
 .ec-content {
-  max-width: 1200px;
-  margin: 0 auto;
-  padding: 28px;
+  max-width: 100%;
+  margin: 0;
+  padding: 12px 28px 28px;
   overflow-x: hidden;
 }
 
@@ -12,14 +12,14 @@
 .ec-back-btn {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  margin-bottom: 20px;
+  gap: 6px;
+  padding: 4px 0;
+  margin-bottom: 10px;
   background: none;
   border: none;
   border-radius: var(--radius-md);
   color: var(--text-secondary);
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 500;
   cursor: pointer;
   transition: all 0.15s ease;
@@ -35,22 +35,71 @@
   height: 16px;
 }
 
+/* ==================== Profile Card ==================== */
+.ec-profile-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 16px 20px;
+  margin-bottom: 16px;
+}
+
+.ec-profile-card .ec-stats-period-selector {
+  margin-top: 12px;
+}
+
+.ec-profile-card .ec-stats-row {
+  margin-bottom: 0;
+  padding-top: 0;
+  border-top: none;
+}
+
+/* ==================== Profile Badges ==================== */
+.ec-profile-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.ec-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 500;
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+}
+
+.ec-badge svg {
+  width: 14px;
+  height: 14px;
+}
+
+.ec-badge.accent {
+  background: rgba(59, 130, 246, 0.12);
+  color: var(--primary);
+}
+
 /* ==================== Profile Header ==================== */
 .ec-profile {
   display: flex;
-  gap: 24px;
-  margin-bottom: 28px;
+  gap: 14px;
+  margin-bottom: 0;
 }
 
 .ec-avatar {
-  width: 120px;
-  height: 120px;
-  border-radius: 20px;
+  width: 72px;
+  height: 72px;
+  border-radius: 16px;
   background: linear-gradient(135deg, var(--primary), #a855f7);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 42px;
+  font-size: 26px;
   font-weight: 700;
   color: white;
   flex-shrink: 0;
@@ -59,12 +108,12 @@
 
 .ec-avatar-status {
   position: absolute;
-  bottom: 8px;
-  right: 8px;
-  width: 20px;
-  height: 20px;
+  bottom: 4px;
+  right: 4px;
+  width: 16px;
+  height: 16px;
   border-radius: 50%;
-  border: 3px solid var(--bg-primary);
+  border: 2px solid var(--bg-primary);
 }
 
 .ec-avatar-status.online {
@@ -82,17 +131,17 @@
 }
 
 .ec-profile-name {
-  font-size: 28px;
+  font-size: 20px;
   font-weight: 700;
-  letter-spacing: -0.5px;
-  margin-bottom: 8px;
+  letter-spacing: -0.3px;
+  margin-bottom: 4px;
 }
 
 .ec-profile-meta {
   display: flex;
   flex-wrap: wrap;
-  gap: 16px;
-  margin-bottom: 16px;
+  gap: 10px;
+  margin-bottom: 0;
 }
 
 .ec-meta-item {
@@ -144,10 +193,10 @@
 .ec-action-btn {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 10px 16px;
+  gap: 6px;
+  padding: 7px 12px;
   border-radius: var(--radius-md);
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 500;
   cursor: pointer;
   transition: all 0.15s ease;
@@ -213,22 +262,22 @@
 .ec-stats-row {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  gap: 14px;
-  margin-bottom: 24px;
+  gap: 10px;
+  margin-bottom: 16px;
 }
 
 .ec-stat-card {
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 14px;
-  padding: 20px;
+  border-radius: 10px;
+  padding: 12px 14px;
 }
 
 .ec-stat-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 12px;
+  margin-bottom: 6px;
 }
 
 .ec-stat-label {
@@ -237,9 +286,9 @@
 }
 
 .ec-stat-icon {
-  width: 36px;
-  height: 36px;
-  border-radius: 10px;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -260,10 +309,10 @@
 .ec-stat-icon.purple svg { color: #a855f7; }
 
 .ec-stat-value {
-  font-size: 28px;
+  font-size: 22px;
   font-weight: 700;
-  letter-spacing: -1px;
-  margin-bottom: 4px;
+  letter-spacing: -0.5px;
+  margin-bottom: 2px;
 }
 
 .ec-stat-trend {
@@ -285,7 +334,7 @@
 
 /* ==================== Tabs ==================== */
 .ec-tabs-container {
-  margin-bottom: 24px;
+  margin-bottom: 16px;
 }
 
 .ec-tabs {
@@ -336,7 +385,7 @@
 .ec-card {
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 14px;
+  border-radius: 12px;
   overflow: hidden;
 }
 
@@ -344,7 +393,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 18px 22px;
+  padding: 12px 16px;
   border-bottom: 1px solid var(--border);
 }
 
@@ -377,20 +426,20 @@
 
 /* ==================== Attendance Calendar ==================== */
 .ec-calendar {
-  padding: 20px;
+  padding: 12px;
 }
 
 .ec-cal-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 20px;
+  margin-bottom: 10px;
 }
 
 .ec-cal-nav {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
 }
 
 .ec-cal-nav-btn {
@@ -417,7 +466,7 @@
 }
 
 .ec-cal-month {
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 600;
 }
 
@@ -448,30 +497,31 @@
 .ec-cal-grid {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
-  gap: 6px;
+  gap: 3px;
 }
 
 .ec-cal-day-header {
   text-align: center;
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 500;
   color: var(--text-tertiary);
-  padding: 8px 0;
+  padding: 4px 0;
 }
 
 .ec-cal-day {
-  aspect-ratio: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  border-radius: var(--radius-md);
+  border-radius: 6px;
   font-size: 13px;
-  font-weight: 500;
+  font-weight: 600;
   cursor: pointer;
   transition: all 0.15s ease;
   position: relative;
   border: 1px solid transparent;
+  padding: 6px 4px 14px;
+  min-height: 44px;
 }
 
 .ec-cal-day:hover:not(.empty) {
@@ -515,10 +565,11 @@
 
 .ec-cal-day .ec-time-badge {
   position: absolute;
-  bottom: 2px;
+  bottom: 3px;
   font-family: 'Space Mono', monospace;
   font-size: 10px;
   font-weight: 500;
+  line-height: 1;
 }
 
 /* ==================== Timeline ==================== */
@@ -758,6 +809,143 @@
   text-align: right;
 }
 
+/* ==================== Info Sections Grid ==================== */
+.ec-info-sections-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 16px;
+}
+
+.ec-info-section {
+  background: var(--bg-tertiary);
+  border-radius: 12px;
+  padding: 16px;
+}
+
+.ec-info-section-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 14px;
+}
+
+.ec-info-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.ec-info-row:last-child {
+  border-bottom: none;
+}
+
+.ec-info-label {
+  font-size: 13px;
+  color: var(--text-tertiary);
+}
+
+.ec-info-val {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+  text-align: right;
+}
+
+.ec-info-val.green {
+  color: var(--success);
+}
+
+.ec-info-val.red {
+  color: var(--error);
+}
+
+.ec-info-label-empty {
+  font-size: 13px;
+  color: var(--text-tertiary);
+  font-style: italic;
+}
+
+/* ==================== History Timeline V2 ==================== */
+.ec-history-timeline {
+  padding: 16px;
+}
+
+.ec-history-item {
+  display: flex;
+  gap: 14px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.ec-history-item:last-child {
+  border-bottom: none;
+}
+
+.ec-history-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.ec-history-icon svg {
+  width: 18px;
+  height: 18px;
+}
+
+.ec-history-icon.green {
+  background: var(--success-muted);
+}
+.ec-history-icon.green svg { color: var(--success); }
+
+.ec-history-icon.blue {
+  background: rgba(59, 130, 246, 0.12);
+}
+.ec-history-icon.blue svg { color: var(--primary); }
+
+.ec-history-icon.orange {
+  background: var(--warning-muted);
+}
+.ec-history-icon.orange svg { color: var(--warning); }
+
+.ec-history-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.ec-history-title {
+  font-size: 14px;
+  font-weight: 500;
+  margin-bottom: 4px;
+}
+
+.ec-history-desc {
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+.ec-history-date {
+  font-family: 'Space Mono', monospace;
+  font-size: 12px;
+  color: var(--text-tertiary);
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.ec-history-empty {
+  padding: 48px 24px;
+  text-align: center;
+  color: var(--text-tertiary);
+  font-size: 13px;
+}
+
 /* ==================== Loading / Error ==================== */
 .ec-loading {
   display: flex;
@@ -854,114 +1042,192 @@
   .ec-content {
     padding: 16px;
   }
-  .ec-profile {
-    flex-direction: column;
-    align-items: center;
-    text-align: center;
+  .ec-profile-card {
+    padding: 16px;
+    border-radius: 12px;
   }
-  .ec-profile-meta {
-    justify-content: center;
+  .ec-profile {
+    flex-wrap: wrap;
+  }
+  .ec-avatar {
+    width: 64px;
+    height: 64px;
+    font-size: 24px;
+    border-radius: 14px;
+  }
+  .ec-profile-name {
+    font-size: 18px;
   }
   .ec-profile-actions {
     margin-left: 0;
-    margin-top: 16px;
+    margin-top: 8px;
     flex-wrap: wrap;
+    width: 100%;
+  }
+  .ec-action-btn {
+    flex: 1;
+    min-width: 100px;
     justify-content: center;
   }
   .ec-stats-row {
     grid-template-columns: 1fr 1fr;
+  }
+  .ec-stat-card {
+    padding: 16px;
+  }
+  .ec-stat-value {
+    font-size: 24px;
   }
   .ec-tabs {
     width: 100%;
     overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .ec-tab {
+    white-space: nowrap;
   }
   .ec-cal-legend {
     flex-wrap: wrap;
-    gap: 8px;
+    gap: 6px;
+    font-size: 10px;
+  }
+  .ec-info-sections-grid {
+    grid-template-columns: 1fr;
+  }
+  .ec-tab-content-full {
+    padding: 16px;
+    border-radius: 12px;
+  }
+  .ec-history-item {
+    gap: 10px;
+  }
+  .ec-history-date {
+    font-size: 11px;
+  }
+  .ec-history-timeline {
+    padding: 12px;
   }
 }
 
 @media (max-width: 430px) {
-  .ec-stats-period-selector {
-    margin-bottom: 8px;
-  }
-  .ec-stats-period-btn {
-    padding: 5px 12px;
-    font-size: 11px;
-  }
   .ec-content {
-    padding: 8px;
+    padding: 6px 8px;
   }
   .ec-back-btn {
+    margin-bottom: 6px;
+    padding: 2px 0;
+    font-size: 11px;
+  }
+
+  /* Profile Card */
+  .ec-profile-card {
+    padding: 10px;
+    border-radius: 10px;
     margin-bottom: 8px;
-    padding: 6px 8px;
-    font-size: 12px;
   }
-  .ec-avatar {
-    width: 72px;
-    height: 72px;
-    font-size: 24px;
-    border-radius: 14px;
-  }
-  .ec-avatar-status {
-    width: 14px;
-    height: 14px;
-    bottom: 4px;
-    right: 4px;
-    border-width: 2px;
+  .ec-profile-card .ec-stats-period-selector {
+    margin-top: 12px;
   }
   .ec-profile {
-    margin-bottom: 14px;
-    gap: 12px;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .ec-avatar {
+    width: 48px;
+    height: 48px;
+    font-size: 18px;
+    border-radius: 12px;
+  }
+  .ec-avatar-status {
+    width: 12px;
+    height: 12px;
+    bottom: 1px;
+    right: 1px;
+    border-width: 2px;
   }
   .ec-profile-name {
-    font-size: 20px;
+    font-size: 16px;
     letter-spacing: -0.3px;
+    margin-bottom: 4px;
+  }
+  .ec-profile-badges {
+    gap: 4px;
+    margin-bottom: 8px;
+  }
+  .ec-badge {
+    padding: 3px 8px;
+    font-size: 10px;
+    border-radius: 6px;
+    gap: 4px;
+  }
+  .ec-badge svg {
+    width: 12px;
+    height: 12px;
   }
   .ec-profile-meta {
     gap: 6px;
-    flex-direction: column;
-    align-items: center;
+    flex-wrap: wrap;
   }
   .ec-meta-item {
-    font-size: 12px;
-    gap: 6px;
+    font-size: 11px;
+    gap: 4px;
   }
-  .ec-meta-item.clickable {
-    padding: 4px 10px;
+  .ec-meta-item svg {
+    width: 14px;
+    height: 14px;
   }
   .ec-profile-id {
     font-size: 10px;
-    padding: 4px 10px;
+    padding: 3px 8px;
   }
   .ec-profile-actions {
-    flex-direction: column;
+    flex-direction: row;
+    flex-wrap: wrap;
     align-items: stretch;
-    margin-top: 4px;
-    gap: 8px;
+    margin-top: 8px;
+    gap: 6px;
+    width: 100%;
   }
   .ec-action-btn {
+    flex: 1;
+    min-width: 0;
     justify-content: center;
-    padding: 10px 14px;
-    font-size: 13px;
+    padding: 8px 10px;
+    font-size: 12px;
+    gap: 4px;
   }
+
+  /* Stats Period */
+  .ec-stats-period-selector {
+    margin-bottom: 8px;
+    width: 100%;
+  }
+  .ec-stats-period-btn {
+    padding: 5px 10px;
+    font-size: 11px;
+    flex: 1;
+    text-align: center;
+  }
+
+  /* Stats Row */
   .ec-stats-row {
     grid-template-columns: 1fr 1fr;
-    margin-bottom: 12px;
-    gap: 8px;
+    margin-bottom: 0;
+    gap: 6px;
   }
   .ec-stat-card {
-    padding: 12px;
+    padding: 8px 10px;
+    border-radius: 8px;
   }
   .ec-stat-header {
-    margin-bottom: 8px;
+    margin-bottom: 4px;
   }
   .ec-stat-label {
-    font-size: 11px;
+    font-size: 10px;
   }
   .ec-stat-icon {
-    width: 30px;
-    height: 30px;
+    width: 28px;
+    height: 28px;
     border-radius: 8px;
   }
   .ec-stat-icon svg {
@@ -969,77 +1235,105 @@
     height: 14px;
   }
   .ec-stat-value {
-    font-size: 20px;
-    margin-bottom: 2px;
+    font-size: 16px;
+    margin-bottom: 1px;
   }
   .ec-stat-trend {
-    font-size: 10px;
+    font-size: 9px;
   }
+
+  /* Tabs */
   .ec-tabs-container {
-    margin-bottom: 12px;
+    margin-bottom: 10px;
   }
   .ec-tabs {
     padding: 3px;
     width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
   }
   .ec-tab {
-    padding: 8px 12px;
+    padding: 7px 10px;
     font-size: 12px;
     flex: 1;
     text-align: center;
+    white-space: nowrap;
   }
+
+  /* Cards */
   .ec-card {
-    border-radius: 10px;
+    border-radius: 8px;
   }
   .ec-card-header {
-    padding: 12px 14px;
+    padding: 8px 10px;
   }
   .ec-card-title {
-    font-size: 13px;
+    font-size: 12px;
     gap: 6px;
   }
   .ec-card-title svg {
-    width: 16px;
-    height: 16px;
+    width: 14px;
+    height: 14px;
   }
+
+  /* Calendar */
   .ec-calendar {
-    padding: 10px;
+    padding: 6px;
   }
   .ec-cal-header {
-    margin-bottom: 12px;
+    margin-bottom: 6px;
+  }
+  .ec-cal-legend {
+    display: none;
   }
   .ec-cal-month {
-    font-size: 13px;
+    font-size: 12px;
+  }
+  .ec-cal-nav {
+    gap: 6px;
   }
   .ec-cal-nav-btn {
-    width: 28px;
-    height: 28px;
+    width: 24px;
+    height: 24px;
+  }
+  .ec-cal-nav-btn svg {
+    width: 14px;
+    height: 14px;
   }
   .ec-cal-grid {
-    gap: 3px;
+    gap: 2px;
   }
   .ec-cal-day-header {
-    font-size: 10px;
-    padding: 4px 0;
+    font-size: 9px;
+    padding: 2px 0;
   }
   .ec-cal-day {
     font-size: 11px;
-    border-radius: 6px;
+    border-radius: 4px;
+    padding: 4px 2px 12px;
+    min-height: 36px;
   }
   .ec-cal-day .ec-time-badge {
     font-size: 8px;
+    bottom: 2px;
   }
+
+  /* Today Timeline */
   .ec-timeline {
-    padding: 0 12px 12px;
+    padding: 0 10px 10px;
   }
   .ec-tl-item {
-    padding: 10px 0;
-    gap: 10px;
+    padding: 8px 0;
+    gap: 8px;
   }
   .ec-tl-icon {
-    width: 32px;
-    height: 32px;
+    width: 28px;
+    height: 28px;
     border-radius: 8px;
+  }
+  .ec-tl-icon svg {
+    width: 14px;
+    height: 14px;
   }
   .ec-tl-title {
     font-size: 12px;
@@ -1050,34 +1344,38 @@
   .ec-tl-time {
     font-size: 11px;
   }
+  .ec-tl-empty {
+    padding: 16px;
+    font-size: 12px;
+  }
+
+  /* Weekly Pattern */
   .ec-weekly {
-    padding: 12px 14px;
+    padding: 10px 12px;
   }
   .ec-weekly-title {
     font-size: 11px;
   }
   .ec-weekly-bars {
-    height: 60px;
-    gap: 6px;
+    height: 50px;
+    gap: 4px;
   }
-  .ec-info-item {
-    padding: 10px 14px;
+  .ec-weekly-label {
+    font-size: 10px;
   }
-  .ec-info-label {
-    font-size: 12px;
-  }
-  .ec-info-value {
-    font-size: 12px;
-  }
+
+  /* Tab Content Full */
   .ec-tab-content-full {
-    padding: 12px;
+    padding: 10px;
     border-radius: 10px;
   }
+
+  /* Alerts */
   .ec-alerts-list {
     padding: 8px;
   }
   .ec-alert-item {
-    padding: 10px;
+    padding: 8px;
     gap: 8px;
     border-radius: 8px;
   }
@@ -1091,10 +1389,83 @@
   .ec-alert-desc {
     font-size: 10px;
   }
+  .ec-alerts-empty {
+    font-size: 11px;
+    padding: 16px;
+  }
+
+  /* Badges */
   .ec-badge-archived,
   .ec-badge-fired {
-    font-size: 10px;
+    font-size: 9px;
     padding: 2px 6px;
     margin-left: 6px;
+  }
+
+  /* Info Sections */
+  .ec-info-sections-grid {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+  .ec-info-section {
+    padding: 10px;
+    border-radius: 8px;
+  }
+  .ec-info-section-title {
+    font-size: 10px;
+    margin-bottom: 8px;
+  }
+  .ec-info-row {
+    padding: 7px 0;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+  .ec-info-label {
+    font-size: 11px;
+  }
+  .ec-info-val {
+    font-size: 11px;
+  }
+  .ec-info-label-empty {
+    font-size: 11px;
+  }
+
+  /* History */
+  .ec-history-timeline {
+    padding: 10px;
+  }
+  .ec-history-item {
+    padding: 8px 0;
+    gap: 8px;
+  }
+  .ec-history-icon {
+    width: 30px;
+    height: 30px;
+    border-radius: 8px;
+  }
+  .ec-history-icon svg {
+    width: 14px;
+    height: 14px;
+  }
+  .ec-history-title {
+    font-size: 12px;
+  }
+  .ec-history-desc {
+    font-size: 10px;
+  }
+  .ec-history-date {
+    font-size: 10px;
+  }
+  .ec-history-empty {
+    padding: 32px 16px;
+    font-size: 12px;
+  }
+
+  /* Info items (old style) */
+  .ec-info-item {
+    padding: 8px 12px;
+  }
+  .ec-info-value {
+    font-size: 12px;
   }
 }

@@ -3,6 +3,7 @@ import { Settings, Wifi, WifiOff, RefreshCw, Eye, Download, Search, Save, Check,
 import { SyncFilterTab } from '../../components/skud/SyncFilterTab';
 import { sigurService } from '../../services/sigurService';
 import { skudService } from '../../services/skudService';
+import { structureApi } from '../../api/structure';
 import { useAuth } from '../../contexts/AuthContext';
 import type { IAccessPointSetting } from '../../types';
 import '../../styles/SigurSettingsPage.css';
@@ -56,6 +57,7 @@ const INITIAL_STEPS: ISyncAllStep[] = [
   { id: 3, name: 'departments', label: 'Отделы (иерархия)', status: 'pending' },
   { id: 4, name: 'positions', label: 'Должности', status: 'pending' },
   { id: 5, name: 'employees', label: 'Сотрудники', status: 'pending' },
+  { id: 6, name: 'events', label: 'События', status: 'pending' },
 ];
 
 const renderStepResult = (name: string, result: Record<string, unknown>) => {
@@ -77,6 +79,10 @@ const renderStepResult = (name: string, result: Record<string, unknown>) => {
     case 'employees':
       text = `Импорт: ${result.imported}, обновлено: ${result.updated}, пропущено: ${result.skipped}`;
       break;
+    case 'events':
+      text = `Импорт: ${result.imported}, пропущено: ${result.skipped}`;
+      if (result.filteredByDept) text += `, отфильтровано: ${result.filteredByDept}`;
+      break;
     default:
       text = JSON.stringify(result);
   }
@@ -90,7 +96,7 @@ const renderStepResult = (name: string, result: Record<string, unknown>) => {
 type SettingsTab = 'settings' | 'access-points' | 'sync-filter';
 
 export const SigurSettingsPage = () => {
-  const { hasPosition } = useAuth();
+  const { hasPosition, profile } = useAuth();
   const canEdit = hasPosition('manager') || hasPosition('owner') || hasPosition('super_admin');
 
   const [activeTab, setActiveTab] = useState<SettingsTab>('settings');
@@ -122,8 +128,14 @@ export const SigurSettingsPage = () => {
   const [syncing, setSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState<ISyncResult | null>(null);
   const [syncProgress, setSyncProgress] = useState<{ percent: number; day: string; message: string } | null>(null);
+  const [eventsProgress, setEventsProgress] = useState<{ percent: number; day: string; dayIndex: number; totalDays: number } | null>(null);
+  const [employeesProgress, setEmployeesProgress] = useState<{ percent: number; current: number; total: number } | null>(null);
   const [clearing, setClearing] = useState(false);
   const [clearResult, setClearResult] = useState<{ deleted: number } | null>(null);
+
+  // Очистка структуры
+  const [clearingStructure, setClearingStructure] = useState(false);
+  const [clearStructureResult, setClearStructureResult] = useState<{ employeesDeleted: number; departmentsDeleted: number } | null>(null);
 
   // Точки доступа
   const [accessPoints, setAccessPoints] = useState<string[]>([]);
@@ -221,6 +233,8 @@ export const SigurSettingsPage = () => {
   const handleSyncAll = async () => {
     setSyncAllRunning(true);
     setSyncAllDone(false);
+    setEventsProgress(null);
+    setEmployeesProgress(null);
     setError('');
     setSyncAllSteps(INITIAL_STEPS.map(s => ({ ...s, status: 'pending', result: undefined, error: undefined })));
 
@@ -233,7 +247,7 @@ export const SigurSettingsPage = () => {
           'Content-Type': 'application/json',
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
-        body: JSON.stringify({}),
+        body: JSON.stringify({ startDate: syncStartDate, endDate: syncEndDate }),
       });
 
       if (!response.ok || !response.body) {
@@ -262,8 +276,20 @@ export const SigurSettingsPage = () => {
                   ? { ...s, status: data.status, result: data.result, error: data.error }
                   : s
               ));
+              if (data.status === 'done' || data.status === 'error') {
+                setEventsProgress(null);
+                setEmployeesProgress(null);
+              }
+            } else if (data.type === 'employees_progress') {
+              setEmployeesProgress({ percent: data.percent, current: data.current, total: data.total });
+            } else if (data.type === 'events_day') {
+              setEventsProgress({ percent: data.percent, day: data.day, dayIndex: data.dayIndex, totalDays: data.totalDays });
+            } else if (data.type === 'events_summaries') {
+              setEventsProgress(prev => prev ? { ...prev, percent: 100, day: 'Пересчёт сводок...' } : null);
             } else if (data.type === 'done') {
               setSyncAllDone(true);
+              setEventsProgress(null);
+              setEmployeesProgress(null);
             } else if (data.type === 'error') {
               setError(data.message);
             }
@@ -274,6 +300,8 @@ export const SigurSettingsPage = () => {
       setError(err instanceof Error ? err.message : 'Ошибка синхронизации');
     } finally {
       setSyncAllRunning(false);
+      setEventsProgress(null);
+      setEmployeesProgress(null);
     }
   };
 
@@ -309,14 +337,20 @@ export const SigurSettingsPage = () => {
 
   const handleSync = async () => {
     if (!syncStartDate || !syncEndDate) return;
+    // Запускаем полную синхронизацию (структура + сотрудники + события)
     setSyncing(true);
     setSyncResult(null);
     setSyncProgress(null);
+    setEventsProgress(null);
+    setEmployeesProgress(null);
+    setSyncAllDone(false);
     setError('');
+    setSyncAllSteps(INITIAL_STEPS.map(s => ({ ...s, status: 'pending', result: undefined, error: undefined })));
+
     try {
       const token = localStorage.getItem('access_token');
       const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
-      const response = await fetch(`${apiUrl}/sigur/sync`, {
+      const response = await fetch(`${apiUrl}/sigur/sync-all`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -345,19 +379,30 @@ export const SigurSettingsPage = () => {
           if (!line.startsWith('data: ')) continue;
           try {
             const data = JSON.parse(line.slice(6));
-            if (data.type === 'day_start' || data.type === 'day_done') {
-              setSyncProgress({
-                percent: data.percent || 0,
-                day: data.day || '',
-                message: data.type === 'day_start'
-                  ? `Загрузка ${data.day}...`
-                  : `${data.day}: +${data.inserted ?? 0}`,
-              });
-            } else if (data.type === 'status') {
-              setSyncProgress(prev => ({ ...prev, percent: prev?.percent || 0, day: '', message: data.message }));
+            if (data.type === 'step') {
+              setSyncAllSteps(prev => prev.map(s =>
+                s.id === data.step
+                  ? { ...s, status: data.status, result: data.result, error: data.error }
+                  : s
+              ));
+              if (data.status === 'done' || data.status === 'error') {
+                setEventsProgress(null);
+                setEmployeesProgress(null);
+              }
+            } else if (data.type === 'employees_progress') {
+              setEmployeesProgress({ percent: data.percent, current: data.current, total: data.total });
+            } else if (data.type === 'events_day') {
+              setEventsProgress({ percent: data.percent, day: data.day, dayIndex: data.dayIndex, totalDays: data.totalDays });
+            } else if (data.type === 'events_summaries') {
+              setEventsProgress(prev => prev ? { ...prev, percent: 100, day: 'Пересчёт сводок...' } : null);
             } else if (data.type === 'done') {
-              setSyncResult(data as ISyncResult);
-              setSyncProgress(null);
+              setSyncAllDone(true);
+              setEventsProgress(null);
+              setEmployeesProgress(null);
+              const eventsResult = data.results?.events;
+              if (eventsResult) {
+                setSyncResult(eventsResult as ISyncResult);
+              }
             } else if (data.type === 'error') {
               setError(data.message);
             }
@@ -369,6 +414,8 @@ export const SigurSettingsPage = () => {
     } finally {
       setSyncing(false);
       setSyncProgress(null);
+      setEventsProgress(null);
+      setEmployeesProgress(null);
     }
   };
 
@@ -386,6 +433,25 @@ export const SigurSettingsPage = () => {
       setError(err instanceof Error ? err.message : 'Ошибка удаления событий');
     } finally {
       setClearing(false);
+    }
+  };
+
+  const handleClearStructure = async () => {
+    if (!confirm('Удалить ВСЕ отделы и сотрудников организации? Это действие необратимо!')) return;
+    setClearingStructure(true);
+    setClearStructureResult(null);
+    setError('');
+    try {
+      const result = await structureApi.clearStructure(profile?.organization_id || undefined);
+      if (result.success && result.data) {
+        setClearStructureResult(result.data);
+      } else {
+        setError(result.error || 'Ошибка очистки структуры');
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Ошибка очистки структуры');
+    } finally {
+      setClearingStructure(false);
     }
   };
 
@@ -478,7 +544,26 @@ export const SigurSettingsPage = () => {
             <RefreshCw size={14} className={syncAllRunning ? 'sigur-spin' : ''} />
             {syncAllRunning ? 'Синхронизация...' : 'Полная синхронизация'}
           </button>
+          {canEdit && (
+            <button
+              className="sigur-btn sigur-btn-danger"
+              onClick={handleClearStructure}
+              disabled={clearingStructure || syncAllRunning}
+            >
+              <Trash2 size={14} />
+              {clearingStructure ? 'Очистка...' : 'Очистить структуру'}
+            </button>
+          )}
         </div>
+
+        {clearStructureResult && (
+          <div className="sigur-sync-result">
+            <div className="sigur-sync-stats">
+              <span className="sigur-sync-stat success">Удалено сотрудников: <strong>{clearStructureResult.employeesDeleted}</strong></span>
+              <span className="sigur-sync-stat success">Удалено отделов: <strong>{clearStructureResult.departmentsDeleted}</strong></span>
+            </div>
+          </div>
+        )}
 
         {(syncAllRunning || syncAllDone) && (
           <div className="sigur-stepper">
@@ -492,7 +577,25 @@ export const SigurSettingsPage = () => {
                 </div>
                 <div className="sigur-step-content">
                   <div className="sigur-step-label">{step.label}</div>
-                  {step.status === 'running' && (
+                  {step.status === 'running' && step.name === 'employees' && employeesProgress ? (
+                    <div className="sigur-events-progress">
+                      <div className="sigur-events-progress-bar">
+                        <div className="sigur-events-progress-fill" style={{ width: `${employeesProgress.percent}%` }} />
+                      </div>
+                      <span className="sigur-events-progress-text">
+                        {employeesProgress.current}/{employeesProgress.total} — {employeesProgress.percent}%
+                      </span>
+                    </div>
+                  ) : step.status === 'running' && step.name === 'events' && eventsProgress ? (
+                    <div className="sigur-events-progress">
+                      <div className="sigur-events-progress-bar">
+                        <div className="sigur-events-progress-fill" style={{ width: `${eventsProgress.percent}%` }} />
+                      </div>
+                      <span className="sigur-events-progress-text">
+                        {eventsProgress.day === 'Пересчёт сводок...' ? eventsProgress.day : `${eventsProgress.day} — ${eventsProgress.percent}% (${eventsProgress.dayIndex + 1}/${eventsProgress.totalDays})`}
+                      </span>
+                    </div>
+                  ) : step.status === 'running' && (
                     <div className="sigur-step-status">Выполняется...</div>
                   )}
                   {step.status === 'done' && step.result && (
@@ -649,7 +752,7 @@ export const SigurSettingsPage = () => {
             onClick={handleSync}
             disabled={syncing || clearing || !connected || !syncStartDate || !syncEndDate}
           >
-            <Download size={14} />
+            <RefreshCw size={14} className={syncing ? 'sigur-spin' : ''} />
             {syncing ? 'Синхронизация...' : 'Синхронизировать'}
           </button>
           <button
@@ -662,14 +765,49 @@ export const SigurSettingsPage = () => {
           </button>
         </div>
 
-        {syncProgress && (
-          <div className="sigur-progress">
-            <div className="sigur-progress-bar">
-              <div className="sigur-progress-fill" style={{ width: `${syncProgress.percent}%` }} />
-            </div>
-            <div className="sigur-progress-text">
-              {syncProgress.percent}% — {syncProgress.message}
-            </div>
+        {(syncing || syncAllDone) && (
+          <div className="sigur-stepper">
+            {syncAllSteps.map(step => (
+              <div key={step.id} className={`sigur-step sigur-step--${step.status}`}>
+                <div className="sigur-step-indicator">
+                  {step.status === 'done' && <span>&#10003;</span>}
+                  {step.status === 'running' && <span className="sigur-step-spinner" />}
+                  {step.status === 'error' && <span>&#10007;</span>}
+                  {step.status === 'pending' && <span className="sigur-step-number">{step.id}</span>}
+                </div>
+                <div className="sigur-step-content">
+                  <div className="sigur-step-label">{step.label}</div>
+                  {step.status === 'running' && step.name === 'employees' && employeesProgress && (
+                    <div className="sigur-events-progress">
+                      <div className="sigur-events-progress-bar">
+                        <div className="sigur-events-progress-fill" style={{ width: `${employeesProgress.percent}%` }} />
+                      </div>
+                      <span className="sigur-events-progress-text">
+                        {employeesProgress.current}/{employeesProgress.total} — {employeesProgress.percent}%
+                      </span>
+                    </div>
+                  )}
+                  {step.status === 'running' && step.name === 'events' && eventsProgress && (
+                    <div className="sigur-events-progress">
+                      <div className="sigur-events-progress-bar">
+                        <div className="sigur-events-progress-fill" style={{ width: `${eventsProgress.percent}%` }} />
+                      </div>
+                      <span className="sigur-events-progress-text">
+                        {eventsProgress.day === 'Пересчёт сводок...' ? eventsProgress.day : `${eventsProgress.day} — ${eventsProgress.percent}% (${eventsProgress.dayIndex + 1}/${eventsProgress.totalDays})`}
+                      </span>
+                    </div>
+                  )}
+                  {step.status === 'done' && step.result && (
+                    <div className="sigur-step-result">
+                      {renderStepResult(step.name, step.result)}
+                    </div>
+                  )}
+                  {step.status === 'error' && step.error && (
+                    <div className="sigur-step-error">{step.error}</div>
+                  )}
+                </div>
+              </div>
+            ))}
           </div>
         )}
 

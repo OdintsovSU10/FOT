@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
-import { Search, Save, Check, RefreshCw, Info } from 'lucide-react';
+import { Search, Save, Check, RefreshCw, Info, ChevronRight, ChevronDown, Folder, FolderOpen } from 'lucide-react';
 import { sigurService } from '../../services/sigurService';
 import '../../styles/SigurSettingsPage.css';
 
@@ -9,19 +9,176 @@ interface ISigurDepartment {
   parentId?: number;
 }
 
+interface ITreeNode {
+  dept: ISigurDepartment;
+  children: ITreeNode[];
+}
+
 interface ISyncFilterTabProps {
   connected: boolean | null;
   canEdit: boolean;
 }
 
+type SortMode = 'alpha' | 'id';
+
+const buildTree = (depts: ISigurDepartment[], sortMode: SortMode): ITreeNode[] => {
+  const byId = new Map<number, ITreeNode>();
+  for (const dept of depts) {
+    byId.set(dept.id, { dept, children: [] });
+  }
+
+  const roots: ITreeNode[] = [];
+  for (const dept of depts) {
+    const node = byId.get(dept.id)!;
+    if (dept.parentId && byId.has(dept.parentId)) {
+      byId.get(dept.parentId)!.children.push(node);
+    } else {
+      roots.push(node);
+    }
+  }
+
+  const comparator = sortMode === 'alpha'
+    ? (a: ITreeNode, b: ITreeNode) => a.dept.name.localeCompare(b.dept.name, 'ru')
+    : (a: ITreeNode, b: ITreeNode) => a.dept.id - b.dept.id;
+
+  const sortNodes = (nodes: ITreeNode[]) => {
+    nodes.sort(comparator);
+    for (const n of nodes) sortNodes(n.children);
+  };
+  sortNodes(roots);
+  return roots;
+};
+
+const getAllDescendantIds = (node: ITreeNode): number[] => {
+  const ids: number[] = [];
+  for (const child of node.children) {
+    ids.push(child.dept.id);
+    ids.push(...getAllDescendantIds(child));
+  }
+  return ids;
+};
+
+const getMatchingIdsWithAncestors = (depts: ISigurDepartment[], query: string): Set<number> | null => {
+  if (!query.trim()) return null;
+  const q = query.toLowerCase();
+  const matchIds = new Set<number>();
+  const parentMap = new Map<number, number>();
+
+  for (const d of depts) {
+    if (d.parentId) parentMap.set(d.id, d.parentId);
+    if (d.name.toLowerCase().includes(q)) matchIds.add(d.id);
+  }
+
+  const visible = new Set(matchIds);
+  for (const id of matchIds) {
+    let cur = parentMap.get(id);
+    while (cur && !visible.has(cur)) {
+      visible.add(cur);
+      cur = parentMap.get(cur);
+    }
+  }
+  return visible;
+};
+
+interface ITreeNodeRowProps {
+  node: ITreeNode;
+  depth: number;
+  selectedIds: Set<number>;
+  expandedIds: Set<number>;
+  canEdit: boolean;
+  visibleIds: Set<number> | null;
+  onToggleSelect: (id: number, descendants: number[]) => void;
+  onToggleExpand: (id: number) => void;
+}
+
+const TreeNodeRow = ({ node, depth, selectedIds, expandedIds, canEdit, visibleIds, onToggleSelect, onToggleExpand }: ITreeNodeRowProps) => {
+  const { dept, children } = node;
+  const hasChildren = children.length > 0;
+  const isExpanded = expandedIds.has(dept.id);
+  const isSelected = selectedIds.has(dept.id);
+
+  if (visibleIds && !visibleIds.has(dept.id)) return null;
+
+  const allDescendants = getAllDescendantIds(node);
+  const allChildrenSelected = hasChildren && allDescendants.length > 0 && allDescendants.every(id => selectedIds.has(id));
+  const someChildrenSelected = hasChildren && allDescendants.some(id => selectedIds.has(id));
+
+  const handleToggleSelect = () => {
+    if (!canEdit) return;
+    onToggleSelect(dept.id, allDescendants);
+  };
+
+  const handleExpandClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    onToggleExpand(dept.id);
+  };
+
+  const visibleChildren = hasChildren && isExpanded
+    ? children.filter(c => !visibleIds || visibleIds.has(c.dept.id))
+    : [];
+
+  return (
+    <>
+      <div
+        className={`sync-tree-row ${isSelected ? 'selected' : ''}`}
+        style={{ paddingLeft: `${12 + depth * 24}px` }}
+        onClick={handleToggleSelect}
+      >
+        <span className="sync-tree-expand" onClick={hasChildren ? handleExpandClick : undefined}>
+          {hasChildren ? (
+            isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />
+          ) : <span style={{ width: 14 }} />}
+        </span>
+
+        <input
+          type="checkbox"
+          className="sync-filter-checkbox"
+          checked={isSelected && (!hasChildren || allChildrenSelected)}
+          ref={el => {
+            if (el) el.indeterminate = isSelected && hasChildren && someChildrenSelected && !allChildrenSelected;
+          }}
+          onChange={handleToggleSelect}
+          disabled={!canEdit}
+          onClick={e => e.stopPropagation()}
+        />
+
+        <span className="sync-tree-icon">
+          {hasChildren
+            ? (isExpanded ? <FolderOpen size={14} /> : <Folder size={14} />)
+            : null}
+        </span>
+
+        <span className="sync-tree-name">{dept.name}</span>
+        <span className="sync-tree-id">{dept.id}</span>
+      </div>
+
+      {isExpanded && visibleChildren.map(child => (
+        <TreeNodeRow
+          key={child.dept.id}
+          node={child}
+          depth={depth + 1}
+          selectedIds={selectedIds}
+          expandedIds={expandedIds}
+          canEdit={canEdit}
+          visibleIds={visibleIds}
+          onToggleSelect={onToggleSelect}
+          onToggleExpand={onToggleExpand}
+        />
+      ))}
+    </>
+  );
+};
+
 export const SyncFilterTab = ({ connected, canEdit }: ISyncFilterTabProps) => {
   const [sigurDepts, setSigurDepts] = useState<ISigurDepartment[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [initialIds, setInitialIds] = useState<Set<number>>(new Set());
+  const [expandedIds, setExpandedIds] = useState<Set<number>>(new Set());
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [search, setSearch] = useState('');
+  const [sortMode, setSortMode] = useState<SortMode>('alpha');
   const [error, setError] = useState('');
 
   const loadData = useCallback(async () => {
@@ -37,9 +194,16 @@ export const SyncFilterTab = ({ connected, canEdit }: ISyncFilterTabProps) => {
         id: d.id as number,
         name: (d.name as string) || '',
         parentId: d.parentId as number | undefined,
-      })).filter(d => d.name.trim()).sort((a, b) => a.name.localeCompare(b.name, 'ru'));
+      })).filter(d => d.name.trim());
 
       setSigurDepts(depts);
+
+      // Expand all folders by default
+      const folders = new Set<number>();
+      for (const d of depts) {
+        if (d.parentId) folders.add(d.parentId);
+      }
+      setExpandedIds(folders);
 
       const filterIds = new Set<number>(
         (filterRes || []).map(f => f.sigur_department_id)
@@ -57,11 +221,23 @@ export const SyncFilterTab = ({ connected, canEdit }: ISyncFilterTabProps) => {
     if (connected) loadData();
   }, [connected, loadData]);
 
-  const filteredDepts = useMemo(() => {
-    if (!search.trim()) return sigurDepts;
-    const q = search.toLowerCase();
-    return sigurDepts.filter(d => d.name.toLowerCase().includes(q));
-  }, [sigurDepts, search]);
+  const tree = useMemo(() => buildTree(sigurDepts, sortMode), [sigurDepts, sortMode]);
+
+  const visibleIds = useMemo(
+    () => getMatchingIdsWithAncestors(sigurDepts, search),
+    [sigurDepts, search],
+  );
+
+  // Auto-expand parents when searching
+  useEffect(() => {
+    if (visibleIds) {
+      setExpandedIds(prev => {
+        const next = new Set(prev);
+        for (const id of visibleIds) next.add(id);
+        return next;
+      });
+    }
+  }, [visibleIds]);
 
   const isDirty = useMemo(() => {
     if (selectedIds.size !== initialIds.size) return true;
@@ -71,36 +247,52 @@ export const SyncFilterTab = ({ connected, canEdit }: ISyncFilterTabProps) => {
     return false;
   }, [selectedIds, initialIds]);
 
-  const toggleDept = (id: number) => {
+  const handleToggleSelect = (id: number, descendants: number[]) => {
     setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        // Deselect this + all descendants
+        next.delete(id);
+        for (const d of descendants) next.delete(d);
+      } else {
+        // Select this + all descendants
+        next.add(id);
+        for (const d of descendants) next.add(d);
+      }
+      return next;
+    });
+    setSaved(false);
+  };
+
+  const handleToggleExpand = (id: number) => {
+    setExpandedIds(prev => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
       return next;
     });
-    setSaved(false);
   };
 
   const handleSelectAll = () => {
-    setSelectedIds(prev => {
-      const next = new Set(prev);
-      for (const d of filteredDepts) next.add(d.id);
-      return next;
-    });
+    setSelectedIds(new Set(sigurDepts.map(d => d.id)));
     setSaved(false);
   };
 
   const handleDeselectAll = () => {
-    if (search.trim()) {
-      setSelectedIds(prev => {
-        const next = new Set(prev);
-        for (const d of filteredDepts) next.delete(d.id);
-        return next;
-      });
-    } else {
-      setSelectedIds(new Set());
-    }
+    setSelectedIds(new Set());
     setSaved(false);
+  };
+
+  const handleExpandAll = () => {
+    const folders = new Set<number>();
+    for (const d of sigurDepts) {
+      if (d.parentId) folders.add(d.parentId);
+    }
+    setExpandedIds(folders);
+  };
+
+  const handleCollapseAll = () => {
+    setExpandedIds(new Set());
   };
 
   const handleSave = async () => {
@@ -146,7 +338,7 @@ export const SyncFilterTab = ({ connected, canEdit }: ISyncFilterTabProps) => {
       {error && (
         <div className="sigur-error" style={{ marginBottom: '0.75rem' }}>
           {error}
-          <button onClick={() => setError('')}>×</button>
+          <button onClick={() => setError('')}>x</button>
         </div>
       )}
 
@@ -161,6 +353,20 @@ export const SyncFilterTab = ({ connected, canEdit }: ISyncFilterTabProps) => {
           />
         </div>
         <div className="sync-filter-actions">
+          <div className="sync-filter-sort-toggle">
+            <button
+              className={`sync-filter-sort-btn ${sortMode === 'alpha' ? 'active' : ''}`}
+              onClick={() => setSortMode('alpha')}
+            >
+              А-Я
+            </button>
+            <button
+              className={`sync-filter-sort-btn ${sortMode === 'id' ? 'active' : ''}`}
+              onClick={() => setSortMode('id')}
+            >
+              ID
+            </button>
+          </div>
           {canEdit && (
             <>
               <button className="sigur-btn" onClick={handleSelectAll}>
@@ -171,6 +377,12 @@ export const SyncFilterTab = ({ connected, canEdit }: ISyncFilterTabProps) => {
               </button>
             </>
           )}
+          <button className="sigur-btn" onClick={handleExpandAll} title="Развернуть все">
+            <ChevronDown size={14} />
+          </button>
+          <button className="sigur-btn" onClick={handleCollapseAll} title="Свернуть все">
+            <ChevronRight size={14} />
+          </button>
           <button className="sigur-btn" onClick={loadData} title="Обновить список">
             <RefreshCw size={14} />
           </button>
@@ -202,59 +414,25 @@ export const SyncFilterTab = ({ connected, canEdit }: ISyncFilterTabProps) => {
           Нет отделов в Sigur
         </div>
       ) : (
-        <div className="sigur-preview-table-wrap sync-filter-table-wrap">
-          <table className="sigur-preview-table">
-            <thead>
-              <tr>
-                <th style={{ width: 40, textAlign: 'center' }}>
-                  <input
-                    type="checkbox"
-                    className="sync-filter-checkbox"
-                    checked={filteredDepts.length > 0 && filteredDepts.every(d => selectedIds.has(d.id))}
-                    onChange={() => {
-                      const allSelected = filteredDepts.every(d => selectedIds.has(d.id));
-                      if (allSelected) handleDeselectAll();
-                      else handleSelectAll();
-                    }}
-                    disabled={!canEdit}
-                  />
-                </th>
-                <th>#</th>
-                <th>Отдел Sigur</th>
-                <th>ID</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredDepts.map((dept, idx) => (
-                <tr
-                  key={dept.id}
-                  onClick={() => canEdit && toggleDept(dept.id)}
-                  style={{ cursor: canEdit ? 'pointer' : 'default' }}
-                >
-                  <td style={{ width: 40, textAlign: 'center' }}>
-                    <input
-                      type="checkbox"
-                      className="sync-filter-checkbox"
-                      checked={selectedIds.has(dept.id)}
-                      onChange={() => toggleDept(dept.id)}
-                      disabled={!canEdit}
-                      onClick={e => e.stopPropagation()}
-                    />
-                  </td>
-                  <td style={{ width: 40, textAlign: 'center', color: 'var(--text-tertiary)' }}>{idx + 1}</td>
-                  <td>{dept.name}</td>
-                  <td style={{ color: 'var(--text-tertiary)', fontSize: '0.6875rem' }}>{dept.id}</td>
-                </tr>
-              ))}
-              {filteredDepts.length === 0 && (
-                <tr>
-                  <td colSpan={4} style={{ textAlign: 'center', color: 'var(--text-tertiary)', padding: '1rem' }}>
-                    Не найдено
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
+        <div className="sync-tree-wrap">
+          {tree.map(node => (
+            <TreeNodeRow
+              key={node.dept.id}
+              node={node}
+              depth={0}
+              selectedIds={selectedIds}
+              expandedIds={expandedIds}
+              canEdit={canEdit}
+              visibleIds={visibleIds}
+              onToggleSelect={handleToggleSelect}
+              onToggleExpand={handleToggleExpand}
+            />
+          ))}
+          {visibleIds && tree.every(n => !visibleIds.has(n.dept.id)) && (
+            <div style={{ textAlign: 'center', padding: '1rem', color: 'var(--text-tertiary)', fontSize: '0.8125rem' }}>
+              Не найдено
+            </div>
+          )}
         </div>
       )}
     </div>

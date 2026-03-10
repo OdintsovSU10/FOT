@@ -64,8 +64,8 @@ class SigurService {
       const config = this.getConnectionConfig(preferred);
       if (config) return preferred;
     }
-    if (this.getConnectionConfig('internal')) return 'internal';
     if (this.getConnectionConfig('external')) return 'external';
+    if (this.getConnectionConfig('internal')) return 'internal';
     throw new Error('Sigur не настроен. Укажите SIGUR_INTERNAL_* или SIGUR_EXTERNAL_* в .env');
   }
 
@@ -324,7 +324,37 @@ class SigurService {
 
   /** Получить список сотрудников */
   async getEmployees(filters?: Record<string, any>, connection?: ConnectionType) {
-    return this.fetchAllPaginated('/api/v1/employees', filters, connection);
+    return this.fetchAllPaginated('/api/v1/employees', filters, connection, 1000);
+  }
+
+  /** Получить сотрудников по списку отделов (по одному запросу на отдел, избегает проблему с большими offset) */
+  async getEmployeesByDepartments(
+    departmentIds: number[],
+    connection?: ConnectionType,
+    onProgress?: (loaded: number, deptIndex: number, totalDepts: number) => void,
+  ): Promise<Record<string, unknown>[]> {
+    const allEmployees: Record<string, unknown>[] = [];
+    const seen = new Set<number>();
+    const total = departmentIds.length;
+    for (let i = 0; i < total; i++) {
+      const deptId = departmentIds[i];
+      const items = await this.fetchAllPaginated<Record<string, unknown>>(
+        '/api/v1/employees',
+        { departmentId: deptId },
+        connection,
+        1000,
+      );
+      for (const emp of items) {
+        const id = emp.id as number;
+        if (id && !seen.has(id)) {
+          seen.add(id);
+          allEmployees.push(emp);
+        }
+      }
+      if (onProgress) onProgress(allEmployees.length, i + 1, total);
+    }
+    console.log(`[sigur] fetched ${allEmployees.length} employees from ${total} departments`);
+    return allEmployees;
   }
 
   /** Получить сотрудников одним запросом (для preview) */
@@ -461,17 +491,6 @@ class SigurService {
     return this.request<Record<string, unknown>>(`/api/v1/employees/${id}`, undefined, connection);
   }
 
-  /** Предзагрузка кэша сотрудников при старте сервера */
-  warmUpCache(): void {
-    if (!this.isConfigured()) return;
-    console.log('[sigur] warming up employee cache...');
-    this.getEmployeesCached().catch(e =>
-      console.warn('[sigur] cache warmup failed:', (e as Error).message),
-    );
-  }
 }
 
 export const sigurService = new SigurService();
-
-// Предзагрузка кэша при импорте модуля (старт сервера)
-sigurService.warmUpCache();

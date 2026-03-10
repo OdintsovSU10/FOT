@@ -18,6 +18,12 @@ interface IAttendanceCalendarProps {
   onDayClick?: (day: number) => void;
 }
 
+const formatWorkedTime = (totalSeconds: number): string => {
+  const h = Math.floor(totalSeconds / 3600);
+  const m = Math.floor((totalSeconds % 3600) / 60);
+  return m > 0 ? `${h}ч${m}м` : `${h}ч`;
+};
+
 export const AttendanceCalendar: FC<IAttendanceCalendarProps> = ({
   days, month, year, onPrevMonth, onNextMonth, onDayClick,
 }) => {
@@ -89,8 +95,8 @@ export const AttendanceCalendar: FC<IAttendanceCalendarProps> = ({
                 onClick={() => clickable && onDayClick?.(day)}
               >
                 {day}
-                {data?.arrivalTime && (
-                  <span className="ec-time-badge">{data.arrivalTime}</span>
+                {data && data.totalSeconds > 0 && (
+                  <span className="ec-time-badge">{formatWorkedTime(data.totalSeconds)}</span>
                 )}
               </div>
             );

@@ -1,5 +1,5 @@
 import { apiClient } from '../api/client';
-import type { Employee, EmployeeInput, EmployeeHistoryEvent } from '../types';
+import type { Employee, EmployeeInput, EmployeeHistoryEvent, EnrichPreview, EnrichResult } from '../types';
 
 interface ApiResponse<T> {
   success: boolean;
@@ -101,6 +101,20 @@ export const employeeService = {
     const response = await apiClient.post<ApiResponse<Employee>>(`/employees/${id}/move-department`, {
       org_department_id: orgDepartmentId,
     });
+    return response.data;
+  },
+
+  async enrichPreview(file: File): Promise<EnrichPreview> {
+    const formData = new FormData();
+    formData.append('file', file);
+    const response = await apiClient.post<ApiResponse<EnrichPreview>>('/employees/enrich?preview=true', formData);
+    return response.data;
+  },
+
+  async enrichApply(file: File): Promise<EnrichResult> {
+    const formData = new FormData();
+    formData.append('file', file);
+    const response = await apiClient.post<ApiResponse<EnrichResult>>('/employees/enrich?preview=false', formData);
     return response.data;
   },
 };

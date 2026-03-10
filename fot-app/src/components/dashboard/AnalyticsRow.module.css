@@ -206,6 +206,16 @@
 .riskItem.high { border-left-color: var(--error); }
 .riskItem.medium { border-left-color: var(--warning); }
 
+.riskItem.clickable {
+  cursor: pointer;
+  transition: background 0.15s ease, transform 0.15s ease;
+}
+
+.riskItem.clickable:hover {
+  background: var(--surface-hover);
+  transform: translateX(2px);
+}
+
 .riskAvatar {
   width: 32px;
   height: 32px;

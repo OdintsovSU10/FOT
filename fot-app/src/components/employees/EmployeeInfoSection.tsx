@@ -1,23 +1,6 @@
-import { useState, useRef, useEffect, type FC } from 'react';
-import { X, Check, ChevronDown, Search } from 'lucide-react';
-import type { Employee, EmployeeInput, OrgDepartmentNode } from '../../types';
-
-interface IDepartmentOption {
-  id: string;
-  name: string;
-  level: number;
-}
-
-const flattenDepartments = (nodes: OrgDepartmentNode[], level = 0): IDepartmentOption[] => {
-  const result: IDepartmentOption[] = [];
-  for (const node of nodes) {
-    result.push({ id: node.id, name: node.name, level });
-    if (node.children?.length) {
-      result.push(...flattenDepartments(node.children, level + 1));
-    }
-  }
-  return result;
-};
+import { type FC } from 'react';
+import { X, Check } from 'lucide-react';
+import type { Employee, EmployeeInput } from '../../types';
 
 interface IEmployeeInfoSectionProps {
   employee: Employee;
@@ -26,9 +9,6 @@ interface IEmployeeInfoSectionProps {
   onEditDataChange: (data: Partial<EmployeeInput>) => void;
   onSave: () => void;
   onCancel: () => void;
-  departments?: OrgDepartmentNode[];
-  onMoveDepartment?: (departmentId: string) => Promise<void>;
-  canEdit?: boolean;
 }
 
 const formatDate = (dateStr: string | null) => {
@@ -57,49 +37,7 @@ export const EmployeeInfoSection: FC<IEmployeeInfoSectionProps> = ({
   onEditDataChange,
   onSave,
   onCancel,
-  departments,
-  onMoveDepartment,
-  canEdit,
 }) => {
-  const [moving, setMoving] = useState(false);
-  const [deptOpen, setDeptOpen] = useState(false);
-  const [deptSearch, setDeptSearch] = useState('');
-  const deptRef = useRef<HTMLDivElement>(null);
-  const searchRef = useRef<HTMLInputElement>(null);
-  const flatDepts = departments ? flattenDepartments(departments) : [];
-
-  const filteredDepts = deptSearch
-    ? flatDepts.filter(d => d.name.toLowerCase().includes(deptSearch.toLowerCase()))
-    : flatDepts;
-
-  useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (deptRef.current && !deptRef.current.contains(e.target as Node)) {
-        setDeptOpen(false);
-        setDeptSearch('');
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
-
-  useEffect(() => {
-    if (deptOpen && searchRef.current) {
-      searchRef.current.focus();
-    }
-  }, [deptOpen]);
-
-  const handleDepartmentChange = async (deptId: string) => {
-    if (!onMoveDepartment || !deptId) return;
-    setMoving(true);
-    setDeptOpen(false);
-    setDeptSearch('');
-    try {
-      await onMoveDepartment(deptId);
-    } finally {
-      setMoving(false);
-    }
-  };
   if (isEditing) {
     return (
       <div className="card-edit-form">
@@ -138,103 +76,133 @@ export const EmployeeInfoSection: FC<IEmployeeInfoSectionProps> = ({
   }
 
   return (
-    <div className="card-info-grid">
-      <div className="info-item">
-        <span className="info-label">ФИО</span>
-        <span className="info-value">{employee.full_name}</span>
-      </div>
-      <div className="info-item">
-        <span className="info-label">Должность</span>
-        <span className="info-value">{employee.position_name || '—'}</span>
-      </div>
-      <div className="info-item">
-        <span className="info-label">Отдел</span>
-        {canEdit && flatDepts.length > 0 ? (
-          <div className="dept-dropdown" ref={deptRef}>
-            <button
-              className="dept-dropdown-trigger"
-              onClick={() => setDeptOpen(!deptOpen)}
-              disabled={moving}
-              type="button"
-            >
-              <span className="dept-dropdown-text">
-                {moving ? 'Сохранение...' : (employee.department || '— Не назначен —')}
-              </span>
-              <ChevronDown size={14} className={`dept-dropdown-chevron ${deptOpen ? 'open' : ''}`} />
-            </button>
-            {deptOpen && (
-              <div className="dept-dropdown-menu">
-                <div className="dept-dropdown-search">
-                  <Search size={14} className="dept-search-icon" />
-                  <input
-                    ref={searchRef}
-                    type="text"
-                    className="dept-search-input"
-                    placeholder="Поиск отдела..."
-                    value={deptSearch}
-                    onChange={e => setDeptSearch(e.target.value)}
-                  />
-                </div>
-                <div className="dept-dropdown-list">
-                  {filteredDepts.length === 0 ? (
-                    <div className="dept-dropdown-empty">Ничего не найдено</div>
-                  ) : (
-                    filteredDepts.map(d => (
-                      <button
-                        key={d.id}
-                        type="button"
-                        className={`dept-dropdown-item ${d.id === employee.org_department_id ? 'active' : ''}`}
-                        style={{ paddingLeft: `${12 + d.level * 16}px` }}
-                        onClick={() => handleDepartmentChange(d.id)}
-                      >
-                        {d.name}
-                      </button>
-                    ))
-                  )}
-                </div>
-              </div>
-            )}
+    <div className="ec-info-sections-grid">
+      {/* Личные данные */}
+      <div className="ec-info-section">
+        <div className="ec-info-section-title">Личные данные</div>
+        <div className="ec-info-row">
+          <span className="ec-info-label">ФИО</span>
+          <span className="ec-info-val">{employee.full_name}</span>
+        </div>
+        {employee.birth_date && (
+          <div className="ec-info-row">
+            <span className="ec-info-label">Дата рождения</span>
+            <span className="ec-info-val">{formatDate(employee.birth_date)}</span>
           </div>
-        ) : (
-          <span className="info-value">{employee.department || '—'}</span>
+        )}
+        {employee.country && (
+          <div className="ec-info-row">
+            <span className="ec-info-label">Гражданство</span>
+            <span className="ec-info-val">{employee.country}</span>
+          </div>
+        )}
+        {employee.pension_number && (
+          <div className="ec-info-row">
+            <span className="ec-info-label">СНИЛС</span>
+            <span className="ec-info-val">{employee.pension_number}</span>
+          </div>
         )}
       </div>
-      {employee.birth_date && (
-        <div className="info-item">
-          <span className="info-label">Дата рождения</span>
-          <span className="info-value">{formatDate(employee.birth_date)}</span>
+
+      {/* Контакты */}
+      <div className="ec-info-section">
+        <div className="ec-info-section-title">Контакты</div>
+        <div className="ec-info-row">
+          <span className="ec-info-label">Email</span>
+          <span className="ec-info-val">{employee.email || '—'}</span>
         </div>
-      )}
-      {employee.country && (
-        <div className="info-item">
-          <span className="info-label">Страна</span>
-          <span className="info-value">{employee.country}</span>
+        {employee.tab_number && (
+          <div className="ec-info-row">
+            <span className="ec-info-label">Табельный номер</span>
+            <span className="ec-info-val">{employee.tab_number}</span>
+          </div>
+        )}
+      </div>
+
+      {/* Трудоустройство */}
+      <div className="ec-info-section">
+        <div className="ec-info-section-title">Трудоустройство</div>
+        <div className="ec-info-row">
+          <span className="ec-info-label">Дата найма</span>
+          <span className="ec-info-val">{formatDate(employee.hire_date)}</span>
         </div>
-      )}
-      {employee.pension_number && (
-        <div className="info-item">
-          <span className="info-label">СНИЛС</span>
-          <span className="info-value">{employee.pension_number}</span>
+        <div className="ec-info-row">
+          <span className="ec-info-label">Стаж</span>
+          <span className="ec-info-val">{calculateTenure(employee.hire_date)}</span>
         </div>
-      )}
-      {employee.patent_issue_date && (
-        <div className="info-item">
-          <span className="info-label">Патент выдан</span>
-          <span className="info-value">{formatDate(employee.patent_issue_date)}</span>
+        <div className="ec-info-row">
+          <span className="ec-info-label">Статус</span>
+          <span className={`ec-info-val ${employee.employment_status === 'active' ? 'green' : 'red'}`}>
+            {employee.employment_status === 'active' ? 'Активен' : 'Уволен'}
+          </span>
         </div>
-      )}
-      {employee.patent_expiry_date && (
-        <div className="info-item">
-          <span className="info-label">Патент до</span>
-          <span className="info-value">{formatDate(employee.patent_expiry_date)}</span>
+        <div className="ec-info-row">
+          <span className="ec-info-label">Должность</span>
+          <span className="ec-info-val">{employee.position_name || '—'}</span>
         </div>
-      )}
-      {employee.email && (
-        <div className="info-item">
-          <span className="info-label">Email</span>
-          <span className="info-value">{employee.email}</span>
+        <div className="ec-info-row">
+          <span className="ec-info-label">Отдел</span>
+          <span className="ec-info-val">{employee.department || '—'}</span>
         </div>
-      )}
+        {employee.work_object && (
+          <div className="ec-info-row">
+            <span className="ec-info-label">Объект</span>
+            <span className="ec-info-val">{employee.work_object}</span>
+          </div>
+        )}
+        {employee.current_salary && (
+          <div className="ec-info-row">
+            <span className="ec-info-label">Оклад</span>
+            <span className="ec-info-val">{formatSalary(employee.current_salary)}</span>
+          </div>
+        )}
+      </div>
+
+      {/* Документы / Разрешения */}
+      <div className="ec-info-section">
+        <div className="ec-info-section-title">Документы и разрешения</div>
+        {employee.patent_issue_date && (
+          <div className="ec-info-row">
+            <span className="ec-info-label">Патент выдан</span>
+            <span className="ec-info-val">{formatDate(employee.patent_issue_date)}</span>
+          </div>
+        )}
+        {employee.patent_expiry_date && (
+          <div className="ec-info-row">
+            <span className="ec-info-label">Патент до</span>
+            <span className="ec-info-val">{formatDate(employee.patent_expiry_date)}</span>
+          </div>
+        )}
+        {employee.permit_expiry_date && (
+          <div className="ec-info-row">
+            <span className="ec-info-label">Разрешение до</span>
+            <span className="ec-info-val">{formatDate(employee.permit_expiry_date)}</span>
+          </div>
+        )}
+        {employee.doc_receipt_date && (
+          <div className="ec-info-row">
+            <span className="ec-info-label">Документы получены</span>
+            <span className="ec-info-val">{formatDate(employee.doc_receipt_date)}</span>
+          </div>
+        )}
+        {employee.registration_cat1 && (
+          <div className="ec-info-row">
+            <span className="ec-info-label">Регистрация кат. 1</span>
+            <span className="ec-info-val">{employee.registration_cat1}</span>
+          </div>
+        )}
+        {employee.registration_cat4 && (
+          <div className="ec-info-row">
+            <span className="ec-info-label">Регистрация кат. 4</span>
+            <span className="ec-info-val">{employee.registration_cat4}</span>
+          </div>
+        )}
+        {!employee.patent_issue_date && !employee.patent_expiry_date && !employee.permit_expiry_date && !employee.doc_receipt_date && !employee.registration_cat1 && !employee.registration_cat4 && (
+          <div className="ec-info-row">
+            <span className="ec-info-label-empty">Нет данных</span>
+          </div>
+        )}
+      </div>
     </div>
   );
 };

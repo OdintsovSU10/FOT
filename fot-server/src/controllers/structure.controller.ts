@@ -176,6 +176,67 @@ export const structureController = {
   },
 
   /**
+   * DELETE /api/structure/clear
+   * Очистка всей структуры: удаление сотрудников и отделов организации
+   */
+  async clearStructure(req: AuthenticatedRequest, res: Response): Promise<void> {
+    try {
+      let organizationId = getOrgId(req);
+
+      if (!organizationId) {
+        const { data: orgs } = await supabase.from('organizations').select('id').limit(1);
+        organizationId = orgs?.[0]?.id;
+      }
+
+      if (!organizationId) {
+        res.status(400).json({ success: false, error: 'Организация не указана' });
+        return;
+      }
+
+      // 1. Удаляем сотрудников организации
+      const { count: employeesDeleted, error: empError } = await supabase
+        .from('employees')
+        .delete({ count: 'exact' })
+        .eq('organization_id', organizationId);
+
+      if (empError) {
+        console.error('Clear employees error:', empError);
+        res.status(500).json({ success: false, error: 'Ошибка удаления сотрудников' });
+        return;
+      }
+
+      // 2. Удаляем отделы организации
+      const { count: departmentsDeleted, error: deptError } = await supabase
+        .from('org_departments')
+        .delete({ count: 'exact' })
+        .eq('organization_id', organizationId);
+
+      if (deptError) {
+        console.error('Clear departments error:', deptError);
+        res.status(500).json({ success: false, error: 'Ошибка удаления отделов' });
+        return;
+      }
+
+      await auditService.logFromRequest(req, req.user.id, 'CLEAR_STRUCTURE', {
+        entityType: 'organization',
+        entityId: organizationId,
+        details: { employeesDeleted, departmentsDeleted },
+      });
+
+      res.json({
+        success: true,
+        data: {
+          employeesDeleted: employeesDeleted || 0,
+          departmentsDeleted: departmentsDeleted || 0,
+        },
+      });
+    } catch (error) {
+      console.error('Clear structure error:', error);
+      res.status(500).json({ success: false, error: 'Ошибка очистки структуры' });
+    }
+  },
+
+  /**
    * Внутренний метод: найти или создать отдел по имени
    */
   async findOrCreateDepartment(

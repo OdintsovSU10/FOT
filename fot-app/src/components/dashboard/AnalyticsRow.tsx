@@ -1,4 +1,5 @@
 import type { FC } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Clock, BarChart3, AlertTriangle } from 'lucide-react';
 import type { IDashboardStats, DashboardPeriod } from '../../types';
 import styles from './AnalyticsRow.module.css';
@@ -122,32 +123,40 @@ const AvgArrivalCard: FC<{ data: IDashboardStats['avgArrivalByDay']; period: Das
   </div>
 );
 
-const RisksCard: FC<{ risks: IDashboardStats['risks']; period: DashboardPeriod }> = ({ risks, period }) => (
-  <div className={styles.card}>
-    <div className={styles.title}>
-      <AlertTriangle size={16} />
-      Требуют внимания
-    </div>
-    {risks.length === 0 ? (
-      <div className={styles.empty}>Нет рисков за {getPeriodLabel(period)}</div>
-    ) : (
-      <div className={styles.risksList}>
-        {risks.slice(0, 3).map(risk => (
-          <div key={risk.employee_id} className={`${styles.riskItem} ${styles[risk.severity]}`}>
-            <div className={styles.riskAvatar}>{getInitials(risk.full_name)}</div>
-            <div className={styles.riskInfo}>
-              <div className={styles.riskName}>{risk.full_name}</div>
-              <div className={styles.riskReason}>{risk.reason}</div>
-            </div>
-            <span className={`${styles.riskBadge} ${styles[risk.severity]}`}>
-              {risk.severity === 'high' ? 'Критично' : 'Внимание'}
-            </span>
-          </div>
-        ))}
+const RisksCard: FC<{ risks: IDashboardStats['risks']; period: DashboardPeriod }> = ({ risks, period }) => {
+  const navigate = useNavigate();
+
+  return (
+    <div className={styles.card}>
+      <div className={styles.title}>
+        <AlertTriangle size={16} />
+        Требуют внимания
       </div>
-    )}
-  </div>
-);
+      {risks.length === 0 ? (
+        <div className={styles.empty}>Нет рисков за {getPeriodLabel(period)}</div>
+      ) : (
+        <div className={styles.risksList}>
+          {risks.slice(0, 3).map(risk => (
+            <div
+              key={risk.employee_id}
+              className={`${styles.riskItem} ${styles[risk.severity]} ${styles.clickable}`}
+              onClick={() => navigate(`/tender/${risk.employee_id}`)}
+            >
+              <div className={styles.riskAvatar}>{getInitials(risk.full_name)}</div>
+              <div className={styles.riskInfo}>
+                <div className={styles.riskName}>{risk.full_name}</div>
+                <div className={styles.riskReason}>{risk.reason}</div>
+              </div>
+              <span className={`${styles.riskBadge} ${styles[risk.severity]}`}>
+                {risk.severity === 'high' ? 'Критично' : 'Внимание'}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
 
 export const AnalyticsRow: FC<IAnalyticsRowProps> = ({ stats, period }) => (
   <div className={styles.row}>

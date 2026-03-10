@@ -45,6 +45,17 @@ export const structureApi = {
     }
   },
 
+  async clearStructure(organizationId?: string): Promise<ApiResponse<{ employeesDeleted: number; departmentsDeleted: number }>> {
+    try {
+      return await apiClient.delete<ApiResponse<{ employeesDeleted: number; departmentsDeleted: number }>>(`/structure/clear${orgQuery(organizationId)}`);
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Ошибка очистки структуры',
+      };
+    }
+  },
+
   async deleteDepartment(id: string, organizationId?: string): Promise<ApiResponse<void>> {
     try {
       return await apiClient.delete<ApiResponse<void>>(`/structure/departments/${id}${orgQuery(organizationId)}`);

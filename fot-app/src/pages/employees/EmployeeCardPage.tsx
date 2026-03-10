@@ -118,11 +118,10 @@ export const EmployeeCardPage: FC = () => {
 
   // Load internal access points
   useEffect(() => {
-    if (!employee?.org_department_id) { setInternalPoints(new Set()); return; }
-    skudService.getAccessPointSettings(employee.org_department_id).then(settings => {
+    skudService.getAccessPointSettings().then(settings => {
       setInternalPoints(new Set(settings.filter(s => s.is_internal).map(s => s.access_point_name.trim())));
     }).catch(() => {});
-  }, [employee?.org_department_id]);
+  }, []);
 
   // Load SKUD events for selected month
   const [skudRefresh, setSkudRefresh] = useState(0);
@@ -239,116 +238,121 @@ export const EmployeeCardPage: FC = () => {
         </div>
       )}
 
-      {/* ===== Back Button ===== */}
-      <button className="ec-back-btn" onClick={() => navigate(-1)}>
-        <ArrowLeft size={16} />
-        {backLabel}
-      </button>
-
-      {/* ===== Profile Header ===== */}
-      <div className="ec-profile">
-        <div className="ec-avatar">
-          {getInitials(employee.full_name)}
-          <div className={`ec-avatar-status ${onSite ? 'online' : 'offline'}`} />
-        </div>
-        <div className="ec-profile-info">
-          <h1 className="ec-profile-name">
-            {employee.full_name}
-            {employee.is_archived && <span className="ec-badge-archived">Архив</span>}
-            {employee.employment_status === 'fired' && <span className="ec-badge-fired">Уволен</span>}
-          </h1>
-          <div className="ec-profile-meta">
-            {employee.position_name && (
+      {/* ===== Profile Card ===== */}
+      <div className="ec-profile-card">
+        <button className="ec-back-btn" onClick={() => navigate(-1)}>
+          <ArrowLeft size={16} />
+          {backLabel}
+        </button>
+        <div className="ec-profile">
+          <div className="ec-avatar">
+            {getInitials(employee.full_name)}
+            <div className={`ec-avatar-status ${onSite ? 'online' : 'offline'}`} />
+          </div>
+          <div className="ec-profile-info">
+            <h1 className="ec-profile-name">
+              {employee.full_name}
+              {employee.is_archived && <span className="ec-badge-archived">Архив</span>}
+              {employee.employment_status === 'fired' && <span className="ec-badge-fired">Уволен</span>}
+            </h1>
+            <div className="ec-profile-badges">
+              {employee.position_name && (
+                <span className="ec-badge"><Briefcase size={14} />{employee.position_name}</span>
+              )}
+              {employee.department && (
+                <span className="ec-badge accent"><FolderOpen size={14} />{employee.department}</span>
+              )}
+              {employee.employment_status === 'active' && !employee.is_archived && (
+                <span className="ec-badge accent"><CheckCircle size={14} />Активен</span>
+              )}
+            </div>
+            <div className="ec-profile-meta">
               <div className="ec-meta-item">
-                <Briefcase size={16} />
-                {employee.position_name}
+                <CalendarDays size={16} />
+                В компании с {formatHireDate(employee.hire_date)}
               </div>
-            )}
-            {employee.department && (
-              <div className="ec-meta-item clickable">
-                <FolderOpen size={16} />
-                {employee.department}
-              </div>
-            )}
-            <div className="ec-meta-item">
-              <CalendarDays size={16} />
-              В компании с {formatHireDate(employee.hire_date)}
+              {employee.email && (
+                <div className="ec-meta-item">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+                  {employee.email}
+                </div>
+              )}
+              <span className="ec-profile-id">ID: {employee.id}</span>
             </div>
           </div>
-          <div className="ec-profile-id">ID: {employee.id}</div>
+          {canEdit && (
+            <div className="ec-profile-actions">
+              <button className="ec-action-btn" onClick={startEditing}>
+                <Edit3 size={16} /> Редактировать
+              </button>
+              {employee.is_archived ? (
+                <button className="ec-action-btn" onClick={handleRestore}>
+                  <RotateCcw size={16} /> Восстановить
+                </button>
+              ) : (
+                <button className="ec-action-btn" onClick={handleArchive}>
+                  <Archive size={16} /> В архив
+                </button>
+              )}
+              <button className="ec-action-btn danger" onClick={handleDelete}>
+                <Trash2 size={16} /> Удалить
+              </button>
+            </div>
+          )}
         </div>
-        {canEdit && (
-          <div className="ec-profile-actions">
-            <button className="ec-action-btn" onClick={startEditing}>
-              <Edit3 size={16} /> Редактировать
-            </button>
-            {employee.is_archived ? (
-              <button className="ec-action-btn" onClick={handleRestore}>
-                <RotateCcw size={16} /> Восстановить
-              </button>
-            ) : (
-              <button className="ec-action-btn" onClick={handleArchive}>
-                <Archive size={16} /> В архив
-              </button>
-            )}
-            <button className="ec-action-btn danger" onClick={handleDelete}>
-              <Trash2 size={16} /> Удалить
-            </button>
-          </div>
-        )}
-      </div>
 
-      {/* ===== Stats Period Selector + Stats Row ===== */}
-      <div className="ec-stats-period-selector">
-        {(['today', 'week', 'month'] as StatsPeriod[]).map(p => (
-          <button
-            key={p}
-            className={`ec-stats-period-btn ${statsPeriod === p ? 'active' : ''}`}
-            onClick={() => setStatsPeriod(p)}
-          >
-            {STATS_PERIOD_LABELS[p]}
-          </button>
-        ))}
-      </div>
-      <div className="ec-stats-row">
-        <div className="ec-stat-card">
-          <div className="ec-stat-header">
-            <span className="ec-stat-label">Посещаемость</span>
-            <div className="ec-stat-icon green"><CheckCircle size={18} /></div>
-          </div>
-          <div className="ec-stat-value">{pStats.attendancePercent}%</div>
-          <div className="ec-stat-trend neutral">{STATS_TREND_LABELS[statsPeriod]}</div>
+        {/* Stats */}
+        <div className="ec-stats-period-selector">
+          {(['today', 'week', 'month'] as StatsPeriod[]).map(p => (
+            <button
+              key={p}
+              className={`ec-stats-period-btn ${statsPeriod === p ? 'active' : ''}`}
+              onClick={() => setStatsPeriod(p)}
+            >
+              {STATS_PERIOD_LABELS[p]}
+            </button>
+          ))}
         </div>
-        <div className="ec-stat-card">
-          <div className="ec-stat-header">
-            <span className="ec-stat-label">Опозданий</span>
-            <div className="ec-stat-icon orange"><Clock size={18} /></div>
+        <div className="ec-stats-row">
+          <div className="ec-stat-card">
+            <div className="ec-stat-header">
+              <span className="ec-stat-label">Посещаемость</span>
+              <div className="ec-stat-icon green"><CheckCircle size={18} /></div>
+            </div>
+            <div className="ec-stat-value">{pStats.attendancePercent}%</div>
+            <div className="ec-stat-trend neutral">{STATS_TREND_LABELS[statsPeriod]}</div>
           </div>
-          <div className="ec-stat-value">{pStats.lateCount}</div>
-          <div className={`ec-stat-trend ${pStats.lateCount > 2 ? 'down' : 'neutral'}`}>
-            {pStats.lateCount > 2 ? 'превышен лимит' : 'в пределах нормы'}
+          <div className="ec-stat-card">
+            <div className="ec-stat-header">
+              <span className="ec-stat-label">Опозданий</span>
+              <div className="ec-stat-icon orange"><Clock size={18} /></div>
+            </div>
+            <div className="ec-stat-value">{pStats.lateCount}</div>
+            <div className={`ec-stat-trend ${pStats.lateCount > 2 ? 'down' : 'neutral'}`}>
+              {pStats.lateCount > 2 ? 'превышен лимит' : 'в пределах нормы'}
+            </div>
           </div>
-        </div>
-        <div className="ec-stat-card">
-          <div className="ec-stat-header">
-            <span className="ec-stat-label">Отработано часов</span>
-            <div className="ec-stat-icon blue"><DollarSign size={18} /></div>
+          <div className="ec-stat-card">
+            <div className="ec-stat-header">
+              <span className="ec-stat-label">Отработано часов</span>
+              <div className="ec-stat-icon blue"><DollarSign size={18} /></div>
+            </div>
+            <div className="ec-stat-value">{pStats.hoursWorked}ч</div>
+            <div className="ec-stat-trend neutral">из {pStats.hoursPlanned}ч по плану</div>
           </div>
-          <div className="ec-stat-value">{pStats.hoursWorked}ч</div>
-          <div className="ec-stat-trend neutral">из {pStats.hoursPlanned}ч по плану</div>
-        </div>
-        <div className="ec-stat-card">
-          <div className="ec-stat-header">
-            <span className="ec-stat-label">Ср. время прихода</span>
-            <div className="ec-stat-icon purple"><BarChart3 size={18} /></div>
-          </div>
-          <div className="ec-stat-value">{pStats.avgArrivalTime || '—'}</div>
-          <div className={`ec-stat-trend ${pStats.avgArrivalDiffMinutes > 0 ? 'down' : 'up'}`}>
-            {pStats.avgArrivalDiffMinutes > 0
-              ? `+${pStats.avgArrivalDiffMinutes} мин к норме`
-              : pStats.avgArrivalDiffMinutes < 0
-                ? `${pStats.avgArrivalDiffMinutes} мин к норме`
-                : 'точно в норме'}
+          <div className="ec-stat-card">
+            <div className="ec-stat-header">
+              <span className="ec-stat-label">Ср. время прихода</span>
+              <div className="ec-stat-icon purple"><BarChart3 size={18} /></div>
+            </div>
+            <div className="ec-stat-value">{pStats.avgArrivalTime || '—'}</div>
+            <div className={`ec-stat-trend ${pStats.avgArrivalDiffMinutes > 0 ? 'down' : 'up'}`}>
+              {pStats.avgArrivalDiffMinutes > 0
+                ? `+${pStats.avgArrivalDiffMinutes} мин к норме`
+                : pStats.avgArrivalDiffMinutes < 0
+                  ? `${pStats.avgArrivalDiffMinutes} мин к норме`
+                  : 'точно в норме'}
+            </div>
           </div>
         </div>
       </div>
@@ -427,9 +431,6 @@ export const EmployeeCardPage: FC = () => {
             onEditDataChange={setEditData}
             onSave={saveEditing}
             onCancel={() => { setIsEditing(false); setEditData({}); }}
-            departments={departments}
-            onMoveDepartment={handleMoveDepartment}
-            canEdit={canEdit}
           />
         </div>
       )}

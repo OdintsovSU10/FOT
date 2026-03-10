@@ -1,6 +1,8 @@
 import { sigurService } from './sigur.service.js';
 import { supabase } from '../config/database.js';
 import { parseFIO } from '../utils/fio.utils.js';
+import { mapSigurEvent } from '../utils/sigur.mapper.js';
+import { computeDedupHash } from '../utils/dedup.utils.js';
 
 /** Системные папки Sigur — больше не фильтруем, синхронизируем все */
 const SIGUR_SYSTEM_DEPARTMENTS: string[] = [];
@@ -581,10 +583,29 @@ export async function seedPositionsLogic(organizationId: string): Promise<ISeedP
 export async function syncEmployeesLogic(
   organizationId: string,
   connection?: 'external' | 'internal',
+  onProgress?: (data: Record<string, unknown>) => void,
 ): Promise<ISyncEmployeesResult> {
   if (!sigurService.isConfigured()) throw new Error('Sigur не настроен');
 
-  const sigurEmployeesRaw = await sigurService.getEmployeesCached(connection);
+  const send = onProgress || (() => {});
+  send({ type: 'employees_progress', current: 0, total: 0, percent: 0 });
+
+  // Whitelist отделов: загружаем ДО получения сотрудников
+  const whitelist = await getWhitelistedDepartmentIds(organizationId);
+  if (whitelist) {
+    console.log(`[syncEmployees] whitelist active: ${whitelist.size} departments`);
+  }
+
+  // Загружаем сотрудников: по отделам из whitelist (избегает проблему с большим offset в Sigur API)
+  let sigurEmployeesRaw: Record<string, unknown>[];
+  if (whitelist && whitelist.size > 0) {
+    send({ type: 'employees_progress', current: 0, total: whitelist.size, percent: 0, status: `Загрузка по ${whitelist.size} отделам...` });
+    sigurEmployeesRaw = await sigurService.getEmployeesByDepartments([...whitelist], connection, (loaded, deptIdx, totalDepts) => {
+      send({ type: 'employees_progress', current: deptIdx, total: totalDepts, percent: Math.round((deptIdx / totalDepts) * 100), status: `Загрузка отделов: ${deptIdx}/${totalDepts} (${loaded} сотр.)` });
+    });
+  } else {
+    sigurEmployeesRaw = await sigurService.getEmployeesCached(connection);
+  }
   console.log('[syncEmployees] got', sigurEmployeesRaw.length, 'employees from Sigur');
 
   if (sigurEmployeesRaw.length === 0) {
@@ -595,7 +616,10 @@ export async function syncEmployeesLogic(
     logSampleAndWarn('syncEmployees', sigurEmployeesRaw[0], ['id', 'name', 'departmentId', 'positionId', 'position']);
   }
 
+  // Все загруженные уже отфильтрованы по whitelist (если он есть)
   const sigurEmployees = sigurEmployeesRaw.map(normalizeEmployee);
+  const skippedByWhitelist = 0;
+  console.log(`[syncEmployees] employees to process: ${sigurEmployees.length}`);
 
   // Глобальный поиск по sigur_employee_id (не только в целевой org)
   // чтобы не создавать дубли при синхронизации в другую организацию
@@ -660,17 +684,52 @@ export async function syncEmployeesLogic(
 
   let imported = 0;
   let updated = 0;
-  let skipped = 0;
+  let skipped = skippedByWhitelist;
   const errors: string[] = [];
   const inserts: Record<string, unknown>[] = [];
 
-  // Whitelist отделов: если задан, пропускаем сотрудников из не-whitelisted отделов
-  const whitelist = await getWhitelistedDepartmentIds(organizationId);
-  if (whitelist) {
-    console.log(`[syncEmployees] whitelist active: ${whitelist.size} departments`);
+  const totalEmployees = sigurEmployees.length;
+  send({ type: 'employees_start', total: totalEmployees });
+
+  // Сначала создаём недостающие должности (батчим по уникальным именам)
+  const missingPositions = new Set<string>();
+  for (const emp of sigurEmployees) {
+    const sigurPosId = emp.positionId;
+    const positionText = emp.position;
+    if (!positionText) continue;
+    let positionId: string | null = null;
+    if (sigurPosId) positionId = sigurPosToDbId.get(sigurPosId) || null;
+    if (!positionId) {
+      const posKey = positionText.toLowerCase();
+      if (!posNameToDbId.has(posKey)) missingPositions.add(positionText);
+    }
   }
 
-  for (const emp of sigurEmployees) {
+  if (missingPositions.size > 0) {
+    send({ type: 'employees_progress', current: 0, total: totalEmployees, percent: 0 });
+    const posInserts = [...missingPositions].map(name => ({
+      organization_id: organizationId,
+      name,
+      category: 'other' as const,
+    }));
+    const POS_BATCH = 100;
+    for (let i = 0; i < posInserts.length; i += POS_BATCH) {
+      const batch = posInserts.slice(i, i + POS_BATCH);
+      const { data: created } = await supabase.from('positions').upsert(batch, { onConflict: 'organization_id,name', ignoreDuplicates: true }).select('id, name');
+      for (const p of created || []) {
+        if (p.name) posNameToDbId.set(p.name.toLowerCase(), p.id);
+      }
+    }
+  }
+
+  // Собираем обновления и вставки (без DB-запросов в цикле)
+  const updates: { id: number; fields: Record<string, unknown>; name: string }[] = [];
+
+  for (let empIdx = 0; empIdx < sigurEmployees.length; empIdx++) {
+    const emp = sigurEmployees[empIdx];
+    if (empIdx % 200 === 0) {
+      send({ type: 'employees_progress', current: empIdx, total: totalEmployees, percent: Math.round((empIdx / totalEmployees) * 100) });
+    }
     const fullName = emp.name;
     if (!fullName) { skipped++; continue; }
 
@@ -680,42 +739,14 @@ export async function syncEmployeesLogic(
     if (sigurEmpId && firedSigurIds.has(sigurEmpId)) { skipped++; continue; }
 
     const sigurDeptId = emp.departmentId;
-
-    // Whitelist: пропускаем сотрудников из отделов вне whitelist
-    if (whitelist && sigurDeptId && !whitelist.has(sigurDeptId)) { skipped++; continue; }
     const orgDepartmentId = sigurDeptId ? sigurDeptToDbId.get(sigurDeptId) || null : null;
     const sigurPosId = emp.positionId;
     const positionText = emp.position;
 
     let positionId: string | null = null;
-
-    // 1) FK-маппинг через sigur_position_id
-    if (sigurPosId) {
-      positionId = sigurPosToDbId.get(sigurPosId) || null;
-    }
-
-    // 2) Текстовый матчинг по имени должности
+    if (sigurPosId) positionId = sigurPosToDbId.get(sigurPosId) || null;
     if (!positionId && positionText) {
-      const posKey = positionText.toLowerCase();
-      positionId = posNameToDbId.get(posKey) || null;
-
-      // 3) Создаём новую должность если нет совпадения
-      if (!positionId) {
-        const { data: created, error: createErr } = await supabase
-          .from('positions')
-          .insert({
-            organization_id: organizationId,
-            name: positionText,
-            category: 'other' as const,
-          })
-          .select('id')
-          .single();
-
-        if (!createErr && created) {
-          positionId = created.id;
-          posNameToDbId.set(posKey, created.id);
-        }
-      }
+      positionId = posNameToDbId.get(positionText.toLowerCase()) || null;
     }
 
     if (sigurEmpId && sigurIdToDbId.has(sigurEmpId)) {
@@ -729,12 +760,7 @@ export async function syncEmployeesLogic(
       if (positionId) updateFields.position_id = positionId;
 
       if (Object.keys(updateFields).length > 0) {
-        const { error: updateError } = await supabase
-          .from('employees')
-          .update(updateFields)
-          .eq('id', dbId);
-        if (!updateError) updated++;
-        else errors.push(`update ${fullName}: ${updateError.message}`);
+        updates.push({ id: dbId, fields: updateFields, name: fullName });
       } else {
         skipped++;
       }
@@ -756,7 +782,23 @@ export async function syncEmployeesLogic(
     });
   }
 
-  console.log('[syncEmployees] prepared', inserts.length, 'inserts');
+  // Батчим обновления (параллельно по 20)
+  console.log('[syncEmployees] prepared', updates.length, 'updates,', inserts.length, 'inserts');
+  send({ type: 'employees_progress', current: totalEmployees, total: totalEmployees, percent: 95 });
+
+  const UPDATE_CONCURRENCY = 20;
+  for (let i = 0; i < updates.length; i += UPDATE_CONCURRENCY) {
+    const batch = updates.slice(i, i + UPDATE_CONCURRENCY);
+    const results = await Promise.all(
+      batch.map(u => supabase.from('employees').update(u.fields).eq('id', u.id))
+    );
+    for (let j = 0; j < results.length; j++) {
+      if (!results[j].error) updated++;
+      else errors.push(`update ${batch[j].name}: ${results[j].error!.message}`);
+    }
+  }
+
+  send({ type: 'employees_progress', current: totalEmployees, total: totalEmployees, percent: 100 });
 
   const BATCH_SIZE = 100;
   for (let i = 0; i < inserts.length; i += BATCH_SIZE) {
@@ -779,4 +821,185 @@ export async function syncEmployeesLogic(
 
   console.log(`[syncEmployees] done: ${imported} imported, ${updated} updated, ${skipped} skipped`);
   return { imported, updated, skipped, total: sigurEmployeesRaw.length, errors };
+}
+
+export interface ISyncEventsResult {
+  sigurTotal: number;
+  imported: number;
+  skipped: number;
+  droppedNoName: number;
+  droppedNoOrg: number;
+  filteredByDept: number;
+  matched: number;
+  errors: string[];
+}
+
+export async function syncEventsLogic(
+  organizationId: string,
+  startDate: string,
+  endDate: string,
+  connection?: 'external' | 'internal',
+  onProgress?: (data: Record<string, unknown>) => void,
+): Promise<ISyncEventsResult> {
+  if (!sigurService.isConfigured()) throw new Error('Sigur не настроен');
+
+  const send = onProgress || (() => {});
+
+  // 1. Загружаем сотрудников
+  const { data: employeesData } = await supabase
+    .from('employees')
+    .select('id, organization_id, full_name, sigur_employee_id')
+    .eq('is_archived', false);
+
+  const employeeByNameOrg = new Map<string, { id: number; organization_id: string }>();
+  const sigurIdMap = new Map<number, { id: number; organization_id: string }>();
+  for (const emp of employeesData || []) {
+    const name = (emp.full_name || '').toLowerCase().trim();
+    const empRef = { id: emp.id, organization_id: emp.organization_id };
+    const key = `${name}|${emp.organization_id}`;
+    if (!employeeByNameOrg.has(key)) employeeByNameOrg.set(key, empRef);
+    if (emp.sigur_employee_id != null) sigurIdMap.set(emp.sigur_employee_id, empRef);
+  }
+
+  // 2. Whitelist
+  const whitelist = await getWhitelistedDepartmentIds(organizationId);
+  let allowedNames: Set<string> | null = null;
+  let allowedSigurIds: Set<number> | null = null;
+
+  if (whitelist) {
+    const sigurEmployees = await sigurService.getEmployeesByDepartments([...whitelist], connection);
+    allowedNames = new Set<string>();
+    allowedSigurIds = new Set<number>();
+    for (const emp of sigurEmployees) {
+      const name = ((emp.name as string) || '').toLowerCase().trim();
+      if (name) allowedNames.add(name);
+      if (typeof emp.id === 'number') allowedSigurIds.add(emp.id);
+    }
+  }
+
+  // 3. Дни
+  const days: string[] = [];
+  const cur = new Date(startDate);
+  const end = new Date(endDate);
+  while (cur <= end) {
+    days.push(cur.toISOString().slice(0, 10));
+    cur.setDate(cur.getDate() + 1);
+  }
+
+  const errors: string[] = [];
+  let totalSigur = 0;
+  let totalInserted = 0;
+  let totalSkipped = 0;
+  let totalNoName = 0;
+  let totalNoOrg = 0;
+  let totalFilteredDept = 0;
+  const summariesToUpdate = new Set<string>();
+
+  send({ type: 'events_start', totalDays: days.length });
+
+  for (let dayIdx = 0; dayIdx < days.length; dayIdx++) {
+    const day = days[dayIdx];
+    const dayStart = `${day}T00:00:00`;
+    const dayEnd = `${day}T23:59:59`;
+
+    send({
+      type: 'events_day',
+      day,
+      dayIndex: dayIdx,
+      totalDays: days.length,
+      percent: Math.round((dayIdx / days.length) * 100),
+    });
+
+    const rawEvents = await sigurService.getEvents(dayStart, dayEnd, connection, 'PASS_DETECTED', { pageSize: 3000 });
+    totalSigur += rawEvents.length;
+
+    if (rawEvents.length === 0) continue;
+
+    const { data: existingEvents } = await supabase
+      .from('skud_events')
+      .select('dedup_hash')
+      .eq('event_date', day)
+      .not('dedup_hash', 'is', null);
+
+    const existingSet = new Set<string>();
+    for (const evt of existingEvents || []) {
+      if (evt.dedup_hash) existingSet.add(evt.dedup_hash);
+    }
+
+    const dayInserts: Record<string, unknown>[] = [];
+
+    for (const raw of rawEvents) {
+      const mapped = mapSigurEvent(raw as Record<string, unknown>);
+      if (!mapped) { totalNoName++; continue; }
+
+      if (allowedNames) {
+        const nameKey = mapped.physicalPerson.toLowerCase().trim();
+        const sigurEmpId = mapped.employeeId;
+        if (!allowedNames.has(nameKey) && !(sigurEmpId && allowedSigurIds?.has(sigurEmpId))) {
+          totalFilteredDept++;
+          continue;
+        }
+      }
+
+      const dedupHash = computeDedupHash(
+        mapped.physicalPerson, mapped.eventDate, mapped.eventTime,
+        mapped.accessPoint, mapped.direction,
+      );
+      if (existingSet.has(dedupHash)) { totalSkipped++; continue; }
+      existingSet.add(dedupHash);
+
+      const nameKey = mapped.physicalPerson.toLowerCase().trim();
+      let emp = mapped.employeeId != null ? sigurIdMap.get(mapped.employeeId) : undefined;
+      if (!emp) emp = employeeByNameOrg.get(`${nameKey}|${organizationId}`);
+      const orgId = emp?.organization_id || organizationId;
+      if (!orgId) { totalNoOrg++; continue; }
+
+      dayInserts.push({
+        organization_id: orgId,
+        physical_person: mapped.physicalPerson,
+        card_number: mapped.cardNumber || null,
+        event_date: mapped.eventDate,
+        event_time: mapped.eventTime,
+        access_point: mapped.accessPoint,
+        direction: mapped.direction,
+        employee_id: emp?.id || null,
+        dedup_hash: dedupHash,
+      });
+
+      if (emp) summariesToUpdate.add(`${emp.id}:${orgId}:${mapped.eventDate}`);
+    }
+
+    const BATCH_SIZE = 500;
+    for (let i = 0; i < dayInserts.length; i += BATCH_SIZE) {
+      const batch = dayInserts.slice(i, i + BATCH_SIZE);
+      const { error: insertError } = await supabase.from('skud_events').upsert(batch, { onConflict: 'dedup_hash', ignoreDuplicates: true });
+      if (insertError) {
+        errors.push(`[${day}] ${insertError.message}`);
+      } else {
+        totalInserted += batch.length;
+      }
+    }
+  }
+
+  // Пересчёт сводок
+  if (summariesToUpdate.size > 0) {
+    send({ type: 'events_summaries', count: summariesToUpdate.size });
+    const pairs = [...summariesToUpdate].map(key => {
+      const [empId, orgId, date] = key.split(':');
+      return { org_id: orgId, emp_id: parseInt(empId, 10), date };
+    });
+    await supabase.rpc('batch_recalculate_skud_daily_summary', { p_pairs: pairs });
+  }
+
+  console.log(`[syncEvents] done: ${totalInserted} imported, ${totalSkipped} skipped, ${totalFilteredDept} filtered`);
+  return {
+    sigurTotal: totalSigur,
+    imported: totalInserted,
+    skipped: totalSkipped,
+    droppedNoName: totalNoName,
+    droppedNoOrg: totalNoOrg,
+    filteredByDept: totalFilteredDept,
+    matched: summariesToUpdate.size,
+    errors,
+  };
 }

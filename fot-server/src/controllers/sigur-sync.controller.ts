@@ -4,6 +4,7 @@ import { supabase } from '../config/database.js';
 import { auditService } from '../services/audit.service.js';
 import { mapSigurEvent } from '../utils/sigur.mapper.js';
 import { computeDedupHash } from '../utils/dedup.utils.js';
+import { stopPresencePolling, startPresencePolling } from '../services/presence-polling.service.js';
 import {
   syncOrganizationsLogic,
   cleanDuplicateOrganizationsLogic,
@@ -11,6 +12,7 @@ import {
   syncPositionsFromSigurLogic,
   seedPositionsLogic,
   syncEmployeesLogic,
+  syncEventsLogic,
   getWhitelistedDepartmentIds,
 } from '../services/sigur-sync.service.js';
 import type { AuthenticatedRequest } from '../types/index.js';
@@ -82,16 +84,13 @@ export const sigurSyncController = {
 
       if (whitelist) {
         sendProgress({ type: 'status', message: `Загрузка фильтра: ${whitelist.size} отделов...` });
-        const sigurEmployees = await sigurService.getEmployeesCached(connection);
+        const sigurEmployees = await sigurService.getEmployeesByDepartments([...whitelist], connection);
         allowedNames = new Set<string>();
         allowedSigurIds = new Set<number>();
         for (const emp of sigurEmployees) {
-          const deptId = emp.departmentId as number | undefined;
-          if (deptId && whitelist.has(deptId)) {
-            const name = ((emp.name as string) || '').toLowerCase().trim();
-            if (name) allowedNames.add(name);
-            if (typeof emp.id === 'number') allowedSigurIds.add(emp.id);
-          }
+          const name = ((emp.name as string) || '').toLowerCase().trim();
+          if (name) allowedNames.add(name);
+          if (typeof emp.id === 'number') allowedSigurIds.add(emp.id);
         }
         sendProgress({ type: 'status', message: `Фильтр: ${whitelist.size} отделов, ${allowedNames.size} сотрудников` });
       }
@@ -438,6 +437,17 @@ export const sigurSyncController = {
 
       const connection = (req.body.connection as 'external' | 'internal') || undefined;
 
+      // Даты для синхронизации событий (если не указаны — текущий месяц)
+      const now = new Date();
+      const y = now.getFullYear();
+      const m = String(now.getMonth() + 1).padStart(2, '0');
+      const d = String(now.getDate()).padStart(2, '0');
+      const eventsStartDate = req.body.startDate || `${y}-${m}-01`;
+      const eventsEndDate = req.body.endDate || `${y}-${m}-${d}`;
+
+      // Приостанавливаем polling чтобы не конкурировать за Sigur API
+      stopPresencePolling();
+
       const steps = [
         { id: 1, name: 'organizations', label: 'Импорт организаций', fn: () => syncOrganizationsLogic(connection) },
         { id: 2, name: 'clean-duplicates', label: 'Очистка дублей', fn: () => cleanDuplicateOrganizationsLogic() },
@@ -447,7 +457,8 @@ export const sigurSyncController = {
           const seeded = await seedPositionsLogic(organizationId);
           return { ...fromSigur, seeded: seeded.created };
         }},
-        { id: 5, name: 'employees', label: 'Импорт сотрудников', fn: () => syncEmployeesLogic(organizationId, connection) },
+        { id: 5, name: 'employees', label: 'Импорт сотрудников', fn: () => syncEmployeesLogic(organizationId, connection, sendProgress) },
+        { id: 6, name: 'events', label: `Синхронизация событий (${eventsStartDate} — ${eventsEndDate})`, fn: () => syncEventsLogic(organizationId, eventsStartDate, eventsEndDate, connection, sendProgress) },
       ];
 
       const results: Record<string, unknown> = {};
@@ -471,9 +482,11 @@ export const sigurSyncController = {
       });
 
       sendProgress({ type: 'done', results });
+      startPresencePolling();
       res.end();
     } catch (error) {
       console.error('Sigur syncAll error:', error);
+      startPresencePolling();
       try {
         res.write(`data: ${JSON.stringify({ type: 'error', message: 'Ошибка полной синхронизации' })}\n\n`);
         res.end();
