@@ -187,17 +187,6 @@ const getNavLabel = (mode: ViewMode, viewDate: Date): string => {
   return `${MONTH_NAMES[viewDate.getMonth()]} ${viewDate.getFullYear()}`;
 };
 
-const getEventStatus = (event: SkudEvent): { label: string; className: string } => {
-  if (event.direction === 'entry') {
-    const time = event.event_time;
-    const hours = parseInt(time.slice(0, 2), 10);
-    const minutes = parseInt(time.slice(3, 5), 10);
-    if (hours > 9 || (hours === 9 && minutes > 0)) {
-      return { label: 'Опоздание', className: 'late' };
-    }
-  }
-  return { label: 'Норма', className: 'ok' };
-};
 
 export const EmployeeSkudSection: FC<IEmployeeSkudSectionProps> = ({
   employeeId, onSync, focusDate, focusKey,
@@ -329,11 +318,9 @@ export const EmployeeSkudSection: FC<IEmployeeSkudSectionProps> = ({
             <div>Время</div>
             <div>Событие</div>
             <div className="skud-col-point">Точка прохода</div>
-            <div>Статус</div>
           </div>
           {allEvents.map(ev => {
             const isInternal = ev.access_point ? internalPoints.has(ev.access_point) : false;
-            const status = getEventStatus(ev);
             return (
               <div
                 key={ev.id}
@@ -347,7 +334,6 @@ export const EmployeeSkudSection: FC<IEmployeeSkudSectionProps> = ({
                   {ev.direction === 'entry' ? 'Вход' : 'Выход'}
                 </div>
                 <div className="skud-col-point skud-table-point">{ev.access_point || '—'}</div>
-                <div className={`skud-table-status ${status.className}`}>{status.label}</div>
               </div>
             );
           })}

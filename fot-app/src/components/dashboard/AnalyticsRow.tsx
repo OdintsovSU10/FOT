@@ -35,7 +35,7 @@ const getBarClass = (time: string): string => {
 
 const CIRCUMFERENCE = 2 * Math.PI * 42; // r=42
 
-const PunctualityCard: FC<{ punctuality: IDashboardStats['punctuality']; period: DashboardPeriod }> = ({ punctuality, period }) => {
+export const PunctualityCard: FC<{ punctuality: IDashboardStats['punctuality']; period: DashboardPeriod }> = ({ punctuality, period }) => {
   const offset = CIRCUMFERENCE - (punctuality.onTime / 100) * CIRCUMFERENCE;
 
   return (
@@ -95,7 +95,7 @@ const PunctualityCard: FC<{ punctuality: IDashboardStats['punctuality']; period:
   );
 };
 
-const AvgArrivalCard: FC<{ data: IDashboardStats['avgArrivalByDay']; period: DashboardPeriod }> = ({ data, period }) => (
+export const AvgArrivalCard: FC<{ data: IDashboardStats['avgArrivalByDay']; period: DashboardPeriod }> = ({ data, period }) => (
   <div className={styles.card}>
     <div className={styles.title}>
       <BarChart3 size={16} />
@@ -123,7 +123,7 @@ const AvgArrivalCard: FC<{ data: IDashboardStats['avgArrivalByDay']; period: Das
   </div>
 );
 
-const RisksCard: FC<{ risks: IDashboardStats['risks']; period: DashboardPeriod }> = ({ risks, period }) => {
+export const RisksCard: FC<{ risks: IDashboardStats['risks']; period: DashboardPeriod }> = ({ risks, period }) => {
   const navigate = useNavigate();
 
   return (

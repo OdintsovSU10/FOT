@@ -422,7 +422,7 @@
 
 .skud-table-header {
   display: grid;
-  grid-template-columns: 80px 1fr 180px 100px;
+  grid-template-columns: 80px 1fr 180px;
   padding: 12px 20px;
   background: var(--bg-tertiary);
   font-size: 11px;
@@ -434,7 +434,7 @@
 
 .skud-table-row {
   display: grid;
-  grid-template-columns: 80px 1fr 180px 100px;
+  grid-template-columns: 80px 1fr 180px;
   padding: 14px 20px;
   border-bottom: 1px solid var(--border);
   font-size: 13px;
@@ -857,7 +857,7 @@
 
   .skud-table-header,
   .skud-table-row {
-    grid-template-columns: 60px 1fr 100px;
+    grid-template-columns: 60px 1fr;
   }
 
   .skud-col-point {
@@ -959,7 +959,7 @@
 
   .skud-table-header,
   .skud-table-row {
-    grid-template-columns: 50px 1fr 70px;
+    grid-template-columns: 50px 1fr;
     padding: 10px 12px;
     font-size: 12px;
   }

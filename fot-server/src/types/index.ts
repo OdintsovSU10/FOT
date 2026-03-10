@@ -145,7 +145,7 @@ export interface SalaryHistory {
 }
 
 // Табель
-export type TimeStatus = 'work' | 'vacation' | 'dayoff' | 'remote' | 'unpaid' | 'absent';
+export type TimeStatus = 'work' | 'vacation' | 'dayoff' | 'remote' | 'unpaid' | 'absent' | 'sick' | 'business_trip' | 'manual';
 
 export interface TimeEntry {
   id: number;

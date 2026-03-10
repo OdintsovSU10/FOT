@@ -388,7 +388,7 @@ export const skudController = {
         .eq('event_date', todayStr)
         .in('employee_id', empIds)
         .order('event_time', { ascending: false })
-        .limit(10);
+        .limit(50);
       if (organizationId) recentEvQuery = recentEvQuery.eq('organization_id', organizationId);
       const { data: recentEventsRaw } = await recentEvQuery;
 
@@ -1258,7 +1258,7 @@ export const skudController = {
         .in('employee_id', empIds)
         .order('event_time', { ascending: false });
 
-      const latestEvent = new Map<number, { event_time: string; direction: string | null }>();
+      const latestEvent = new Map<number, { event_time: string; direction: string | null; access_point: string | null }>();
       // Собираем ВСЕ внешние события по сотруднику (ASC для расчёта выходов)
       const allExternalEvents = new Map<number, Array<{ event_time: string; direction: string | null }>>();
 
@@ -1268,7 +1268,7 @@ export const skudController = {
         if (orgInternalPoints.size > 0 && evt.access_point && orgInternalPoints.has(evt.access_point)) continue;
 
         if (!latestEvent.has(evt.employee_id)) {
-          latestEvent.set(evt.employee_id, { event_time: evt.event_time, direction: evt.direction });
+          latestEvent.set(evt.employee_id, { event_time: evt.event_time, direction: evt.direction, access_point: evt.access_point || null });
         }
         if (!allExternalEvents.has(evt.employee_id)) {
           allExternalEvents.set(evt.employee_id, []);
@@ -1315,7 +1315,7 @@ export const skudController = {
 
           if (!isInternal) {
             if (!latestEvent.has(empId)) {
-              latestEvent.set(empId, { event_time: evt.event_time, direction: evt.direction });
+              latestEvent.set(empId, { event_time: evt.event_time, direction: evt.direction, access_point: evt.access_point || null });
             }
             if (!allExternalEvents.has(empId)) {
               allExternalEvents.set(empId, []);
@@ -1369,6 +1369,30 @@ export const skudController = {
         .select('employee_id, first_entry, total_hours')
         .eq('date', today)
         .in('employee_id', empIds);
+
+      // Загружаем пунктуальность за текущий месяц (% дней прихода до 09:00)
+      const monthStart = today.slice(0, 7) + '-01';
+      const { data: monthSummaries } = await supabase
+        .from('skud_daily_summary')
+        .select('employee_id, first_entry')
+        .gte('date', monthStart)
+        .lte('date', today)
+        .eq('is_present', true)
+        .in('employee_id', empIds);
+
+      const punctualityMap = new Map<number, number>();
+      if (monthSummaries && monthSummaries.length > 0) {
+        const byEmp = new Map<number, { total: number; onTime: number }>();
+        for (const s of monthSummaries) {
+          if (!byEmp.has(s.employee_id)) byEmp.set(s.employee_id, { total: 0, onTime: 0 });
+          const rec = byEmp.get(s.employee_id)!;
+          rec.total++;
+          if (s.first_entry && s.first_entry <= '09:00:00') rec.onTime++;
+        }
+        for (const [empId, rec] of byEmp) {
+          punctualityMap.set(empId, rec.total > 0 ? Math.round((rec.onTime / rec.total) * 100) : 100);
+        }
+      }
 
       const summaryMap = new Map<number, { first_entry: string | null; total_hours: number | null }>();
       for (const s of dailySummaries || []) {
@@ -1426,6 +1450,8 @@ export const skudController = {
           total_hours: summary?.total_hours || null,
           exit_count,
           time_outside_minutes,
+          last_access_point: last?.access_point || null,
+          punctuality_percent: punctualityMap.get(emp.id) ?? null,
         };
       });
 

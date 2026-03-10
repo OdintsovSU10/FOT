@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { ChevronDown, Search, Building2, LogOut } from 'lucide-react';
 import { StatCard } from '../components/ui/StatCard';
 import { ActivityList } from '../components/dashboard/ActivityList';
-import { AnalyticsRow } from '../components/dashboard/AnalyticsRow';
+import { AnalyticsRow, PunctualityCard, AvgArrivalCard, RisksCard } from '../components/dashboard/AnalyticsRow';
 import { DashboardSidebar } from '../components/dashboard/DashboardSidebar';
 import { PresenceTodayCard } from '../components/dashboard/stats/PresenceTodayCard';
 import { LatenessCard } from '../components/dashboard/stats/LatenessCard';
@@ -215,7 +215,7 @@ export const DashboardPage: React.FC = () => {
               ))}
             </div>
             {period === 'today' ? (
-              <div className="stats-row">
+              <div className="stats-grid-today">
                 <PresenceTodayCard
                   online={onlineCount}
                   total={employees.length}
@@ -232,10 +232,19 @@ export const DashboardPage: React.FC = () => {
                 <AnomaliesCard
                   refusals={stats?.anomalies?.refusals ?? 0}
                 />
-                <LiveEventsCard
-                  events={stats?.recentEvents ?? []}
-                  totalCount={(stats?.todayEntriesCount ?? 0) + (stats?.todayExitsCount ?? 0)}
-                />
+                <div className="stats-events-tall">
+                  <LiveEventsCard
+                    events={stats?.recentEvents ?? []}
+                    totalCount={(stats?.todayEntriesCount ?? 0) + (stats?.todayExitsCount ?? 0)}
+                  />
+                </div>
+                {stats && !statsLoading && (
+                  <>
+                    <PunctualityCard punctuality={stats.punctuality} period={period} />
+                    <AvgArrivalCard data={stats.avgArrivalByDay} period={period} />
+                    <RisksCard risks={stats.risks} period={period} />
+                  </>
+                )}
               </div>
             ) : (
               <div className="stats-row">
@@ -273,7 +282,7 @@ export const DashboardPage: React.FC = () => {
             )}
           </div>
 
-          {stats && !statsLoading && <AnalyticsRow stats={stats} period={period} />}
+          {period !== 'today' && stats && !statsLoading && <AnalyticsRow stats={stats} period={period} />}
 
           <div className="main-grid">
             <ActivityList employees={employees} loading={loading} />

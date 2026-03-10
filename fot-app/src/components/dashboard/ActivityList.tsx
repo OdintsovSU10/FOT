@@ -1,7 +1,7 @@
 import { type FC, useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Star, Search } from 'lucide-react';
-import { Card, CardHeader, CardContent } from '../ui/Card';
+import { Star, Search, X } from 'lucide-react';
+import { Card, CardContent } from '../ui/Card';
 import { formatElapsed } from '../../utils/formatElapsed';
 import { useFavorites } from '../../hooks/useFavorites';
 import type { IEmployeePresence } from '../../types';
@@ -37,6 +37,22 @@ const getTimelinePercent = (employee: IEmployeePresence): number => {
     return Math.min(100, Math.round((employee.total_hours / 8) * 100));
   }
   return 0;
+};
+
+/** Прогноз ухода: arrival + 9 часов (8ч работы + 1ч обед) */
+const getLeaveInfo = (firstEntry: string | null): { leaveTime: string; remaining: string } | null => {
+  if (!firstEntry) return null;
+  const [h, m] = firstEntry.split(':').map(Number);
+  const arrival = new Date();
+  arrival.setHours(h, m, 0, 0);
+  const leave = new Date(arrival.getTime() + 9 * 60 * 60 * 1000);
+  const leaveTime = `${String(leave.getHours()).padStart(2, '0')}:${String(leave.getMinutes()).padStart(2, '0')}`;
+  const now = new Date();
+  const diffMs = leave.getTime() - now.getTime();
+  if (diffMs <= 0) return { leaveTime, remaining: '' };
+  const remH = Math.floor(diffMs / (1000 * 60 * 60));
+  const remM = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+  return { leaveTime, remaining: `${remH}ч ${remM}м` };
 };
 
 /** Форматирование минут вне офиса */
@@ -106,6 +122,11 @@ const EmployeeRow: FC<{
   const isOffline = employee.status === 'offline';
   const timelineWidth = getTimelinePercent(employee);
 
+  const arrivalTime = employee.first_entry ? employee.first_entry.slice(0, 5) : null;
+  const isLate = arrivalTime ? arrivalTime > '09:00' : false;
+  const leaveInfo = isOnline ? getLeaveInfo(employee.first_entry) : null;
+  const punct = employee.punctuality_percent;
+
   return (
     <div className={styles.item} onClick={() => navigate(`/tender/${employee.employee_id}`, { state: { from: '/dashboard', label: 'Обзор' } })}>
       <button
@@ -116,6 +137,18 @@ const EmployeeRow: FC<{
         <Star size={14} fill={isFavorite ? 'currentColor' : 'none'} />
       </button>
       <div className={styles.avatar}>{getInitials(employee.full_name)}</div>
+      <div className={styles.arrivalBlock}>
+        {arrivalTime && (
+          <span className={`${styles.arrivalTime} ${isLate ? styles.arrivalLate : ''}`}>
+            → {arrivalTime}
+          </span>
+        )}
+        {leaveInfo && (
+          <span className={styles.leaveForecast}>
+            {leaveInfo.remaining ? `~ до конца ${leaveInfo.remaining}` : `~ уйдёт в ${leaveInfo.leaveTime}`}
+          </span>
+        )}
+      </div>
       <div className={styles.content}>
         <div className={styles.name}>{employee.full_name}</div>
         <div className={styles.meta}>
@@ -130,9 +163,21 @@ const EmployeeRow: FC<{
           />
         </div>
       )}
-      <span className={`${styles.status} ${isOnline ? styles.in : isOffline ? styles.out : styles.unknown}`}>
-        {isOnline ? 'В офисе' : isOffline ? 'Вышел' : '—'}
-      </span>
+      <div className={styles.badges}>
+        <span className={`${styles.status} ${isOnline ? styles.in : isOffline ? styles.out : styles.unknown}`}>
+          {isOnline ? 'В офисе' : isOffline ? 'Вышел' : '—'}
+        </span>
+        {employee.last_access_point && (
+          <span className={styles.locationBadge}>
+            📍 {employee.last_access_point}
+          </span>
+        )}
+        {punct != null && (
+          <span className={`${styles.punctBadge} ${punct >= 90 ? styles.punctGood : styles.punctWarn}`}>
+            {punct}%
+          </span>
+        )}
+      </div>
       <div className={styles.times}>
         {workTime && <span className={`${styles.time} ${isOffline ? styles.timeStopped : ''}`}>{workTime}</span>}
         {isOffline && absentTime && <span className={styles.absentTime}>−{absentTime}</span>}
@@ -179,7 +224,9 @@ export const ActivityList: FC<IActivityListProps> = ({ employees, loading }) => 
   if (loading) {
     return (
       <Card className={styles.card}>
-        <CardHeader title="Присутствие сотрудников" />
+        <div className={styles.headerRow}>
+          <h2 className={styles.headerTitle}>Присутствие сотрудников</h2>
+        </div>
         <CardContent className={styles.cardContent}>
           <div className={styles.empty}>
             <span className={styles.emptyText}>Загрузка...</span>
@@ -191,7 +238,24 @@ export const ActivityList: FC<IActivityListProps> = ({ employees, loading }) => 
 
   return (
     <Card className={styles.card}>
-      <CardHeader title="Присутствие сотрудников" />
+      <div className={styles.headerRow}>
+        <h2 className={styles.headerTitle}>Присутствие сотрудников</h2>
+        <div className={styles.headerSearch}>
+          <Search size={14} className={styles.searchIcon} />
+          <input
+            type="text"
+            className={styles.searchInput}
+            placeholder="Поиск..."
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+          />
+          {searchQuery && (
+            <button className={styles.searchClear} onClick={() => setSearchQuery('')}>
+              <X size={12} />
+            </button>
+          )}
+        </div>
+      </div>
       <CardContent className={styles.cardContent}>
         <div className={styles.tabs}>
           {favCount > 0 && (
@@ -227,16 +291,6 @@ export const ActivityList: FC<IActivityListProps> = ({ employees, loading }) => 
           >
             Отсутствуют <span className={styles.tabCount}>{absentCount}</span>
           </button>
-        </div>
-        <div className={styles.searchBar}>
-          <Search size={14} className={styles.searchIcon} />
-          <input
-            type="text"
-            className={styles.searchInput}
-            placeholder="Поиск сотрудника..."
-            value={searchQuery}
-            onChange={e => setSearchQuery(e.target.value)}
-          />
         </div>
         <div className={styles.list}>
           {filtered.length === 0 ? (

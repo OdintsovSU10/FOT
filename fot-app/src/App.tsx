@@ -25,6 +25,9 @@ import { SigurSettingsPage } from './pages/skud/SigurSettingsPage';
 import { SigurRawDataPage } from './pages/skud/SigurRawDataPage';
 import { SkudSupabasePage } from './pages/skud/SkudSupabasePage';
 
+// Timesheet
+import { TimesheetPage } from './pages/timesheet/TimesheetPage';
+
 
 // Profile
 import { ProfilePage } from './pages/profile';
@@ -170,7 +173,7 @@ const AppRoutes = () => {
           path="/timesheet"
           element={
             <Layout title="Табель" theme={theme} onToggleTheme={toggleTheme}>
-              <div>Timesheet Page (в разработке)</div>
+              <TimesheetPage />
             </Layout>
           }
         />
