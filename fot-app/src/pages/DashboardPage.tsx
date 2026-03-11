@@ -11,6 +11,7 @@ import { AnomaliesCard } from '../components/dashboard/stats/AnomaliesCard';
 import { LiveEventsCard } from '../components/dashboard/stats/LiveEventsCard';
 import { usePresence } from '../hooks/usePresence';
 import { useDashboardStats } from '../hooks/useDashboardStats';
+import { useAuth } from '../contexts/AuthContext';
 import { apiClient } from '../api/client';
 import type { DashboardPeriod } from '../types';
 import {
@@ -53,6 +54,9 @@ const formatClock = (): string => {
 const ATTENDANCE_TARGET = 90;
 
 export const DashboardPage: React.FC = () => {
+  const { positionType, profile } = useAuth();
+  const isHeaderOnly = positionType === 'header';
+
   const today = new Date().toLocaleDateString('ru-RU', {
     weekday: 'long',
     day: 'numeric',
@@ -80,10 +84,16 @@ export const DashboardPage: React.FC = () => {
       .then(res => {
         const departments = res.data?.departments || [];
         const collator = new Intl.Collator('ru', { sensitivity: 'base', ignorePunctuation: true });
-        setDeptOptions(flattenDbTree(departments).sort((a, b) => collator.compare(a.name.trim(), b.name.trim())));
+        const flat = flattenDbTree(departments).sort((a, b) => collator.compare(a.name.trim(), b.name.trim()));
+        setDeptOptions(flat);
+
+        // Для header: автоматически выбираем его отдел
+        if (isHeaderOnly && profile?.department_id && !selectedDeptId) {
+          setSearchParams({ dept: profile.department_id }, { replace: true });
+        }
       })
       .catch(() => {});
-  }, []);
+  }, [isHeaderOnly, profile?.department_id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -142,7 +152,16 @@ export const DashboardPage: React.FC = () => {
     deptInputRef.current?.blur();
   };
 
-  const deptSelector = (
+  const deptSelector = isHeaderOnly ? (
+    <div className="dash-dept-dropdown">
+      <div className="dash-dept-trigger has-value" style={{ cursor: 'default', opacity: 0.8 }}>
+        <Building2 size={14} className="dash-dept-search-icon" />
+        <span className="dash-dept-input" style={{ cursor: 'default' }}>
+          {selectedDept?.name ?? 'Мой отдел'}
+        </span>
+      </div>
+    </div>
+  ) : (
     <div className="dash-dept-dropdown" ref={deptDropdownRef}>
       <div className={`dash-dept-trigger ${selectedDeptId ? 'has-value' : ''} ${!selectedDeptId ? 'dash-dept-trigger--large' : ''}`}>
         <Search size={selectedDeptId ? 14 : 16} className="dash-dept-search-icon" />

@@ -261,7 +261,10 @@ export const skudController = {
   async getDashboardStats(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
       const organizationId = getOrgId(req);
-      const departmentId = typeof req.query.department_id === 'string' ? req.query.department_id : null;
+      // Для header: принудительно фильтруем по его отделу
+      const departmentId = req.user.position_type === 'header' && req.user.department_id
+        ? req.user.department_id
+        : (typeof req.query.department_id === 'string' ? req.query.department_id : null);
       const period = (req.query.period as string) || 'today';
 
       if (!departmentId) {
@@ -1157,7 +1160,10 @@ export const skudController = {
     try {
       const organizationId = getOrgId(req);
 
-      const departmentId = typeof req.query.department_id === 'string' ? req.query.department_id : null;
+      // Для header: принудительно фильтруем по его отделу
+      const departmentId = req.user.position_type === 'header' && req.user.department_id
+        ? req.user.department_id
+        : (typeof req.query.department_id === 'string' ? req.query.department_id : null);
 
       // Загружаем все отделы (для дочерних + наследования настроек предков)
       let allDeptsQuery = supabase.from('org_departments').select('id, parent_id');

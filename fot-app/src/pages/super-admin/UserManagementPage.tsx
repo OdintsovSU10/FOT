@@ -42,6 +42,19 @@ export const UserManagementPage: React.FC = () => {
   const [expandedUserId, setExpandedUserId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState<{ userId: string; value: string } | null>(null);
 
+  // Approval modal state
+  const [approvalModal, setApprovalModal] = useState<{
+    visible: boolean;
+    userId: string;
+    userName: string;
+    userOrgId: string | null;
+    positionType: EmployeePositionType;
+    employeeId: number | null;
+    employeeSearch: string;
+    employeeResults: { id: number; full_name: string; org_department_id: string | null; tab_number: string | null }[];
+    searchLoading: boolean;
+  } | null>(null);
+
   const toggleExpand = (userId: string) => {
     setExpandedUserId(prev => prev === userId ? null : userId);
     setEditingName(null);
@@ -118,10 +131,48 @@ export const UserManagementPage: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // Пустой массив - загружаем только при монтировании
 
-  const handleApprove = async (userId: string) => {
+  const openApprovalModal = (user: PendingUserFromApi) => {
+    setApprovalModal({
+      visible: true,
+      userId: user.id,
+      userName: user.full_name || user.email || '',
+      userOrgId: user.organization_id,
+      positionType: user.position_type || 'worker',
+      employeeId: null,
+      employeeSearch: '',
+      employeeResults: [],
+      searchLoading: false,
+    });
+  };
+
+  const handleEmployeeSearch = async (query: string) => {
+    if (!approvalModal) return;
+    setApprovalModal(prev => prev ? { ...prev, employeeSearch: query, searchLoading: true } : null);
+
+    if (query.length < 2) {
+      setApprovalModal(prev => prev ? { ...prev, employeeResults: [], searchLoading: false } : null);
+      return;
+    }
+
     try {
-      await adminService.approveUser(userId);
+      const results = await adminService.searchUnlinkedEmployees(query, approvalModal.userOrgId || undefined);
+      setApprovalModal(prev => prev ? { ...prev, employeeResults: results, searchLoading: false } : null);
+    } catch {
+      setApprovalModal(prev => prev ? { ...prev, searchLoading: false } : null);
+    }
+  };
+
+  const handleApproveConfirm = async () => {
+    if (!approvalModal) return;
+
+    try {
+      await adminService.approveUser(approvalModal.userId, {
+        position_type: approvalModal.positionType,
+        organization_id: approvalModal.userOrgId || undefined,
+        employee_id: approvalModal.employeeId || undefined,
+      });
       toast.success('Пользователь одобрен. Теперь выдайте ему 2FA.');
+      setApprovalModal(null);
       await loadData();
     } catch {
       toast.error('Ошибка одобрения пользователя');
@@ -289,7 +340,7 @@ export const UserManagementPage: React.FC = () => {
                   </button>
                   <button
                     className={styles.approveBtn}
-                    onClick={() => handleApprove(user.id)}
+                    onClick={() => openApprovalModal(user)}
                   >
                     Одобрить
                   </button>
@@ -445,6 +496,94 @@ export const UserManagementPage: React.FC = () => {
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* Approval Modal */}
+      {approvalModal?.visible && (
+        <div className={styles.modalOverlay} onClick={() => setApprovalModal(null)}>
+          <div className={styles.modal} onClick={e => e.stopPropagation()}>
+            <div className={styles.modalHeader}>
+              <h2>Одобрение: {approvalModal.userName}</h2>
+              <button className={styles.closeBtn} onClick={() => setApprovalModal(null)}>&times;</button>
+            </div>
+            <div className={styles.modalContent}>
+              <div className={styles.controlGroup}>
+                <label>Должность:</label>
+                <select
+                  value={approvalModal.positionType}
+                  onChange={(e) => setApprovalModal(prev => prev ? { ...prev, positionType: e.target.value as EmployeePositionType } : null)}
+                >
+                  <option value="worker">Сотрудник</option>
+                  <option value="header">Руководитель</option>
+                  <option value="admin">Администратор</option>
+                </select>
+              </div>
+
+              <div className={styles.controlGroup}>
+                <label>Организация:</label>
+                <select
+                  value={approvalModal.userOrgId || ''}
+                  onChange={(e) => setApprovalModal(prev => prev ? { ...prev, userOrgId: e.target.value || null } : null)}
+                >
+                  <option value="">Не назначена</option>
+                  {organizations.map(org => (
+                    <option key={org.id} value={org.id}>{org.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className={styles.controlGroup}>
+                <label>Привязка к сотруднику (СКУД):</label>
+                <input
+                  type="text"
+                  placeholder="Поиск по ФИО..."
+                  value={approvalModal.employeeSearch}
+                  onChange={(e) => handleEmployeeSearch(e.target.value)}
+                  className={styles.nameInput}
+                />
+                {approvalModal.employeeId && (
+                  <div style={{ marginTop: 4, fontSize: 13, color: 'var(--color-success, #22c55e)' }}>
+                    Выбран: ID {approvalModal.employeeId}
+                    <button
+                      style={{ marginLeft: 8, background: 'none', border: 'none', color: 'var(--color-danger, #ef4444)', cursor: 'pointer', fontSize: 13 }}
+                      onClick={() => setApprovalModal(prev => prev ? { ...prev, employeeId: null } : null)}
+                    >
+                      Отвязать
+                    </button>
+                  </div>
+                )}
+                {approvalModal.employeeResults.length > 0 && (
+                  <div style={{ border: '1px solid var(--border-color, #333)', borderRadius: 6, maxHeight: 160, overflowY: 'auto', marginTop: 4 }}>
+                    {approvalModal.employeeResults.map(emp => (
+                      <div
+                        key={emp.id}
+                        style={{
+                          padding: '6px 10px',
+                          cursor: 'pointer',
+                          fontSize: 13,
+                          background: approvalModal.employeeId === emp.id ? 'var(--color-primary-bg, #1e3a5f)' : 'transparent',
+                        }}
+                        onClick={() => setApprovalModal(prev => prev ? { ...prev, employeeId: emp.id, employeeSearch: emp.full_name, employeeResults: [] } : null)}
+                      >
+                        {emp.full_name} {emp.tab_number ? `(таб. ${emp.tab_number})` : ''}
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {approvalModal.searchLoading && <div style={{ fontSize: 12, color: '#888', marginTop: 4 }}>Поиск...</div>}
+              </div>
+
+              <div className={styles.controlActions} style={{ marginTop: 16 }}>
+                <button className={styles.approveBtn} onClick={handleApproveConfirm}>
+                  Одобрить
+                </button>
+                <button className={styles.cancelBtn} onClick={() => setApprovalModal(null)}>
+                  Отмена
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 

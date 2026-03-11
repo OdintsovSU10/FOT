@@ -40,14 +40,34 @@ const resetPasswordSchema = z.object({
 });
 
 /**
+ * Резолвит department_id из employees по employee_id
+ */
+async function resolveDepartmentId(employeeId: number | null): Promise<string | null> {
+  if (!employeeId) return null;
+  const { data } = await supabase
+    .from('employees')
+    .select('org_department_id')
+    .eq('id', employeeId)
+    .single();
+  return data?.org_department_id || null;
+}
+
+/**
  * Генерирует JWT токен
  */
-function generateToken(profile: UserProfile, email: string, twoFactorVerified: boolean): string {
+function generateToken(
+  profile: UserProfile,
+  email: string,
+  twoFactorVerified: boolean,
+  departmentId: string | null = null
+): string {
   const payload: Omit<JWTPayload, 'iat' | 'exp'> = {
     sub: profile.id,
     email,
     organization_id: profile.organization_id,
     position_type: profile.position_type,
+    employee_id: profile.employee_id,
+    department_id: departmentId,
     is_approved: profile.is_approved,
     two_factor_enabled: profile.two_factor_enabled,
     two_factor_verified: twoFactorVerified,
@@ -210,8 +230,11 @@ export const authController = {
         return;
       }
 
+      // Резолвим department_id из employee
+      const departmentId = await resolveDepartmentId(profile.employee_id);
+
       // 2FA не включена, выдаём полный токен
-      const accessToken = generateToken(profile, email, true);
+      const accessToken = generateToken(profile, email, true, departmentId);
 
       await auditService.logFromRequest(req, profile.id, 'LOGIN');
 
@@ -229,6 +252,7 @@ export const authController = {
           position_type: positionType,
           imported_position: profile.imported_position,
           employee_id: profile.employee_id,
+          department_id: departmentId,
           supervisor_id: profile.supervisor_id,
           organization_id: profile.organization_id,
           is_approved: profile.is_approved,
@@ -539,6 +563,9 @@ export const authController = {
         else if (roleCode === 'worker') positionType = 'worker';
       }
 
+      // Резолвим department_id
+      const departmentId = await resolveDepartmentId(profile.employee_id);
+
       res.json({
         success: true,
         user: {
@@ -551,6 +578,7 @@ export const authController = {
           position_type: positionType,
           imported_position: profile.imported_position,
           employee_id: profile.employee_id,
+          department_id: departmentId,
           supervisor_id: profile.supervisor_id,
           organization_id: profile.organization_id,
           is_approved: profile.is_approved,

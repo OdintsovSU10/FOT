@@ -53,9 +53,9 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
     return <Navigate to="/verify-2fa" state={{ from: location }} replace />;
   }
 
-  // Check position access
+  // Check position access — redirect to appropriate page instead of error
   if (requiredPosition && !canAccess(requiredPosition)) {
-    return <Navigate to="/unauthorized" replace />;
+    return <Navigate to="/" replace />;
   }
 
   // All checks passed

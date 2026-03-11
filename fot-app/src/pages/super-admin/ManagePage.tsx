@@ -38,7 +38,8 @@ const filterTree = (nodes: OrgDepartmentNode[], query: string): OrgDepartmentNod
 };
 
 export const ManagePage: FC = () => {
-  const { profile } = useAuth();
+  const { profile, positionType } = useAuth();
+  const isHeaderOnly = positionType === 'header';
 
   // Structure state
   const [structure, setStructure] = useState<OrgStructureResponse | null>(null);
@@ -187,15 +188,40 @@ export const ManagePage: FC = () => {
     setActionLoading(null);
   };
 
+  // Для header: фильтруем дерево только до своего отдела
+  const scopedDepartments = useMemo(() => {
+    if (!structure) return [];
+    if (!isHeaderOnly || !profile?.department_id) return structure.departments;
+
+    // Ищем отдел header'а в дереве (рекурсивно)
+    const findDept = (nodes: OrgDepartmentNode[]): OrgDepartmentNode | null => {
+      for (const node of nodes) {
+        if (node.id === profile.department_id) return node;
+        const found = findDept(node.children);
+        if (found) return found;
+      }
+      return null;
+    };
+    const myDept = findDept(structure.departments);
+    return myDept ? [myDept] : [];
+  }, [structure, isHeaderOnly, profile?.department_id]);
+
+  // Автоматически выбрать отдел header'а
+  useEffect(() => {
+    if (isHeaderOnly && profile?.department_id && !selectedDeptId) {
+      setSelectedDeptId(profile.department_id);
+    }
+  }, [isHeaderOnly, profile?.department_id, selectedDeptId]);
+
   // Computed
   const displayTree = useMemo(() =>
-    structure ? (deptSearch ? filterTree(structure.departments, deptSearch) : structure.departments) : [],
-    [structure, deptSearch]
+    deptSearch ? filterTree(scopedDepartments, deptSearch) : scopedDepartments,
+    [scopedDepartments, deptSearch]
   );
 
   const flatDepts = useMemo(() =>
-    structure ? flattenTree(structure.departments) : [],
-    [structure]
+    flattenTree(scopedDepartments),
+    [scopedDepartments]
   );
 
   const filteredEmployees = useMemo(() => {
@@ -264,16 +290,16 @@ export const ManagePage: FC = () => {
             <span className={styles.leafIcon}>●</span>
           )}
           <span className={styles.nodeName}>{node.name}</span>
-          <button
+          {!isHeaderOnly && <button
             className={styles.nodeAddBtn}
             title="Добавить подотдел"
             onClick={e => { e.stopPropagation(); startAdding(node.id); }}
-          >+</button>
-          <button
+          >+</button>}
+          {!isHeaderOnly && <button
             className={styles.nodeDeleteBtn}
             title="Удалить отдел"
             onClick={e => handleDeleteDept(node.id, e)}
-          >×</button>
+          >×</button>}
         </div>
         {(isExpanded || isAddingHere) && (
           <div className={styles.nodeChildren}>
@@ -292,7 +318,7 @@ export const ManagePage: FC = () => {
         <div className={styles.sidebarHeader}>
           <p className={styles.sidebarTitle}>Отделы</p>
           <div className={styles.sidebarActions}>
-            <button className={styles.sidebarBtnAdd} onClick={() => startAdding(null)} title="Добавить отдел">+</button>
+            {!isHeaderOnly && <button className={styles.sidebarBtnAdd} onClick={() => startAdding(null)} title="Добавить отдел">+</button>}
             <button className={styles.sidebarBtn} onClick={loadStructure} title="Обновить">↻</button>
           </div>
         </div>
@@ -384,32 +410,34 @@ export const ManagePage: FC = () => {
                         <div className={styles.empPosition}>{emp.position_name}</div>
                       )}
                     </div>
-                    <div className={styles.empActions}>
-                      {emp.employment_status === 'active' ? (
+                    {!isHeaderOnly && (
+                      <div className={styles.empActions}>
+                        {emp.employment_status === 'active' ? (
+                          <button
+                            className={`${styles.actionBtn} ${styles.actionBtnDanger}`}
+                            onClick={() => handleFire(emp)}
+                            disabled={actionLoading === emp.id}
+                          >
+                            Уволить
+                          </button>
+                        ) : (
+                          <button
+                            className={`${styles.actionBtn} ${styles.actionBtnSuccess}`}
+                            onClick={() => handleRehire(emp)}
+                            disabled={actionLoading === emp.id}
+                          >
+                            Восстановить
+                          </button>
+                        )}
                         <button
-                          className={`${styles.actionBtn} ${styles.actionBtnDanger}`}
-                          onClick={() => handleFire(emp)}
+                          className={styles.actionBtn}
+                          onClick={() => { setMoveTarget(emp); setMoveSearch(''); }}
                           disabled={actionLoading === emp.id}
                         >
-                          Уволить
+                          Переместить
                         </button>
-                      ) : (
-                        <button
-                          className={`${styles.actionBtn} ${styles.actionBtnSuccess}`}
-                          onClick={() => handleRehire(emp)}
-                          disabled={actionLoading === emp.id}
-                        >
-                          Восстановить
-                        </button>
-                      )}
-                      <button
-                        className={styles.actionBtn}
-                        onClick={() => { setMoveTarget(emp); setMoveSearch(''); }}
-                        disabled={actionLoading === emp.id}
-                      >
-                        Переместить
-                      </button>
-                    </div>
+                      </div>
+                    )}
                   </div>
                 ))
               )}

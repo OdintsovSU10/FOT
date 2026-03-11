@@ -50,6 +50,16 @@ const navGroups: INavGroup[] = [
         badgeType: 'pending',
       },
       {
+        id: 'chat',
+        path: '/employee/chat',
+        label: 'Сообщения',
+        icon: (
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+          </svg>
+        ),
+      },
+      {
         id: 'calendar',
         path: '/employee/calendar',
         label: 'Календарь',
@@ -124,17 +134,6 @@ const navGroups: INavGroup[] = [
     label: 'Настройки',
     items: [
       {
-        id: 'profile',
-        path: '/profile',
-        label: 'Профиль',
-        icon: (
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
-            <circle cx="12" cy="7" r="4"/>
-          </svg>
-        ),
-      },
-      {
         id: 'settings',
         path: '/employee/settings',
         label: 'Настройки',
@@ -157,7 +156,7 @@ interface IEmployeeSidebarProps {
 export const EmployeeSidebar: FC<IEmployeeSidebarProps> = ({ isOpen, onClose }) => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { profile, logout } = useAuth();
+  const { profile, logout, canAccess } = useAuth();
 
   const logoSrc = '/fot-logo-dark.svg';
 
@@ -214,17 +213,29 @@ export const EmployeeSidebar: FC<IEmployeeSidebarProps> = ({ isOpen, onClose }) 
         </div>
         <div className={styles.profileStats}>
           <div className={styles.profileStat}>
-            <div className={styles.profileStatValue}>18</div>
-            <div className={styles.profileStatLabel}>Дней отпуска</div>
-          </div>
-          <div className={styles.profileStat}>
-            <div className={styles.profileStatValue}>3.2</div>
-            <div className={styles.profileStatLabel}>Года в компании</div>
+            <div className={styles.profileStatValue}>{profile?.imported_position || 'Сотрудник'}</div>
           </div>
         </div>
       </div>
 
       <nav className={styles.nav}>
+        {canAccess('header') && (
+          <div className={styles.navGroup}>
+            <div className={styles.navLabel}>Управление</div>
+            <div
+              className={`${styles.navItem} ${location.pathname === '/dashboard' ? styles.active : ''}`}
+              onClick={() => { navigate('/dashboard'); onClose?.(); }}
+            >
+              <div className={styles.navIcon}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <rect x="3" y="3" width="18" height="18" rx="2"/>
+                  <path d="M3 9h18M9 21V9"/>
+                </svg>
+              </div>
+              Панель управления
+            </div>
+          </div>
+        )}
         {navGroups.map(group => (
           <div key={group.label} className={styles.navGroup}>
             <div className={styles.navLabel}>{group.label}</div>

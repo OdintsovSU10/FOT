@@ -37,7 +37,11 @@ export const timesheetController = {
   async getAll(req: AuthenticatedRequest, res: Response) {
     try {
       const organizationId = getOrgId(req);
-      const { month, department_id } = req.query;
+      const { month } = req.query;
+      // Для header: принудительно фильтруем по его отделу
+      const department_id = req.user.position_type === 'header' && req.user.department_id
+        ? req.user.department_id
+        : req.query.department_id;
 
       if (!month || typeof month !== 'string' || !/^\d{4}-\d{2}$/.test(month)) {
         return res.status(400).json({ success: false, error: 'Параметр month обязателен (формат YYYY-MM)' });

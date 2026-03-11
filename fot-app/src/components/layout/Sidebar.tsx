@@ -12,6 +12,7 @@ import {
   ClipboardCheckIcon,
   FileTextIcon,
   DatabaseIcon,
+  UserIcon,
 } from '../ui/Icons';
 
 interface INavItem {
@@ -33,23 +34,24 @@ const navGroups: INavGroup[] = [
     label: 'Основное',
     items: [
       { id: 'overview', path: '/', label: 'Обзор', icon: GridIcon },
-      { id: 'employees', path: '/tender', label: 'Сотрудники', icon: UsersIcon },
+      { id: 'employees', path: '/tender', label: 'Сотрудники', icon: UsersIcon, requiredPosition: 'admin' },
       { id: 'timesheet', path: '/timesheet', label: 'Табель', icon: CalendarIcon },
+      { id: 'admin-structure', path: '/admin/structure', label: 'Управление', icon: BuildingIcon },
+      { id: 'my-cabinet', path: '/employee', label: 'Личный кабинет', icon: UserIcon, requiredPosition: 'header' },
     ]
   },
   {
     label: 'Контроль',
     items: [
-      { id: 'skud-raw', path: '/skud-raw', label: 'Просмотр СКУД', icon: FileTextIcon },
-      { id: 'skud-db', path: '/skud-db', label: 'СКУД (база)', icon: DatabaseIcon },
+      { id: 'skud-raw', path: '/skud-raw', label: 'Просмотр СКУД', icon: FileTextIcon, requiredPosition: 'admin' },
+      { id: 'skud-db', path: '/skud-db', label: 'СКУД (база)', icon: DatabaseIcon, requiredPosition: 'admin' },
     ]
   },
   {
     label: 'Система',
     items: [
-      { id: 'sigur-settings', path: '/skud-settings', label: 'Настройки СКУД', icon: SettingsIcon },
+      { id: 'sigur-settings', path: '/skud-settings', label: 'Настройки СКУД', icon: SettingsIcon, requiredPosition: 'super_admin' },
       { id: 'admin-users', path: '/admin/users', label: 'Пользователи', icon: SettingsIcon, requiredPosition: 'super_admin' },
-      { id: 'admin-structure', path: '/admin/structure', label: 'Управление', icon: BuildingIcon, requiredPosition: 'super_admin' },
       { id: 'admin-audit', path: '/admin/audit', label: 'Аудит данных', icon: ClipboardCheckIcon, requiredPosition: 'super_admin' },
     ]
   }
@@ -64,7 +66,7 @@ interface ISidebarProps {
 export const Sidebar: FC<ISidebarProps> = ({ theme = 'dark', isOpen, onClose }) => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { profile, logout, hasPosition } = useAuth();
+  const { profile, logout, canAccess } = useAuth();
 
   const logoSrc = theme === 'dark' ? '/fot-logo-dark.svg' : '/fot-logo-light.svg';
 
@@ -118,10 +120,7 @@ export const Sidebar: FC<ISidebarProps> = ({ theme = 'dark', isOpen, onClose }) 
   };
 
   const getPositionLabel = (positionType: EmployeePositionType | null, importedPosition: string | null) => {
-    // Для worker показываем реальную должность из импорта, если есть
-    if (positionType === 'worker' && importedPosition) {
-      return importedPosition;
-    }
+    if (importedPosition) return importedPosition;
     switch (positionType) {
       case 'super_admin': return 'Супер-админ';
       case 'admin': return 'Администратор';
@@ -142,7 +141,7 @@ export const Sidebar: FC<ISidebarProps> = ({ theme = 'dark', isOpen, onClose }) 
           // Filter items based on position
           const visibleItems = group.items.filter(item => {
             if (!item.requiredPosition) return true;
-            return hasPosition(item.requiredPosition);
+            return canAccess(item.requiredPosition);
           });
 
           if (visibleItems.length === 0) return null;
@@ -173,11 +172,7 @@ export const Sidebar: FC<ISidebarProps> = ({ theme = 'dark', isOpen, onClose }) 
       </nav>
 
       <div className={styles.footer}>
-        <div
-          className={styles.userCard}
-          onClick={() => navigate('/profile')}
-          title="Личный кабинет"
-        >
+        <div className={styles.userCard}>
           <div className={styles.userAvatar}>{getInitials(profile?.full_name || null)}</div>
           <div className={styles.userInfo}>
             <div className={styles.userName}>{profile?.full_name || 'Пользователь'}</div>

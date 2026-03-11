@@ -166,7 +166,10 @@ export const employeesController = {
       const t0 = Date.now();
       const showArchived = req.query.archived === 'true';
       const organizationId = req.user.organization_id;
-      const departmentId = req.query.department_id as string | undefined;
+      // Для header: принудительно фильтруем по его отделу
+      const departmentId = req.user.position_type === 'header' && req.user.department_id
+        ? req.user.department_id
+        : req.query.department_id as string | undefined;
       const isListView = req.query.view === 'list';
       console.log(`[getAll] Start | archived=${showArchived} org=${organizationId} dept=${departmentId} list=${isListView}`);
 

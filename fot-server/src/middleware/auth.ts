@@ -36,6 +36,8 @@ export const authenticate = async (
       email: decoded.email,
       organization_id: decoded.organization_id,
       position_type: decoded.position_type,
+      employee_id: decoded.employee_id ?? null,
+      department_id: decoded.department_id ?? null,
       is_approved: decoded.is_approved,
       two_factor_enabled: decoded.two_factor_enabled,
       two_factor_verified: decoded.two_factor_verified,
@@ -100,6 +102,36 @@ export const requirePosition = (...allowedPositions: EmployeePositionType[]) => 
 
 // Alias для обратной совместимости
 export const requireRole = requirePosition;
+
+/**
+ * Middleware для проверки должности пользователя по иерархии
+ * header (2) < admin (3) < super_admin (4)
+ */
+const POSITION_HIERARCHY: Record<EmployeePositionType, number> = {
+  worker: 1,
+  header: 2,
+  admin: 3,
+  super_admin: 4,
+};
+
+export const requireMinPosition = (minPosition: EmployeePositionType) => {
+  return (req: AuthenticatedRequest, res: Response, next: NextFunction): void => {
+    if (!req.user) {
+      res.status(401).json({ success: false, error: 'Authentication required' });
+      return;
+    }
+
+    const userLevel = POSITION_HIERARCHY[req.user.position_type] ?? 0;
+    const requiredLevel = POSITION_HIERARCHY[minPosition];
+
+    if (userLevel < requiredLevel) {
+      res.status(403).json({ success: false, error: 'Insufficient permissions' });
+      return;
+    }
+
+    next();
+  };
+};
 
 /**
  * Middleware для проверки что пользователь - super_admin

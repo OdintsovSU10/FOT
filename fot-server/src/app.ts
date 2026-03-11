@@ -13,6 +13,7 @@ import structureRoutes from './routes/structure.routes.js';
 import auditRoutes from './routes/audit.routes.js';
 import sigurRoutes from './routes/sigur.routes.js';
 import timesheetRoutes from './routes/timesheet.routes.js';
+import chatRoutes from './routes/chat.routes.js';
 
 const app = express();
 
@@ -44,6 +45,7 @@ app.use('/api/structure', structureRoutes);
 app.use('/api/audit', auditRoutes);
 app.use('/api/sigur', sigurRoutes);
 app.use('/api/timesheet', timesheetRoutes);
+app.use('/api/chat', chatRoutes);
 
 // 404 handler
 app.use((_req, res) => {

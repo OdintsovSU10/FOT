@@ -23,6 +23,9 @@ router.patch('/users/:id/name', adminController.updateUserName as any);
 router.post('/users/:id/generate-2fa', adminController.generate2FA as any);
 router.post('/users/:id/disable-2fa', adminController.disable2FA as any);
 
+// Поиск сотрудников (для привязки при одобрении)
+router.get('/employees/search', adminController.searchUnlinkedEmployees as any);
+
 // Организации
 router.get('/organizations', adminController.getOrganizations as any);
 router.post('/organizations', adminController.createOrganization as any);

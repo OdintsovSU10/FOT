@@ -33,7 +33,9 @@ import { TimesheetPage } from './pages/timesheet/TimesheetPage';
 import { ProfilePage } from './pages/profile';
 
 // Employee
-import { EmployeeDashboardPage } from './pages/employee';
+import { EmployeeDashboardPage, ChatPage } from './pages/employee';
+
+import { DevRoleSwitcher } from './components/ui/DevRoleSwitcher';
 
 import './App.css';
 
@@ -44,13 +46,18 @@ const PositionBasedRedirect = () => {
   // DEBUG: выводим текущую роль
   console.log('[PositionBasedRedirect] positionType:', positionType);
 
-  // Worker (Рабочий/Инженер) → личный кабинет сотрудника
-  if (positionType === 'worker') {
+  // Если роль ещё не загружена — не редиректим в никуда
+  if (!positionType) {
     return <Navigate to="/employee" replace />;
   }
 
-  // Все остальные (header, admin, super_admin) → дашборд
-  return <Navigate to="/dashboard" replace />;
+  // Header+ (руководитель, админ, супер-админ) → дашборд
+  if (canAccess('header')) {
+    return <Navigate to="/dashboard" replace />;
+  }
+
+  // Worker (Рабочий/Инженер) → личный кабинет сотрудника
+  return <Navigate to="/employee" replace />;
 };
 
 const AppRoutes = () => {
@@ -110,6 +117,14 @@ const AppRoutes = () => {
           }
         />
         <Route
+          path="/employee/chat"
+          element={
+            <EmployeeLayout title="Сообщения">
+              <ChatPage />
+            </EmployeeLayout>
+          }
+        />
+        <Route
           path="/employee/*"
           element={
             <EmployeeLayout title="Личный кабинет">
@@ -119,7 +134,7 @@ const AppRoutes = () => {
         />
       </Route>
 
-      {/* Header/Admin routes (dashboard access) */}
+      {/* Header+ routes (dashboard, timesheet) */}
       <Route element={<ProtectedRoute requiredPosition="header" />}>
         <Route
           path="/dashboard"
@@ -129,6 +144,26 @@ const AppRoutes = () => {
             </Layout>
           }
         />
+        <Route
+          path="/timesheet"
+          element={
+            <Layout title="Табель" theme={theme} onToggleTheme={toggleTheme}>
+              <TimesheetPage />
+            </Layout>
+          }
+        />
+        <Route
+          path="/admin/structure"
+          element={
+            <Layout title="Управление" theme={theme} onToggleTheme={toggleTheme}>
+              <ManagePage />
+            </Layout>
+          }
+        />
+      </Route>
+
+      {/* Admin+ routes (employees, SKUD) */}
+      <Route element={<ProtectedRoute requiredPosition="admin" />}>
         <Route
           path="/tender"
           element={
@@ -142,14 +177,6 @@ const AppRoutes = () => {
           element={
             <Layout title="Карточка сотрудника" theme={theme} onToggleTheme={toggleTheme}>
               <EmployeeCardPage />
-            </Layout>
-          }
-        />
-        <Route
-          path="/skud-settings"
-          element={
-            <Layout title="Настройки СКУД" theme={theme} onToggleTheme={toggleTheme}>
-              <SigurSettingsPage />
             </Layout>
           }
         />
@@ -169,18 +196,10 @@ const AppRoutes = () => {
             </Layout>
           }
         />
-        <Route
-          path="/timesheet"
-          element={
-            <Layout title="Табель" theme={theme} onToggleTheme={toggleTheme}>
-              <TimesheetPage />
-            </Layout>
-          }
-        />
       </Route>
 
-      {/* Profile - available for all authenticated users */}
-      <Route element={<ProtectedRoute />}>
+      {/* Profile - for header+ uses Layout, workers redirect to /employee */}
+      <Route element={<ProtectedRoute requiredPosition="header" />}>
         <Route
           path="/profile"
           element={
@@ -194,6 +213,14 @@ const AppRoutes = () => {
       {/* Super Admin routes */}
       <Route element={<ProtectedRoute requiredPosition="super_admin" />}>
         <Route
+          path="/skud-settings"
+          element={
+            <Layout title="Настройки СКУД" theme={theme} onToggleTheme={toggleTheme}>
+              <SigurSettingsPage />
+            </Layout>
+          }
+        />
+        <Route
           path="/admin/users"
           element={
             <Layout title="Управление пользователями" theme={theme} onToggleTheme={toggleTheme}>
@@ -206,14 +233,6 @@ const AppRoutes = () => {
           element={
             <Layout title="Управление организациями" theme={theme} onToggleTheme={toggleTheme}>
               <OrganizationsPage />
-            </Layout>
-          }
-        />
-        <Route
-          path="/admin/structure"
-          element={
-            <Layout title="Управление" theme={theme} onToggleTheme={toggleTheme}>
-              <ManagePage />
             </Layout>
           }
         />
@@ -251,6 +270,7 @@ const App = () => {
       <AuthProvider>
         <ToastProvider>
           <AppRoutes />
+          {import.meta.env.DEV && <DevRoleSwitcher />}
         </ToastProvider>
       </AuthProvider>
     </BrowserRouter>

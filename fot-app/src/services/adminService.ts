@@ -45,8 +45,8 @@ export const adminService = {
     return response.data || [];
   },
 
-  async approveUser(userId: string): Promise<void> {
-    await apiClient.post(`/admin/users/${userId}/approve`);
+  async approveUser(userId: string, options?: { organization_id?: string; position_type?: EmployeePositionType; employee_id?: number }): Promise<void> {
+    await apiClient.post(`/admin/users/${userId}/approve`, options || {});
   },
 
   async rejectUser(userId: string): Promise<void> {
@@ -85,6 +85,14 @@ export const adminService = {
 
   async disable2FA(userId: string): Promise<void> {
     await apiClient.post(`/admin/users/${userId}/disable-2fa`);
+  },
+
+  // Employee search (for linking)
+  async searchUnlinkedEmployees(query: string, organizationId?: string): Promise<{ id: number; full_name: string; org_department_id: string | null; tab_number: string | null }[]> {
+    const params = new URLSearchParams({ q: query });
+    if (organizationId) params.set('organization_id', organizationId);
+    const response = await apiClient.get<ApiResponse<{ id: number; full_name: string; org_department_id: string | null; tab_number: string | null }[]>>(`/admin/employees/search?${params}`);
+    return response.data || [];
   },
 
   // Organizations

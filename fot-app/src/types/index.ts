@@ -68,6 +68,7 @@ export interface UserProfile {
   organization_id: string | null;
   position_type: EmployeePositionType;    // Заменяет role
   employee_id: number | null;              // Связь с employees
+  department_id: string | null;            // org_department_id сотрудника
   supervisor_id: string | null;            // ID руководителя
   imported_position: string | null;        // Должность из импорта (для worker)
   is_approved: boolean;

@@ -18,6 +18,7 @@ interface RegisterResponse {
 }
 
 interface AuthContextType extends AuthState {
+  token: string | null;
   login: (credentials: LoginCredentials) => Promise<{ requires2FA: boolean }>;
   verify2FA: (code: string) => Promise<void>;
   register: (data: RegisterData) => Promise<RegisterResponse | null>;
@@ -25,6 +26,9 @@ interface AuthContextType extends AuthState {
   refreshProfile: () => Promise<void>;
   hasPosition: (positions: EmployeePositionType | EmployeePositionType[]) => boolean;
   canAccess: (requiredPosition?: EmployeePositionType) => boolean;
+  // Dev mode override
+  devOverride: EmployeePositionType | null;
+  setDevOverride: (position: EmployeePositionType | null) => void;
   // Deprecated aliases for compatibility
   role: EmployeePositionType | null;
   hasRole: (roles: EmployeePositionType | EmployeePositionType[]) => boolean;
@@ -45,6 +49,13 @@ const initialState: AuthState = {
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [state, setState] = useState<AuthState>(initialState);
+  const [devOverride, setDevOverrideState] = useState<EmployeePositionType | null>(null);
+
+  const setDevOverride = useCallback((position: EmployeePositionType | null) => {
+    if (import.meta.env.DEV) {
+      setDevOverrideState(position);
+    }
+  }, []);
 
   // Check existing session on mount
   useEffect(() => {
@@ -179,12 +190,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, [logout]);
 
+  // Effective position type (dev override takes priority in DEV mode)
+  const effectivePositionType = (import.meta.env.DEV && devOverride) ? devOverride : state.positionType;
+
   // Check if user has one of the specified positions
   const hasPosition = useCallback((positions: EmployeePositionType | EmployeePositionType[]): boolean => {
-    if (!state.positionType) return false;
+    if (!effectivePositionType) return false;
     const positionArray = Array.isArray(positions) ? positions : [positions];
-    return positionArray.includes(state.positionType);
-  }, [state.positionType]);
+    return positionArray.includes(effectivePositionType);
+  }, [effectivePositionType]);
 
   // Deprecated alias for backward compatibility
   const hasRole = hasPosition;
@@ -203,12 +217,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       worker: 1,
     };
 
-    if (!state.positionType) return false;
-    return positionHierarchy[state.positionType] >= positionHierarchy[requiredPosition];
-  }, [state]);
+    if (!effectivePositionType) return false;
+    return positionHierarchy[effectivePositionType] >= positionHierarchy[requiredPosition];
+  }, [state.isAuthenticated, state.isApproved, state.isTwoFactorEnabled, state.isTwoFactorVerified, effectivePositionType]);
 
   const value: AuthContextType = {
     ...state,
+    positionType: effectivePositionType,
+    token: localStorage.getItem('access_token'),
     login,
     verify2FA,
     register,
@@ -216,8 +232,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     refreshProfile,
     hasPosition,
     canAccess,
+    devOverride,
+    setDevOverride,
     // Deprecated aliases for compatibility
-    role: state.positionType,
+    role: effectivePositionType,
     hasRole,
   };
 

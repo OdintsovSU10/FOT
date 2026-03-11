@@ -6,6 +6,7 @@ import { TimesheetSidePanel } from '../../components/timesheet/TimesheetSidePane
 import { TimesheetCorrectionModal } from '../../components/timesheet/TimesheetCorrectionModal';
 import { timesheetService } from '../../services/timesheetService';
 import { apiClient } from '../../api/client';
+import { useAuth } from '../../contexts/AuthContext';
 import { getMonthLabel, formatDateRu } from '../../utils/calendarUtils';
 import type {
   TimesheetEntry,
@@ -46,6 +47,8 @@ const DEFAULT_STATS: ITimesheetStats = {
 };
 
 export const TimesheetPage: FC = () => {
+  const { positionType, profile } = useAuth();
+  const isHeaderOnly = positionType === 'header';
   const now = new Date();
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth() + 1);
@@ -77,10 +80,16 @@ export const TimesheetPage: FC = () => {
     apiClient.get<{ success: boolean; data: { departments: IDbDepartment[] } }>('/structure')
       .then(res => {
         const deps = res.data?.departments || [];
-        setDeptOptions(flattenTree(deps));
+        const flat = flattenTree(deps);
+        setDeptOptions(flat);
+
+        // Для header: автоматически выбрать свой отдел
+        if (isHeaderOnly && profile?.department_id && !selectedDeptId) {
+          setSelectedDeptId(profile.department_id);
+        }
       })
       .catch(() => {});
-  }, []);
+  }, [isHeaderOnly, profile?.department_id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Close dept dropdown on outside click
   useEffect(() => {
@@ -220,35 +229,43 @@ export const TimesheetPage: FC = () => {
         </div>
         <div className="ts-header-right">
           <div className="ts-dept-wrap" ref={deptRef}>
-            <button className="ts-dept-btn" onClick={() => setDeptOpen(!deptOpen)}>
-              {selectedDeptName}
-              <ChevronDown size={16} />
-            </button>
-            {deptOpen && (
-              <div className="ts-dept-dropdown">
-                <input
-                  className="ts-dept-search"
-                  placeholder="Поиск отдела..."
-                  value={deptSearch}
-                  onChange={e => setDeptSearch(e.target.value)}
-                  autoFocus
-                />
-                <div
-                  className={`ts-dept-item ${!selectedDeptId ? 'ts-dept-item--active' : ''}`}
-                  onClick={() => { setSelectedDeptId(null); setDeptOpen(false); }}
-                >
-                  Все отделы
-                </div>
-                {filteredDepts.map(d => (
-                  <div
-                    key={d.id}
-                    className={`ts-dept-item ${selectedDeptId === d.id ? 'ts-dept-item--active' : ''}`}
-                    onClick={() => { setSelectedDeptId(d.id); setDeptOpen(false); }}
-                  >
-                    {d.name}
+            {isHeaderOnly ? (
+              <button className="ts-dept-btn" style={{ cursor: 'default', opacity: 0.8 }}>
+                {selectedDeptName}
+              </button>
+            ) : (
+              <>
+                <button className="ts-dept-btn" onClick={() => setDeptOpen(!deptOpen)}>
+                  {selectedDeptName}
+                  <ChevronDown size={16} />
+                </button>
+                {deptOpen && (
+                  <div className="ts-dept-dropdown">
+                    <input
+                      className="ts-dept-search"
+                      placeholder="Поиск отдела..."
+                      value={deptSearch}
+                      onChange={e => setDeptSearch(e.target.value)}
+                      autoFocus
+                    />
+                    <div
+                      className={`ts-dept-item ${!selectedDeptId ? 'ts-dept-item--active' : ''}`}
+                      onClick={() => { setSelectedDeptId(null); setDeptOpen(false); }}
+                    >
+                      Все отделы
+                    </div>
+                    {filteredDepts.map(d => (
+                      <div
+                        key={d.id}
+                        className={`ts-dept-item ${selectedDeptId === d.id ? 'ts-dept-item--active' : ''}`}
+                        onClick={() => { setSelectedDeptId(d.id); setDeptOpen(false); }}
+                      >
+                        {d.name}
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
+                )}
+              </>
             )}
           </div>
           <div className="ts-status-badge ts-status-badge--draft">Черновик</div>

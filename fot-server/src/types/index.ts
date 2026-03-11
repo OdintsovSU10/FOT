@@ -32,6 +32,8 @@ export interface AuthenticatedRequest extends Request {
     email: string;
     organization_id: string | null;
     position_type: EmployeePositionType;  // Заменяет role
+    employee_id: number | null;
+    department_id: string | null;         // org_department_id сотрудника
     is_approved: boolean;
     two_factor_enabled: boolean;
     two_factor_verified: boolean;
@@ -235,6 +237,8 @@ export interface JWTPayload {
   email: string;
   organization_id: string | null;
   position_type: EmployeePositionType;  // Заменяет role
+  employee_id: number | null;
+  department_id: string | null;          // org_department_id сотрудника
   is_approved: boolean;
   two_factor_enabled: boolean;
   two_factor_verified: boolean;
