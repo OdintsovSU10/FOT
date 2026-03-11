@@ -385,6 +385,15 @@
   background: var(--bg-secondary);
 }
 
+/* Row hover */
+.ts-table tbody tr:hover {
+  background: var(--surface-hover, rgba(255, 255, 255, 0.03));
+}
+
+.ts-table tbody tr:hover td.ts-col-sticky {
+  background: var(--surface-hover, rgba(255, 255, 255, 0.03));
+}
+
 /* Employee cell */
 .ts-employee-cell {
   text-align: left;
@@ -431,8 +440,10 @@
 }
 
 .ts-day:hover {
-  transform: scale(1.08);
-  z-index: 5;
+  z-index: 9;
+  background: rgba(59, 130, 246, 0.18);
+  outline: 2px solid var(--primary);
+  outline-offset: -2px;
 }
 
 .ts-day--full {
@@ -473,9 +484,17 @@
 
 .ts-day--weekend:hover {
   transform: none;
+  outline: none;
+  background: var(--bg-tertiary, var(--bg-secondary));
 }
 
 .ts-day--today {
+  box-shadow: inset 0 0 0 2px var(--success);
+}
+
+.ts-day--today:hover {
+  outline: 2px solid var(--primary);
+  outline-offset: -2px;
   box-shadow: inset 0 0 0 2px var(--success);
 }
 

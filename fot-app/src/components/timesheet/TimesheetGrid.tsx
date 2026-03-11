@@ -25,6 +25,22 @@ interface IRowData {
   normHours: number;
 }
 
+/** Format decimal hours to "Xч Yм" */
+const formatHM = (decimal: number): string => {
+  const h = Math.floor(decimal);
+  const m = Math.round((decimal - h) * 60);
+  if (m === 0) return `${h}ч`;
+  return `${h}ч${m}м`;
+};
+
+/** Short format for day cells: "X:MM" */
+const formatCellHM = (decimal: number): string => {
+  const h = Math.floor(decimal);
+  const m = Math.round((decimal - h) * 60);
+  if (m === 0) return `${h}`;
+  return `${h}:${String(m).padStart(2, '0')}`;
+};
+
 const STATUS_CELL_TEXT: Record<TimesheetStatus, string> = {
   work: '',
   sick: 'Б',
@@ -33,6 +49,7 @@ const STATUS_CELL_TEXT: Record<TimesheetStatus, string> = {
   business_trip: 'К',
   dayoff: 'В',
   remote: 'У',
+  unpaid: 'НО',
   manual: '',
 };
 
@@ -76,7 +93,7 @@ const getDayCellText = (entry: TimesheetEntry | null, weekend: boolean): string 
   if (!entry) return '';
   const special = STATUS_CELL_TEXT[entry.status];
   if (special) return special;
-  if (entry.hours_worked != null) return String(entry.hours_worked);
+  if (entry.hours_worked != null) return formatCellHM(entry.hours_worked);
   return '';
 };
 
@@ -203,14 +220,12 @@ export const TimesheetGrid: FC<ITimesheetGridProps> = ({
                       </td>
                     );
                   })}
-                  <td className="ts-summary ts-summary--total">{Math.round(row.factHours)}ч</td>
-                  <td className="ts-summary">{row.normHours}ч</td>
+                  <td className="ts-summary ts-summary--total">{formatHM(row.factHours)}</td>
+                  <td className="ts-summary">{formatHM(row.normHours)}</td>
                   <td className={`ts-summary ${hasVacation && row.factHours === 0 ? '' : diff >= 0 ? 'ts-summary--positive' : 'ts-summary--negative'}`}>
                     {hasVacation && row.factHours === 0
                       ? 'отпуск'
-                      : diff >= 0
-                        ? `+${diff}`
-                        : `${diff}`
+                      : `${diff >= 0 ? '+' : '−'}${formatHM(Math.abs(diff))}`
                     }
                   </td>
                 </tr>

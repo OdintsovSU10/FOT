@@ -29,9 +29,8 @@ interface IDbDepartment {
 const flattenTree = (nodes: IDbDepartment[]): IDeptOption[] => {
   const result: IDeptOption[] = [];
   for (const node of nodes) {
-    if (!node.children || node.children.length === 0) {
-      result.push({ id: node.id, name: node.name });
-    } else {
+    result.push({ id: node.id, name: node.name });
+    if (node.children && node.children.length > 0) {
       result.push(...flattenTree(node.children));
     }
   }
@@ -178,7 +177,7 @@ export const TimesheetPage: FC = () => {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `timesheet-${monthStr}.csv`;
+      a.download = `timesheet-${monthStr}.xlsx`;
       a.click();
       URL.revokeObjectURL(url);
     } catch (err) {
@@ -267,6 +266,10 @@ export const TimesheetPage: FC = () => {
       {loading ? (
         <div className="ts-table-container">
           <div className="ts-loading">Загрузка табеля...</div>
+        </div>
+      ) : !selectedDeptId ? (
+        <div className="ts-table-container">
+          <div className="ts-loading">Выберите отдел для отображения табеля</div>
         </div>
       ) : (
         <TimesheetGrid

@@ -175,16 +175,18 @@ export interface EmployeeInput {
 }
 
 // Timesheet types
-export type TimesheetStatus = 'work' | 'absent' | 'vacation' | 'sick' | 'business_trip' | 'dayoff' | 'remote' | 'manual';
+export type TimesheetStatus = 'work' | 'absent' | 'vacation' | 'sick' | 'business_trip' | 'dayoff' | 'remote' | 'unpaid' | 'manual';
 
 export interface TimesheetEntry {
-  id: number;
+  id: number | null;
   employee_id: number;
   work_date: string;
   status: TimesheetStatus;
   hours_worked: number | null;
   is_correction: boolean;
   notes?: string | null;
+  first_entry?: string | null;
+  last_exit?: string | null;
   created_at?: string;
   updated_at?: string;
 }
