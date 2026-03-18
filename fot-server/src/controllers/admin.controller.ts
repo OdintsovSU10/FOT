@@ -495,6 +495,38 @@ export const adminController = {
   },
 
   /**
+   * PATCH /api/admin/users/:id/employee
+   * Привязка/отвязка сотрудника СКУД
+   */
+  async updateUserEmployee(req: AuthenticatedRequest, res: Response): Promise<void> {
+    try {
+      const { id } = req.params;
+      const { employee_id } = z.object({
+        employee_id: z.number().int().positive().nullable(),
+      }).parse(req.body);
+
+      const { error } = await supabase
+        .from('user_profiles')
+        .update({ employee_id })
+        .eq('id', id);
+
+      if (error) {
+        res.status(500).json({ success: false, error: 'Failed to update employee link' });
+        return;
+      }
+
+      res.json({ success: true });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        res.status(400).json({ success: false, error: error.errors[0].message });
+        return;
+      }
+      console.error('Update employee error:', error);
+      res.status(500).json({ success: false, error: 'Failed to update employee link' });
+    }
+  },
+
+  /**
    * POST /api/admin/users/:id/generate-2fa
    * Генерация 2FA для пользователя (только super_admin)
    */
@@ -609,7 +641,7 @@ export const adminController = {
    */
   async getOrganizations(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
-      // Получаем организации
+      // Получаем все организации
       const { data: orgsEncrypted, error: orgsError } = await supabase
         .from('organizations')
         .select('*')
@@ -621,8 +653,10 @@ export const adminController = {
         return;
       }
 
-      // Расшифровываем организации
-      const orgs = (orgsEncrypted as OrganizationEncrypted[] || []).map(decryptOrganization);
+      // Показываем только организации с непустым именем
+      const orgs = (orgsEncrypted as OrganizationEncrypted[] || [])
+        .filter(o => o.name && o.name.trim().length > 0)
+        .map(decryptOrganization);
 
       // Получаем количество сотрудников для каждой организации
       const { data: memberCounts, error: countError } = await supabase
@@ -826,7 +860,7 @@ export const adminController = {
       // Ищем сотрудников по имени
       let query = supabase
         .from('employees')
-        .select('id, full_name, org_department_id, tab_number')
+        .select('id, full_name, org_department_id')
         .ilike('full_name', `%${q}%`)
         .eq('employment_status', 'active')
         .limit(20);

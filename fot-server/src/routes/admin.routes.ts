@@ -18,6 +18,7 @@ router.post('/users/:id/confirm-email', adminController.confirmUserEmail as any)
 router.patch('/users/:id/position', adminController.updateUserPosition as any);
 router.patch('/users/:id/organization', adminController.assignOrganization as any);
 router.patch('/users/:id/name', adminController.updateUserName as any);
+router.patch('/users/:id/employee', adminController.updateUserEmployee as any);
 
 // 2FA управление
 router.post('/users/:id/generate-2fa', adminController.generate2FA as any);

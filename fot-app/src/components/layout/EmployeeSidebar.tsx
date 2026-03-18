@@ -208,12 +208,7 @@ export const EmployeeSidebar: FC<IEmployeeSidebarProps> = ({ isOpen, onClose }) 
           <div className={styles.profileAvatar}>{getInitials(profile?.full_name || null)}</div>
           <div className={styles.profileInfo}>
             <h3>{profile?.full_name || 'Сотрудник'}</h3>
-            <p>Сотрудник</p>
-          </div>
-        </div>
-        <div className={styles.profileStats}>
-          <div className={styles.profileStat}>
-            <div className={styles.profileStatValue}>{profile?.imported_position || 'Сотрудник'}</div>
+            {profile?.imported_position && <p>{profile.imported_position}</p>}
           </div>
         </div>
       </div>

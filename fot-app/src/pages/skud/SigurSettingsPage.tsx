@@ -143,6 +143,8 @@ export const SigurSettingsPage = () => {
   const [apSettings, setApSettings] = useState<Map<string, boolean>>(new Map());
   const [savingSettings, setSavingSettings] = useState(false);
   const [settingsSaved, setSettingsSaved] = useState(false);
+  const [syncingAP, setSyncingAP] = useState(false);
+  const [syncAPResult, setSyncAPResult] = useState<{ added: number; removed: number } | null>(null);
   const [apSearch, setApSearch] = useState('');
 
   // Инициализация дат текущим месяцем
@@ -186,9 +188,10 @@ export const SigurSettingsPage = () => {
   }, [accessPoints, apSearch]);
 
   const toggleApInternal = (apName: string) => {
+    const key = apName.trim();
     setApSettings(prev => {
       const next = new Map(prev);
-      next.set(apName, !next.get(apName));
+      next.set(key, !next.get(key));
       return next;
     });
     setSettingsSaved(false);
@@ -199,7 +202,7 @@ export const SigurSettingsPage = () => {
     try {
       const settings: IAccessPointSetting[] = accessPoints.map(ap => ({
         access_point_name: ap,
-        is_internal: apSettings.get(ap) || false,
+        is_internal: apSettings.get(ap.trim()) || false,
       }));
       await skudService.saveAccessPointSettings(settings);
       setSettingsSaved(true);
@@ -208,6 +211,31 @@ export const SigurSettingsPage = () => {
       setError('Ошибка сохранения настроек');
     } finally {
       setSavingSettings(false);
+    }
+  };
+
+  const handleSyncAccessPoints = async () => {
+    setSyncingAP(true);
+    setSyncAPResult(null);
+    setError('');
+    try {
+      const oldSet = new Set(accessPoints);
+      const result = await skudService.syncAccessPoints();
+      setAccessPoints(result.accessPoints);
+      if (result.removed.length > 0) {
+        setApSettings(prev => {
+          const next = new Map(prev);
+          for (const name of result.removed) next.delete(name);
+          return next;
+        });
+      }
+      const addedCount = result.accessPoints.filter(ap => !oldSet.has(ap)).length;
+      setSyncAPResult({ added: addedCount, removed: result.removed.length });
+      setTimeout(() => setSyncAPResult(null), 5000);
+    } catch {
+      setError('Ошибка обновления точек доступа');
+    } finally {
+      setSyncingAP(false);
     }
   };
 
@@ -865,7 +893,16 @@ export const SigurSettingsPage = () => {
               onChange={e => setApSearch(e.target.value)}
             />
           </div>
-          {canEdit && (
+          {canEdit && (<>
+            <button
+              className="sigur-btn"
+              onClick={handleSyncAccessPoints}
+              disabled={syncingAP || !connected}
+              title="Обновить список из Sigur"
+            >
+              <RefreshCw size={14} className={syncingAP ? 'sigur-spin' : ''} />
+              {syncingAP ? 'Обновление...' : 'Обновить'}
+            </button>
             <button
               className={`sigur-btn sigur-btn-primary ${settingsSaved ? 'sigur-btn-saved' : ''}`}
               onClick={handleSaveApSettings}
@@ -873,8 +910,24 @@ export const SigurSettingsPage = () => {
             >
               {settingsSaved ? <><Check size={14} /> Сохранено</> : <><Save size={14} /> Сохранить</>}
             </button>
-          )}
+          </>)}
         </div>
+
+        {syncAPResult && (
+          <div className="sigur-sync-result" style={{ marginBottom: '0.75rem' }}>
+            <div className="sigur-sync-stats">
+              {syncAPResult.added > 0 && (
+                <span className="sigur-sync-stat success">Добавлено: <strong>{syncAPResult.added}</strong></span>
+              )}
+              {syncAPResult.removed > 0 && (
+                <span className="sigur-sync-stat skipped">Удалено: <strong>{syncAPResult.removed}</strong></span>
+              )}
+              {syncAPResult.added === 0 && syncAPResult.removed === 0 && (
+                <span className="sigur-sync-stat">Изменений нет</span>
+              )}
+            </div>
+          </div>
+        )}
 
         {apLoading ? (
           <div style={{ textAlign: 'center', padding: '1rem', color: 'var(--text-tertiary)', fontSize: '0.8125rem' }}>
@@ -896,7 +949,7 @@ export const SigurSettingsPage = () => {
               </thead>
               <tbody>
                 {filteredAccessPoints.map((ap, idx) => {
-                  const isInternal = apSettings.get(ap) || false;
+                  const isInternal = apSettings.get(ap.trim()) || false;
                   return (
                     <tr key={ap}>
                       <td style={{ width: 40, textAlign: 'center', color: 'var(--text-tertiary)' }}>{idx + 1}</td>

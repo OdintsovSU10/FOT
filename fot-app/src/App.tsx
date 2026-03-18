@@ -28,6 +28,9 @@ import { SkudSupabasePage } from './pages/skud/SkudSupabasePage';
 // Timesheet
 import { TimesheetPage } from './pages/timesheet/TimesheetPage';
 
+// Discipline Analytics
+import { DisciplineAnalyticsPage } from './pages/DisciplineAnalyticsPage';
+
 
 // Profile
 import { ProfilePage } from './pages/profile';
@@ -193,6 +196,14 @@ const AppRoutes = () => {
           element={
             <Layout title="Просмотр СКУД (база)" theme={theme} onToggleTheme={toggleTheme}>
               <SkudSupabasePage />
+            </Layout>
+          }
+        />
+        <Route
+          path="/discipline"
+          element={
+            <Layout title="Аналитика дисциплины" theme={theme} onToggleTheme={toggleTheme}>
+              <DisciplineAnalyticsPage />
             </Layout>
           }
         />

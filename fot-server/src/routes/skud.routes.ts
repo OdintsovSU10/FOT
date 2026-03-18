@@ -43,6 +43,13 @@ router.get(
   skudController.getDashboardStats as any
 );
 
+// GET /api/skud/discipline - аналитика дисциплины по всей организации (admin+)
+router.get(
+  '/discipline',
+  requireRole('admin', 'manager', 'owner', 'super_admin') as any,
+  skudController.getDisciplineViolations as any
+);
+
 // GET /api/skud/daily-summary - дневные сводки (viewer+)
 router.get(
   '/daily-summary',
@@ -50,10 +57,10 @@ router.get(
   skudController.getDailySummary as any
 );
 
-// GET /api/skud/employee-events/:employeeId - события конкретного сотрудника (viewer+)
+// GET /api/skud/employee-events/:employeeId - события конкретного сотрудника (worker — только свои, viewer+)
 router.get(
   '/employee-events/:employeeId',
-  requireRole('viewer', 'manager', 'owner', 'super_admin') as any,
+  requireRole('worker', 'header', 'viewer', 'manager', 'admin', 'owner', 'super_admin') as any,
   skudController.getEmployeeEvents as any
 );
 
@@ -71,10 +78,10 @@ router.get(
   skudController.getAccessPoints as any
 );
 
-// GET /api/skud/access-point-settings - настройки точек доступа для отдела (viewer+)
+// GET /api/skud/access-point-settings - настройки точек доступа для отдела (worker+)
 router.get(
   '/access-point-settings',
-  requireRole('viewer', 'manager', 'owner', 'super_admin') as any,
+  requireRole('worker', 'header', 'viewer', 'manager', 'admin', 'owner', 'super_admin') as any,
   skudController.getAccessPointSettings as any
 );
 
@@ -83,6 +90,13 @@ router.put(
   '/access-point-settings',
   requireRole('manager', 'owner', 'super_admin') as any,
   skudController.saveAccessPointSettings as any
+);
+
+// POST /api/skud/sync-access-points - обновление точек доступа из Sigur (manager+)
+router.post(
+  '/sync-access-points',
+  requireRole('manager', 'owner', 'super_admin') as any,
+  skudController.syncAccessPoints as any
 );
 
 // GET /api/skud/presence - статус присутствия сотрудников (header+)

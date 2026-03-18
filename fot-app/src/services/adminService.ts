@@ -73,6 +73,10 @@ export const adminService = {
     await apiClient.patch(`/admin/users/${userId}/name`, { full_name: fullName });
   },
 
+  async updateUserEmployee(userId: string, employeeId: number | null): Promise<void> {
+    await apiClient.patch(`/admin/users/${userId}/employee`, { employee_id: employeeId });
+  },
+
   // 2FA management
   async generate2FA(userId: string): Promise<TwoFactorData> {
     const response = await apiClient.post<ApiResponse<{ secret: string; qr_code: string; recovery_codes: string[] }>>(`/admin/users/${userId}/generate-2fa`);
@@ -88,10 +92,10 @@ export const adminService = {
   },
 
   // Employee search (for linking)
-  async searchUnlinkedEmployees(query: string, organizationId?: string): Promise<{ id: number; full_name: string; org_department_id: string | null; tab_number: string | null }[]> {
+  async searchUnlinkedEmployees(query: string, organizationId?: string): Promise<{ id: number; full_name: string; org_department_id: string | null }[]> {
     const params = new URLSearchParams({ q: query });
     if (organizationId) params.set('organization_id', organizationId);
-    const response = await apiClient.get<ApiResponse<{ id: number; full_name: string; org_department_id: string | null; tab_number: string | null }[]>>(`/admin/employees/search?${params}`);
+    const response = await apiClient.get<ApiResponse<{ id: number; full_name: string; org_department_id: string | null }[]>>(`/admin/employees/search?${params}`);
     return response.data || [];
   },
 

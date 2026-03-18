@@ -146,6 +146,150 @@
   font-weight: 600;
 }
 
+/* Attendance header with period controls */
+.attendanceHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 22px;
+  border-bottom: 1px solid var(--border);
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.periodTabs {
+  display: flex;
+  gap: 4px;
+  background: var(--bg-tertiary);
+  border-radius: 8px;
+  padding: 3px;
+}
+
+.periodTab {
+  background: none;
+  border: none;
+  padding: 5px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.periodTab:hover { color: var(--text-primary); }
+
+.periodTabActive {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+}
+
+.periodNav {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.periodNavBtn {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: var(--text-secondary);
+  transition: all 0.15s;
+  flex-shrink: 0;
+}
+
+.periodNavBtn:hover:not(:disabled) { background: var(--bg-tertiary); color: var(--text-primary); }
+.periodNavBtn:disabled { opacity: 0.35; cursor: not-allowed; }
+.periodNavBtn svg { width: 14px; height: 14px; }
+
+.periodLabel {
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--text-primary);
+  min-width: 120px;
+  text-align: center;
+  font-family: 'Space Mono', monospace;
+}
+
+/* Duration badge inside event row */
+.durationBadge {
+  display: inline-block;
+  margin-left: 8px;
+  font-size: 10px;
+  color: var(--text-tertiary);
+  font-family: 'Space Mono', monospace;
+}
+
+/* Week/month schedule rows */
+.scheduleWeekFull {
+  display: flex;
+  flex-direction: column;
+}
+
+.scheduleRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 22px;
+  border-bottom: 1px solid var(--border);
+  transition: background 0.15s;
+}
+
+.scheduleRow:last-child { border-bottom: none; }
+.scheduleRow:hover { background: var(--bg-tertiary); }
+.scheduleRow.today { background: rgba(99, 102, 241, 0.06); }
+.scheduleRow.weekend { opacity: 0.55; }
+
+.scheduleRowDay {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 80px;
+}
+
+.scheduleDayName {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+  font-family: 'Space Mono', monospace;
+}
+
+.scheduleDayDate {
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+.scheduleRowTimes {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1;
+  font-size: 12px;
+  font-family: 'Space Mono', monospace;
+}
+
+.scheduleEntry { color: #22c55e; font-weight: 600; }
+.scheduleExit  { color: #ef4444; font-weight: 600; }
+.scheduleSep   { color: var(--text-tertiary); }
+.scheduleAbsent { color: var(--text-tertiary); }
+
+.scheduleRowHours {
+  font-size: 11px;
+  font-family: 'Space Mono', monospace;
+  color: var(--accent);
+  font-weight: 600;
+  min-width: 60px;
+  text-align: right;
+}
+
 /* Requests List */
 .requestsList {
   max-height: 420px;
@@ -267,6 +411,30 @@
 }
 
 .requestStatus.draft {
+  background: var(--bg-tertiary);
+  color: var(--text-tertiary);
+  border-color: var(--border);
+}
+
+/* SKUD event dot */
+.skudDot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.skudEntry { background: #22c55e; box-shadow: 0 0 6px rgba(34,197,94,0.5); }
+.skudExit  { background: #ef4444; box-shadow: 0 0 6px rgba(239,68,68,0.5); }
+.skudInternal { background: #6b7280; }
+
+.requestStatus.statusRed {
+  background: rgba(239, 68, 68, 0.1);
+  color: #ef4444;
+  border-color: rgba(239, 68, 68, 0.2);
+}
+
+.requestStatus.statusGray {
   background: var(--bg-tertiary);
   color: var(--text-tertiary);
   border-color: var(--border);

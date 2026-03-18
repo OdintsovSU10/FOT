@@ -41,6 +41,12 @@ export const UserManagementPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [expandedUserId, setExpandedUserId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState<{ userId: string; value: string } | null>(null);
+  const [empSearch, setEmpSearch] = useState<{
+    userId: string;
+    query: string;
+    results: { id: number; full_name: string; org_department_id: string | null }[];
+    loading: boolean;
+  } | null>(null);
 
   // Approval modal state
   const [approvalModal, setApprovalModal] = useState<{
@@ -51,13 +57,40 @@ export const UserManagementPage: React.FC = () => {
     positionType: EmployeePositionType;
     employeeId: number | null;
     employeeSearch: string;
-    employeeResults: { id: number; full_name: string; org_department_id: string | null; tab_number: string | null }[];
+    employeeResults: { id: number; full_name: string; org_department_id: string | null }[];
     searchLoading: boolean;
   } | null>(null);
 
   const toggleExpand = (userId: string) => {
     setExpandedUserId(prev => prev === userId ? null : userId);
     setEditingName(null);
+    setEmpSearch(null);
+  };
+
+  const handleEmpSearchQuery = async (userId: string, orgId: string | null, query: string) => {
+    if (query.length < 2) {
+      setEmpSearch({ userId, query, loading: false, results: [] });
+      return;
+    }
+    setEmpSearch({ userId, query, loading: true, results: [] });
+    try {
+      const results = await adminService.searchUnlinkedEmployees(query, orgId || undefined);
+      setEmpSearch({ userId, query, loading: false, results });
+    } catch (err) {
+      console.error('Employee search error:', err);
+      setEmpSearch({ userId, query, loading: false, results: [] });
+    }
+  };
+
+  const handleEmpLink = async (userId: string, employeeId: number | null, empName?: string) => {
+    try {
+      await adminService.updateUserEmployee(userId, employeeId);
+      toast.success(employeeId ? `Привязан: ${empName}` : 'Сотрудник отвязан');
+      setEmpSearch(null);
+      await loadData();
+    } catch {
+      toast.error('Ошибка привязки сотрудника');
+    }
   };
 
   const handleNameEdit = (userId: string, currentName: string | null) => {
@@ -155,7 +188,7 @@ export const UserManagementPage: React.FC = () => {
     }
 
     try {
-      const results = await adminService.searchUnlinkedEmployees(query, approvalModal.userOrgId || undefined);
+      const results = await adminService.searchUnlinkedEmployees(query);
       setApprovalModal(prev => prev ? { ...prev, employeeResults: results, searchLoading: false } : null);
     } catch {
       setApprovalModal(prev => prev ? { ...prev, searchLoading: false } : null);
@@ -462,6 +495,49 @@ export const UserManagementPage: React.FC = () => {
                             ))}
                           </select>
                         </div>
+
+                        <div className={styles.controlGroup}>
+                          <label>Сотрудник СКУД:</label>
+                          {user.employee_id ? (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                              <span style={{ fontSize: 13, color: 'var(--color-success, #22c55e)' }}>
+                                ID {user.employee_id}
+                              </span>
+                              <button
+                                style={{ background: 'none', border: 'none', color: 'var(--color-danger, #ef4444)', cursor: 'pointer', fontSize: 13 }}
+                                onClick={() => handleEmpLink(user.id, null)}
+                              >
+                                Отвязать
+                              </button>
+                            </div>
+                          ) : (
+                            <span style={{ fontSize: 13, color: '#888' }}>Не привязан</span>
+                          )}
+                          <input
+                            type="text"
+                            placeholder="Поиск по ФИО..."
+                            value={empSearch?.userId === user.id ? empSearch.query : ''}
+                            onChange={(e) => handleEmpSearchQuery(user.id, null, e.target.value)}
+                            className={styles.nameInput}
+                            style={{ marginTop: 6 }}
+                          />
+                          {empSearch?.userId === user.id && empSearch.loading && (
+                            <div style={{ fontSize: 12, color: '#888', marginTop: 4 }}>Поиск...</div>
+                          )}
+                          {empSearch?.userId === user.id && empSearch.results.length > 0 && (
+                            <div style={{ border: '1px solid var(--border-color, #333)', borderRadius: 6, maxHeight: 150, overflowY: 'auto', marginTop: 4 }}>
+                              {empSearch.results.map(emp => (
+                                <div
+                                  key={emp.id}
+                                  style={{ padding: '6px 10px', cursor: 'pointer', fontSize: 13 }}
+                                  onClick={() => handleEmpLink(user.id, emp.id, emp.full_name)}
+                                >
+                                  {emp.full_name}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
                       </>
                     )}
 
@@ -566,7 +642,7 @@ export const UserManagementPage: React.FC = () => {
                         }}
                         onClick={() => setApprovalModal(prev => prev ? { ...prev, employeeId: emp.id, employeeSearch: emp.full_name, employeeResults: [] } : null)}
                       >
-                        {emp.full_name} {emp.tab_number ? `(таб. ${emp.tab_number})` : ''}
+                        {emp.full_name}
                       </div>
                     ))}
                   </div>

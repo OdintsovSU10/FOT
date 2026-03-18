@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, type FC } from 'react';
-import { useParams, useNavigate, useLocation } from 'react-router-dom';
+import { useParams, useNavigate, useLocation, useSearchParams } from 'react-router-dom';
 import {
   ArrowLeft, Edit3, Archive, RotateCcw, Trash2,
   Briefcase, FolderOpen, CalendarDays, CheckCircle,
@@ -61,9 +61,14 @@ export const EmployeeCardPage: FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const location = useLocation();
+  const [searchParams] = useSearchParams();
   const backLabel = (location.state as { label?: string })?.label || 'Сотрудники';
   const { canAccess } = useAuth();
   const canEdit = canAccess('header');
+
+  // Deep-link: ?tab=skud&date=2026-03-18
+  const urlTab = searchParams.get('tab') as Tab | null;
+  const urlDate = searchParams.get('date');
 
   const [employee, setEmployee] = useState<Employee | null>(null);
   const [history, setHistory] = useState<EmployeeHistoryEvent[]>([]);
@@ -72,17 +77,19 @@ export const EmployeeCardPage: FC = () => {
   const [internalPoints, setInternalPoints] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [activeTab, setActiveTab] = useState<Tab>('attendance');
+  const [activeTab, setActiveTab] = useState<Tab>(urlTab && ['attendance', 'info', 'history', 'skud'].includes(urlTab) ? urlTab : 'attendance');
   const [isEditing, setIsEditing] = useState(false);
   const [editData, setEditData] = useState<Partial<EmployeeInput>>({});
   const [statsPeriod, setStatsPeriod] = useState<StatsPeriod>('month');
-  const [skudFocusDate, setSkudFocusDate] = useState<string | null>(null);
-  const [skudFocusKey, setSkudFocusKey] = useState(0);
+  const [skudFocusDate, setSkudFocusDate] = useState<string | null>(urlDate || null);
+  const [skudFocusKey, setSkudFocusKey] = useState(urlDate ? 1 : 0);
 
-  // Calendar month
+  // Calendar month — если есть urlDate, начинаем с его месяца
   const now = new Date();
-  const [calMonth, setCalMonth] = useState(now.getMonth());
-  const [calYear, setCalYear] = useState(now.getFullYear());
+  // Парсим urlDate напрямую (YYYY-MM-DD) без new Date() чтобы избежать сдвига часового пояса
+  const urlYMD = urlDate ? urlDate.split('-').map(Number) : null;
+  const [calMonth, setCalMonth] = useState(urlYMD ? urlYMD[1] - 1 : now.getMonth());
+  const [calYear, setCalYear] = useState(urlYMD ? urlYMD[0] : now.getFullYear());
 
   const prevMonth = () => {
     if (calMonth === 0) { setCalMonth(11); setCalYear(y => y - 1); }

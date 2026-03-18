@@ -775,15 +775,31 @@ export const skudController = {
         return;
       }
 
+      // Worker может смотреть только свои события
+      if (req.user?.position_type === 'worker') {
+        if (!req.user.employee_id || req.user.employee_id !== employeeId) {
+          res.status(403).json({ success: false, error: 'Access denied' });
+          return;
+        }
+      }
+
       const { startDate, endDate } = req.query;
       const organizationId = getOrgId(req);
 
+      // Worker запрашивает свои события — не фильтруем по организации при поиске сотрудника
+      const isSelfRequest = req.user.position_type === 'worker' &&
+        req.user.employee_id !== null &&
+        req.user.employee_id === employeeId;
+
       // Получаем ФИО и organization_id сотрудника
       let empQuery = supabase.from('employees').select('full_name, organization_id').eq('id', employeeId);
-      if (organizationId) empQuery = empQuery.eq('organization_id', organizationId);
+      if (organizationId && !isSelfRequest) empQuery = empQuery.eq('organization_id', organizationId);
       const { data: empData } = await empQuery.single();
 
-      const effectiveOrgId = organizationId || empData?.organization_id || undefined;
+      // Для self-request используем organization_id из таблицы employees, а не из JWT
+      const effectiveOrgId = isSelfRequest
+        ? (empData?.organization_id || organizationId || undefined)
+        : (organizationId || empData?.organization_id || undefined);
 
       // 1) По employee_id
       const byId = await queryEventsByEmployeeId(employeeId, effectiveOrgId, startDate, endDate);
@@ -923,7 +939,7 @@ export const skudController = {
         try {
           const sigurAPs = await sigurService.getAccessPoints();
           const names = (sigurAPs as Record<string, unknown>[])
-            .map(ap => (ap.name as string) || '')
+            .map(ap => ((ap.name as string) || '').trim())
             .filter(Boolean);
           const unique = [...new Set(names)].sort();
           res.json({ success: true, data: unique });
@@ -1896,19 +1912,33 @@ export const skudController = {
         return;
       }
 
-      // Удалить старые настройки организации (все отделы)
-      await supabase
+      // Дедупликация по trimmed name (Sigur может отдавать "Серверная" и "Серверная ")
+      const internalMap = new Map<string, boolean>();
+      for (const s of settings) {
+        const name = s.access_point_name.trim();
+        if (s.is_internal) internalMap.set(name, true);
+      }
+      const uniqueInternalNames = [...internalMap.keys()];
+
+      // Удалить все старые настройки организации
+      const { error: deleteError } = await supabase
         .from('skud_access_point_settings')
         .delete()
-        .eq('organization_id', organizationId);
+        .eq('organization_id', organizationId)
+        .select('id');
 
-      // Вставить новые (только те, что помечены как internal)
-      const internalSettings = settings.filter(s => s.is_internal);
-      if (internalSettings.length > 0) {
-        const rows = internalSettings.map(s => ({
+      if (deleteError) {
+        console.error('Delete access point settings error:', deleteError);
+        res.status(500).json({ success: false, error: 'Ошибка удаления старых настроек' });
+        return;
+      }
+
+      // Вставить новые internal настройки
+      if (uniqueInternalNames.length > 0) {
+        const rows = uniqueInternalNames.map(name => ({
           organization_id: organizationId,
           department_id: targetDeptId,
-          access_point_name: s.access_point_name.trim(),
+          access_point_name: name,
           is_internal: true,
         }));
 
@@ -1927,6 +1957,65 @@ export const skudController = {
     } catch (error) {
       console.error('Save access point settings error:', error);
       res.status(500).json({ success: false, error: 'Ошибка сохранения настроек' });
+    }
+  },
+
+  /**
+   * POST /api/skud/sync-access-points
+   * Обновление списка точек доступа из Sigur. Удаляет настройки для исчезнувших точек.
+   */
+  async syncAccessPoints(req: AuthenticatedRequest, res: Response): Promise<void> {
+    try {
+      let organizationId = getOrgId(req);
+      if (!organizationId) {
+        const { data: orgs } = await supabase.from('organizations').select('id').limit(1);
+        organizationId = orgs?.[0]?.id;
+      }
+
+      // Сбросить кэш
+      accessPointCache.delete(organizationId || '__all__');
+
+      if (!sigurService.isConfigured()) {
+        res.status(400).json({ success: false, error: 'Sigur не настроен' });
+        return;
+      }
+
+      // Получить свежий список из Sigur
+      const sigurAPs = await sigurService.getAccessPoints();
+      const freshNames = [...new Set(
+        (sigurAPs as Record<string, unknown>[])
+          .map(ap => ((ap.name as string) || '').trim())
+          .filter(Boolean)
+      )].sort();
+
+      // Получить текущие настройки из БД
+      const { data: currentSettings } = await supabase
+        .from('skud_access_point_settings')
+        .select('id, access_point_name')
+        .eq('organization_id', organizationId);
+
+      // Найти и удалить настройки для точек, которых больше нет
+      const freshSet = new Set(freshNames);
+      const toDelete = (currentSettings || []).filter(s => !freshSet.has(s.access_point_name));
+      const removed = toDelete.map(r => r.access_point_name);
+
+      if (toDelete.length > 0) {
+        await supabase
+          .from('skud_access_point_settings')
+          .delete()
+          .in('id', toDelete.map(r => r.id));
+      }
+
+      // Обновить кэш
+      accessPointCache.set(organizationId || '__all__', { data: freshNames, at: Date.now() });
+
+      res.json({
+        success: true,
+        data: { accessPoints: freshNames, removed, settingsRemoved: removed.length },
+      });
+    } catch (error) {
+      console.error('Sync access points error:', error);
+      res.status(500).json({ success: false, error: 'Ошибка получения точек доступа из Sigur' });
     }
   },
 
@@ -1964,6 +2053,203 @@ export const skudController = {
     } catch (error) {
       console.error('Get SKUD organizations error:', error);
       res.status(500).json({ success: false, error: 'Ошибка загрузки организаций' });
+    }
+  },
+
+  /**
+   * GET /api/skud/discipline?month=2026-03
+   * Аналитика дисциплины: нарушения по всей организации за месяц
+   */
+  async getDisciplineViolations(req: AuthenticatedRequest, res: Response): Promise<void> {
+    try {
+      const organizationId = getOrgId(req);
+      const monthParam = (req.query.month as string) || formatDateToISO(new Date()).slice(0, 7);
+
+
+      const startDate = `${monthParam}-01`;
+      const endOfMonth = new Date(parseInt(monthParam.split('-')[0]), parseInt(monthParam.split('-')[1]), 0);
+      const endDate = formatDateToISO(endOfMonth);
+
+      // Загрузить всех активных сотрудников организации с отделами
+      let empQuery = supabase
+        .from('employees')
+        .select('id, full_name, position_id, org_department_id')
+        .eq('is_archived', false)
+        .eq('employment_status', 'active');
+      if (organizationId) empQuery = empQuery.eq('organization_id', organizationId);
+      const { data: employees, error: empError } = await empQuery;
+
+      // debug removed
+
+      if (!employees || employees.length === 0) {
+        res.json({ success: true, data: { violations: [], employees: {}, departments: {} } });
+        return;
+      }
+
+      const empIds = employees.map(e => e.id);
+
+      // Загрузить названия позиций
+      const posIdSet = new Set(employees.map(e => e.position_id).filter(Boolean));
+      const posMap = new Map<number, string>();
+      if (posIdSet.size > 0) {
+        const { data: positions } = await supabase.from('positions').select('id, name').in('id', [...posIdSet]);
+        for (const p of positions || []) posMap.set(p.id, p.name);
+      }
+
+      const empMap: Record<number, { full_name: string; position: string | null; department_id: string | null }> = {};
+      for (const e of employees) {
+        empMap[e.id] = {
+          full_name: e.full_name || '',
+          position: e.position_id ? posMap.get(e.position_id) || null : null,
+          department_id: e.org_department_id || null,
+        };
+      }
+
+      // Загрузить отделы
+      let deptQuery = supabase.from('org_departments').select('id, name');
+      if (organizationId) deptQuery = deptQuery.eq('organization_id', organizationId);
+      const { data: departments } = await deptQuery;
+      const deptMap: Record<string, string> = {};
+      for (const d of departments || []) {
+        deptMap[d.id] = d.name;
+      }
+
+      // Загрузить daily_summary за месяц
+      // empIds (2000+) слишком большой для .in() → разбиваем на чанки
+      const CHUNK_SIZE = 300;
+      const summaries: DailySummaryRow[] = [];
+      for (let i = 0; i < empIds.length; i += CHUNK_SIZE) {
+        const chunk = empIds.slice(i, i + CHUNK_SIZE);
+        const { data: page } = await supabase
+          .from('skud_daily_summary')
+          .select('employee_id, date, first_entry, last_exit, total_hours, is_present')
+          .in('employee_id', chunk)
+          .gte('date', startDate)
+          .lte('date', endDate)
+          .limit(10000);
+        if (page) summaries.push(...(page as DailySummaryRow[]));
+      }
+
+      // debug removed
+
+      const LATE_THRESHOLD = '09:00:00';
+      const WORK_NORM_HOURS = 9;
+      const ABSENCE_THRESHOLD_HOURS = 3;
+
+      interface Violation {
+        employee_id: number;
+        date: string;
+        type: 'late' | 'underwork' | 'early' | 'absence';
+        first_entry: string | null;
+        last_exit: string | null;
+        total_hours: number | null;
+        deviation: string;
+      }
+
+      const violations: Violation[] = [];
+
+      const fmtMinutes = (min: number, sign = '+') => {
+        const h = Math.floor(min / 60);
+        const m = min % 60;
+        if (h > 0 && m > 0) return `${sign}${h}ч ${m}м`;
+        if (h > 0) return `${sign}${h}ч`;
+        return `${sign}${m} мин`;
+      };
+
+      for (const s of summaries || []) {
+        if (!s.is_present) continue;
+
+        // 1. Опоздание: приход после 09:00
+        if (s.first_entry && s.first_entry > LATE_THRESHOLD) {
+          const [h, m] = s.first_entry.split(':').map(Number);
+          const lateMin = (h * 60 + m) - 9 * 60;
+          violations.push({
+            employee_id: s.employee_id,
+            date: s.date,
+            type: 'late',
+            first_entry: s.first_entry,
+            last_exit: s.last_exit,
+            total_hours: s.total_hours,
+            deviation: fmtMinutes(lateMin, '+'),
+          });
+        }
+
+        // Вычисляем span (от первого входа до последнего выхода) в часах
+        let spanHours: number | null = null;
+        if (s.first_entry && s.last_exit) {
+          const [eh, em] = s.first_entry.split(':').map(Number);
+          const [lh, lm] = s.last_exit.split(':').map(Number);
+          spanHours = (lh * 60 + lm - eh * 60 - em) / 60;
+        }
+
+        // 2. Недоработка: от первого входа до последнего выхода < 9ч
+        if (spanHours !== null && spanHours < WORK_NORM_HOURS) {
+          const diffMin = Math.round((WORK_NORM_HOURS - spanHours) * 60);
+          violations.push({
+            employee_id: s.employee_id,
+            date: s.date,
+            type: 'underwork',
+            first_entry: s.first_entry,
+            last_exit: s.last_exit,
+            total_hours: s.total_hours,
+            deviation: fmtMinutes(diffMin, '-'),
+          });
+        }
+
+        // 3. Ранний уход: ушёл до отработки 9ч от момента прихода
+        if (s.first_entry && s.last_exit && spanHours !== null && spanHours < WORK_NORM_HOURS) {
+          const [eh, em] = s.first_entry.split(':').map(Number);
+          const expectedLeave = eh * 60 + em + WORK_NORM_HOURS * 60;
+          const expectedH = Math.floor(expectedLeave / 60);
+          const expectedM = expectedLeave % 60;
+          const expectedStr = `${String(expectedH).padStart(2, '0')}:${String(expectedM).padStart(2, '0')}`;
+          if (s.last_exit < expectedStr + ':00') {
+            const earlyMin = Math.round(expectedLeave - (parseInt(s.last_exit.split(':')[0]) * 60 + parseInt(s.last_exit.split(':')[1])));
+            violations.push({
+              employee_id: s.employee_id,
+              date: s.date,
+              type: 'early',
+              first_entry: s.first_entry,
+              last_exit: s.last_exit,
+              total_hours: s.total_hours,
+              deviation: fmtMinutes(earlyMin, '-'),
+            });
+          }
+        }
+
+        // 4. Отсутствие >3ч: реальное присутствие < (span - 3ч)
+        // total_hours = реальное присутствие, spanHours = от входа до выхода
+        if (s.total_hours !== null && spanHours !== null) {
+          const absenceHours = spanHours - s.total_hours;
+          if (absenceHours > ABSENCE_THRESHOLD_HOURS) {
+            const diffMin = Math.round(absenceHours * 60);
+            violations.push({
+              employee_id: s.employee_id,
+              date: s.date,
+              type: 'absence',
+              first_entry: s.first_entry,
+              last_exit: s.last_exit,
+              total_hours: s.total_hours,
+              deviation: `Отсутствие ${fmtMinutes(diffMin, '')}`,
+            });
+          }
+        }
+      }
+
+      // Сортировка: новые даты сверху
+      violations.sort((a, b) => b.date.localeCompare(a.date));
+
+      res.json({
+        success: true,
+        data: {
+          violations,
+          employees: empMap,
+          departments: deptMap,
+        },
+      });
+    } catch (error) {
+      console.error('getDisciplineViolations error:', error);
+      res.status(500).json({ success: false, error: 'Ошибка получения аналитики дисциплины' });
     }
   },
 };

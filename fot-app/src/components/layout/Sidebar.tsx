@@ -13,6 +13,7 @@ import {
   FileTextIcon,
   DatabaseIcon,
   UserIcon,
+  BarChartIcon,
 } from '../ui/Icons';
 
 interface INavItem {
@@ -45,6 +46,7 @@ const navGroups: INavGroup[] = [
     items: [
       { id: 'skud-raw', path: '/skud-raw', label: 'Просмотр СКУД', icon: FileTextIcon, requiredPosition: 'admin' },
       { id: 'skud-db', path: '/skud-db', label: 'СКУД (база)', icon: DatabaseIcon, requiredPosition: 'admin' },
+      { id: 'discipline', path: '/discipline', label: 'Аналитика', icon: BarChartIcon, requiredPosition: 'admin' },
     ]
   },
   {

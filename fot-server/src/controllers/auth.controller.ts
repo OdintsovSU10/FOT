@@ -566,8 +566,17 @@ export const authController = {
       // Резолвим department_id
       const departmentId = await resolveDepartmentId(profile.employee_id);
 
+      // Выдаём свежий токен с актуальными данными из БД (нужен при смене org/employee_id без перелогина)
+      const freshToken = generateToken(
+        { ...profile, position_type: positionType } as UserProfile,
+        req.user.email,
+        req.user.two_factor_verified,
+        departmentId,
+      );
+
       res.json({
         success: true,
+        access_token: freshToken,
         user: {
           id: profile.id,
           email: req.user.email,

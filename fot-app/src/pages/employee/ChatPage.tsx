@@ -32,7 +32,7 @@ export const ChatPage: React.FC = () => {
 
   // Search users for new conversation
   useEffect(() => {
-    if (searchQuery.length < 2) {
+    if (!searchOpen) {
       setSearchResults([]);
       return;
     }
@@ -45,7 +45,7 @@ export const ChatPage: React.FC = () => {
       }
     }, 300);
     return () => clearTimeout(timeout);
-  }, [searchQuery]);
+  }, [searchQuery, searchOpen]);
 
   const handleSend = async () => {
     if (!inputValue.trim()) return;
@@ -125,9 +125,11 @@ export const ChatPage: React.FC = () => {
               className={styles.searchInput}
               autoFocus
             />
-            {searchResults.length > 0 && (
-              <div className={styles.searchResults}>
-                {searchResults.map(user => (
+            <div className={styles.searchResults}>
+              {searchResults.length === 0 ? (
+                <div className={styles.emptyList}>Пользователи не найдены</div>
+              ) : (
+                searchResults.map(user => (
                   <div
                     key={user.id}
                     className={styles.searchItem}
@@ -136,9 +138,9 @@ export const ChatPage: React.FC = () => {
                     <div className={styles.avatar}>{getInitials(user.full_name || '??')}</div>
                     <span>{user.full_name}</span>
                   </div>
-                ))}
-              </div>
-            )}
+                ))
+              )}
+            </div>
           </div>
         )}
 

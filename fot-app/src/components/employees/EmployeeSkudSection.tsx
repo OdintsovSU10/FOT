@@ -65,8 +65,16 @@ const timeToSeconds = (time: string): number => {
   return h * 3600 + m * 60 + s;
 };
 
+/** Форматирует Date в YYYY-MM-DD в локальном часовом поясе */
+const toLocalISO = (d: Date): string => {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+};
+
 const isToday = (dateStr: string): boolean =>
-  dateStr === new Date().toISOString().slice(0, 10);
+  dateStr === toLocalISO(new Date());
 
 const nowSeconds = (): number => {
   const now = new Date();
@@ -138,7 +146,7 @@ const groupByDay = (events: SkudEvent[], internalPoints: Set<string>): IDayGroup
 // Date range helpers
 const getDateRange = (mode: ViewMode, viewDate: Date): { startDate: string; endDate: string } => {
   if (mode === 'day') {
-    const d = viewDate.toISOString().slice(0, 10);
+    const d = toLocalISO(viewDate);
     return { startDate: d, endDate: d };
   }
 
@@ -150,8 +158,8 @@ const getDateRange = (mode: ViewMode, viewDate: Date): { startDate: string; endD
     const sunday = new Date(monday);
     sunday.setDate(monday.getDate() + 6);
     return {
-      startDate: monday.toISOString().slice(0, 10),
-      endDate: sunday.toISOString().slice(0, 10),
+      startDate: toLocalISO(monday),
+      endDate: toLocalISO(sunday),
     };
   }
 
@@ -159,8 +167,8 @@ const getDateRange = (mode: ViewMode, viewDate: Date): { startDate: string; endD
   const start = new Date(viewDate.getFullYear(), viewDate.getMonth(), 1);
   const end = new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 0);
   return {
-    startDate: start.toISOString().slice(0, 10),
-    endDate: end.toISOString().slice(0, 10),
+    startDate: toLocalISO(start),
+    endDate: toLocalISO(end),
   };
 };
 
@@ -178,7 +186,7 @@ const navigateDate = (mode: ViewMode, current: Date, direction: -1 | 1): Date =>
 
 const getNavLabel = (mode: ViewMode, viewDate: Date): string => {
   if (mode === 'day') {
-    return formatDateLabel(viewDate.toISOString().slice(0, 10));
+    return formatDateLabel(toLocalISO(viewDate));
   }
   if (mode === 'week') {
     const { startDate, endDate } = getDateRange('week', viewDate);
@@ -194,8 +202,14 @@ export const EmployeeSkudSection: FC<IEmployeeSkudSectionProps> = ({
   const [groups, setGroups] = useState<IDayGroup[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedDays, setExpandedDays] = useState<Set<string>>(new Set());
-  const [viewMode, setViewMode] = useState<ViewMode>('day');
-  const [viewDate, setViewDate] = useState(new Date());
+  const [viewMode, setViewMode] = useState<ViewMode>(focusDate ? 'day' : 'day');
+  const [viewDate, setViewDate] = useState(() => {
+    if (focusDate) {
+      const [y, m, d] = focusDate.split('-').map(Number);
+      return new Date(y, m - 1, d);
+    }
+    return new Date();
+  });
   const [syncing, setSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState<string | null>(null);
   const [internalPoints, setInternalPoints] = useState<Set<string>>(new Set());
@@ -213,7 +227,8 @@ export const EmployeeSkudSection: FC<IEmployeeSkudSectionProps> = ({
     if (focusDate && focusKey !== undefined && focusKey !== prevFocusKey.current) {
       prevFocusKey.current = focusKey;
       setViewMode('day');
-      setViewDate(new Date(focusDate + 'T00:00:00'));
+      const [fy, fm, fd] = focusDate.split('-').map(Number);
+      setViewDate(new Date(fy, fm - 1, fd));
     }
   }, [focusDate, focusKey]);
 

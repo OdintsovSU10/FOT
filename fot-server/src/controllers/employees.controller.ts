@@ -241,19 +241,27 @@ export const employeesController = {
       const { id } = req.params;
       const organizationId = req.user.organization_id;
 
-      let q = supabase.from('employees').select('*').eq('id', id);
-      if (organizationId) q = q.eq('organization_id', organizationId);
+      // Worker запрашивает свои данные — не фильтруем по организации
+      const isSelfRequest = req.user.position_type === 'worker' &&
+        req.user.employee_id !== null &&
+        req.user.employee_id === parseInt(id, 10);
 
-      const [employeeResult, structureCache] = await Promise.all([
-        q.single(),
-        loadStructureCache(organizationId || undefined),
-      ]);
+      let q = supabase.from('employees').select('*').eq('id', id);
+      if (organizationId && !isSelfRequest) q = q.eq('organization_id', organizationId);
+
+      const employeeResult = await q.single();
 
       if (employeeResult.error || !employeeResult.data) {
         res.status(404).json({ success: false, error: 'Employee not found' });
         return;
       }
 
+      // Для self-request используем фактический organization_id сотрудника для кэша структуры
+      const effectiveOrgId = isSelfRequest
+        ? (employeeResult.data.organization_id || organizationId || undefined)
+        : (organizationId || undefined);
+
+      const structureCache = await loadStructureCache(effectiveOrgId);
       const employee = decryptEmployee(employeeResult.data as EmployeeEncrypted, structureCache);
       res.json({ success: true, data: employee });
     } catch (error) {

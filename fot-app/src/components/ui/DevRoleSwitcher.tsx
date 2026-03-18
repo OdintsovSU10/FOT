@@ -27,6 +27,8 @@ export const DevRoleSwitcher: FC = () => {
 
   const currentLabel = ROLE_OPTIONS.find(r => r.value === positionType)?.label || 'Не задана';
 
+  if (devOverride == null && positionType !== 'super_admin') return null;
+
   return (
     <div className={styles.container} ref={containerRef}>
       {isOpen && (

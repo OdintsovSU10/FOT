@@ -237,16 +237,20 @@ export const chatService = {
    * Поиск пользователей для начала диалога
    */
   async searchUsers(query: string, organizationId: string, currentUserId: string): Promise<{ id: string; full_name: string | null }[]> {
-    if (!query || query.length < 2) return [];
-
-    const { data } = await supabase
+    let dbQuery = supabase
       .from('user_profiles')
       .select('id, full_name')
       .eq('organization_id', organizationId)
       .eq('is_approved', true)
       .neq('id', currentUserId)
-      .ilike('full_name', `%${query}%`)
-      .limit(10);
+      .order('full_name', { ascending: true })
+      .limit(20);
+
+    if (query && query.length >= 2) {
+      dbQuery = dbQuery.ilike('full_name', `%${query}%`);
+    }
+
+    const { data } = await dbQuery;
 
     return (data || []).map(u => ({ id: u.id, full_name: u.full_name }));
   },

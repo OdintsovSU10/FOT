@@ -148,11 +148,35 @@ export const skudService = {
     });
   },
 
+  async syncAccessPoints(): Promise<{ accessPoints: string[]; removed: string[]; settingsRemoved: number }> {
+    const response = await apiClient.post<ApiResponse<{ accessPoints: string[]; removed: string[]; settingsRemoved: number }>>(
+      '/skud/sync-access-points'
+    );
+    return response.data;
+  },
+
   async getDashboardStats(departmentId: string, period = 'today', signal?: AbortSignal): Promise<IDashboardStats> {
     const response = await apiClient.get<ApiResponse<IDashboardStats>>(
       `/skud/dashboard-stats?department_id=${departmentId}&period=${period}`,
       { signal },
     );
+    return response.data;
+  },
+
+  async getDisciplineViolations(month: string, signal?: AbortSignal): Promise<{
+    violations: Array<{
+      employee_id: number;
+      date: string;
+      type: 'late' | 'underwork' | 'early' | 'absence';
+      first_entry: string | null;
+      last_exit: string | null;
+      total_hours: number | null;
+      deviation: string;
+    }>;
+    employees: Record<number, { full_name: string; position: string | null; department_id: string | null }>;
+    departments: Record<string, string>;
+  }> {
+    const response = await apiClient.get<ApiResponse<any>>(`/skud/discipline?month=${month}`, { signal });
     return response.data;
   },
 

@@ -69,7 +69,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
 
       try {
-        const { user, profile } = await apiClient.get<{ user: User; profile: UserProfile }>('/auth/me');
+        const response = await apiClient.get<{ user: User; profile: UserProfile; access_token?: string }>('/auth/me');
+        const { user, profile } = response;
+
+        // Обновляем токен если сервер вернул свежий (при смене org/employee_id без перелогина)
+        if (response.access_token) {
+          localStorage.setItem('access_token', response.access_token);
+        }
 
         setState({
           user,
@@ -173,8 +179,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const refreshProfile = useCallback(async (): Promise<void> => {
     try {
-      const { user, profile } = await apiClient.get<{ user: User; profile: UserProfile }>('/auth/me');
-      console.log('[AuthContext] refreshProfile response:', { user, profile });
+      const response = await apiClient.get<{ user: User; profile: UserProfile; access_token?: string }>('/auth/me');
+      const { user, profile } = response;
+      if (response.access_token) {
+        localStorage.setItem('access_token', response.access_token);
+      }
       setState(prev => ({
         ...prev,
         user,
