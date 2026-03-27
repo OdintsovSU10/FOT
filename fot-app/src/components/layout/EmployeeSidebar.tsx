@@ -147,14 +147,15 @@ const navGroups: INavGroup[] = [
 interface IEmployeeSidebarProps {
   isOpen?: boolean;
   onClose?: () => void;
+  theme?: 'light' | 'dark';
 }
 
-export const EmployeeSidebar: FC<IEmployeeSidebarProps> = ({ isOpen, onClose }) => {
+export const EmployeeSidebar: FC<IEmployeeSidebarProps> = ({ isOpen, onClose, theme = 'dark' }) => {
   const navigate = useNavigate();
   const location = useLocation();
   const { profile, logout, canAccess } = useAuth();
 
-  const logoSrc = '/fot-logo-dark.svg';
+  const logoSrc = theme === 'dark' ? '/fot-logo-dark.svg' : '/fot-logo-light.svg';
 
   const getActiveItem = () => {
     const path = location.pathname;

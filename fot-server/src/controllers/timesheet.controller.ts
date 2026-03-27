@@ -3,8 +3,9 @@ import { z } from 'zod';
 import { supabase } from '../config/database.js';
 import { auditService } from '../services/audit.service.js';
 import { getOrgId } from '../utils/org.utils.js';
-import type { AuthenticatedRequest, TimeStatus } from '../types/index.js';
+import type { AuthenticatedRequest, TimeStatus, IResolvedSchedule } from '../types/index.js';
 import { exportTimesheet } from './timesheet-export.controller.js';
+import { resolveSchedulesBulk, isWorkingDay, needsSkudCheck, countWorkingDaysUpToToday as schedWorkingDaysUpToToday } from '../services/schedule.service.js';
 
 const validStatuses: TimeStatus[] = ['work', 'vacation', 'dayoff', 'remote', 'unpaid', 'absent', 'sick', 'business_trip', 'manual'];
 
@@ -81,7 +82,7 @@ export const timesheetController = {
           data: {
             employees: [],
             entries: [],
-            stats: { employeeCount: 0, workingDays: getWorkingDaysInMonth(year, mon), normHours: getWorkingDaysInMonth(year, mon) * 8, actualHours: 0, deviations: { late: 0, absent: 0, sick: 0 } },
+            stats: { employeeCount: 0, workingDays: getWorkingDaysUpToToday(year, mon), normHours: getWorkingDaysUpToToday(year, mon) * 8, actualHours: 0, deviations: { late: 0, absent: 0, sick: 0 } },
           },
         });
       }
@@ -106,6 +107,12 @@ export const timesheetController = {
       if (empError) throw empError;
 
       const employeeIds = (employees || []).map(e => e.id);
+
+      // Resolve графики для всех сотрудников
+      const empList = (employees || []).map(e => ({ id: e.id as number, org_department_id: (e.org_department_id as string | null) }));
+      const schedulesMap = organizationId
+        ? await resolveSchedulesBulk(empList, organizationId, startDate)
+        : new Map<number, IResolvedSchedule>();
 
       // Fetch position names
       const positionIds = [...new Set((employees || []).map(e => e.position_id).filter(Boolean))];
@@ -306,9 +313,56 @@ export const timesheetController = {
         });
       }
 
-      // Compute stats
-      const workingDays = getWorkingDaysUpToToday(year, mon);
-      const normHours = workingDays * 8 * employeeIds.length;
+      // Автозаполнение для remote/hybrid-remote дней
+      const today = new Date();
+      const todayStr = today.toISOString().slice(0, 10);
+      const daysInMonth = new Date(year, mon, 0).getDate();
+
+      for (const empId of employeeIds) {
+        const sched = schedulesMap.get(empId);
+        if (!sched) continue;
+
+        for (let d = 1; d <= daysInMonth; d++) {
+          const dateObj = new Date(year, mon - 1, d);
+          const dateStr = `${month}-${String(d).padStart(2, '0')}`;
+          const key = `${empId}_${dateStr}`;
+
+          // Пропускаем будущие дни и дни с уже имеющимися записями
+          if (dateStr > todayStr) continue;
+          if (seenKeys.has(key)) continue;
+
+          // Проверяем рабочий ли день по графику
+          if (!isWorkingDay(sched, dateObj)) continue;
+
+          // Если не нужен СКУД-контроль (remote или hybrid на remote-день) — автозаполнение
+          if (!needsSkudCheck(sched, dateObj)) {
+            seenKeys.add(key);
+            entries.push({
+              id: null,
+              employee_id: empId,
+              work_date: dateStr,
+              status: 'remote',
+              hours_worked: sched.work_hours,
+              is_correction: false,
+              first_entry: null,
+              last_exit: null,
+            });
+          }
+        }
+      }
+
+      // Compute stats (schedule-aware)
+      let normHours = 0;
+      let totalWorkingDays = 0;
+      for (const empId of employeeIds) {
+        const sched = schedulesMap.get(empId);
+        const empWorkDays = sched
+          ? schedWorkingDaysUpToToday(year, mon, sched)
+          : getWorkingDaysUpToToday(year, mon);
+        normHours += empWorkDays * (sched ? sched.work_hours : 8);
+        totalWorkingDays = Math.max(totalWorkingDays, empWorkDays);
+      }
+
       let actualHours = 0;
       const deviations = { late: 0, absent: 0, sick: 0 };
 
@@ -318,7 +372,11 @@ export const timesheetController = {
         }
         if (entry.status === 'absent') deviations.absent++;
         if (entry.status === 'sick') deviations.sick++;
-        if (entry.status === 'work' && typeof entry.hours_worked === 'number' && entry.hours_worked < 8) {
+
+        // Проверка "недоработка" с учётом графика сотрудника
+        const empSched = schedulesMap.get(entry.employee_id as number);
+        const threshold = empSched ? empSched.work_hours : 8;
+        if (entry.status === 'work' && typeof entry.hours_worked === 'number' && entry.hours_worked < threshold) {
           deviations.late++;
         }
       }
@@ -328,14 +386,21 @@ export const timesheetController = {
         position_name: e.position_id ? posMap.get(e.position_id) || null : null,
       }));
 
+      // Сериализация графиков для фронтенда
+      const schedulesObj: Record<number, IResolvedSchedule> = {};
+      for (const [id, sched] of schedulesMap) {
+        schedulesObj[id] = sched;
+      }
+
       res.json({
         success: true,
         data: {
           employees: employeesWithNames,
           entries,
+          schedules: schedulesObj,
           stats: {
             employeeCount: employeeIds.length,
-            workingDays,
+            workingDays: totalWorkingDays,
             normHours,
             actualHours,
             deviations,

@@ -208,13 +208,37 @@ export class SigurDataService extends SigurServiceBase {
       }
     }
 
-    return rawEvents
-      .filter(raw => this.isRawPassEvent(raw))
-      .map(raw => {
+    const beforeFilter = rawEvents.length;
+    const passEvents = rawEvents.filter(raw => this.isRawPassEvent(raw));
+    const dropped = beforeFilter - passEvents.length;
+    if (dropped > 0) {
+      const reasons = { noDir: 0, badDir: 0, noAOId: 0, badAOIdType: 0, noTs: 0 };
+      const samples: string[] = [];
+      for (const raw of rawEvents) {
+        if (this.isRawPassEvent(raw)) continue;
+        if (!raw.direction) reasons.noDir++;
+        else if (raw.direction !== 'IN' && raw.direction !== 'OUT') reasons.badDir++;
+        if (raw.accessObjectId === undefined) reasons.noAOId++;
+        else if (typeof raw.accessObjectId !== 'number') reasons.badAOIdType++;
+        if (typeof raw.timestamp !== 'string') reasons.noTs++;
+        if (samples.length < 3) samples.push(`id=${raw.id} dir=${raw.direction} aoId=${raw.accessObjectId}(${typeof raw.accessObjectId}) ts=${typeof raw.timestamp}`);
+      }
+      console.log(`[enrichRawEvents] dropped ${dropped}/${beforeFilter} by isRawPassEvent: ${JSON.stringify(reasons)} samples: ${samples.join(' | ')}`);
+    }
+
+    let unmatchedEmployeeIds = 0;
+    const unmatchedIdSamples: number[] = [];
+
+    const result = passEvents.map(raw => {
         const employeeId = raw.accessObjectId as number;
         const employee = employeeById.get(employeeId);
         const accessPointId = typeof raw.accessPointId === 'number' ? raw.accessPointId : null;
         const empName = typeof employee?.name === 'string' ? employee.name : '';
+
+        if (!employee) {
+          unmatchedEmployeeIds++;
+          if (unmatchedIdSamples.length < 10) unmatchedIdSamples.push(employeeId);
+        }
 
         return {
           id: raw.id,
@@ -242,6 +266,13 @@ export class SigurDataService extends SigurServiceBase {
           },
         };
       });
+
+    if (unmatchedEmployeeIds > 0) {
+      console.log(`[enrichRawEvents] ${unmatchedEmployeeIds}/${passEvents.length} events have no employee match. Unmatched accessObjectIds: [${unmatchedIdSamples.join(', ')}]`);
+    }
+    console.log(`[enrichRawEvents] pipeline: raw=${rawEvents.length} → passFilter=${passEvents.length} → enriched=${result.length} (employeeCache=${employeeById.size})`);
+
+    return result;
   }
 
   async getRawEvents(startTime?: string, endTime?: string, connection?: ConnectionType, extraParams?: Record<string, any>) {

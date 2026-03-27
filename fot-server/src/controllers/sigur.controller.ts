@@ -1,6 +1,7 @@
 import { Response } from 'express';
 import { sigurService } from '../services/sigur.service.js';
 import { mapSigurEvent } from '../utils/sigur.mapper.js';
+import { supabase } from '../config/database.js';
 import type { AuthenticatedRequest } from '../types/index.js';
 
 export const sigurController = {
@@ -269,6 +270,285 @@ export const sigurController = {
     } catch (error) {
       console.error('Sigur get access rules error:', error);
       res.status(500).json({ success: false, error: 'Ошибка получения режимов доступа из Sigur' });
+    }
+  },
+
+  /**
+   * GET /api/sigur/debug-events
+   * Диагностика: сравнивает сырые и обогащённые события, показывает потери по этапам
+   */
+  async debugEvents(req: AuthenticatedRequest, res: Response): Promise<void> {
+    try {
+      if (!sigurService.isConfigured()) {
+        res.status(503).json({ success: false, error: 'Sigur не настроен' });
+        return;
+      }
+
+      const { startTime, endTime, connection: conn } = req.query;
+      const connection = (conn as 'external' | 'internal') || undefined;
+
+      if (!startTime || !endTime) {
+        res.status(400).json({ success: false, error: 'startTime и endTime обязательны' });
+        return;
+      }
+
+      // 1. Сырые события (без enrichment)
+      const rawEvents = await sigurService.getRawEvents(
+        startTime as string,
+        endTime as string,
+        connection,
+        { pageSize: 3000 },
+      );
+
+      // Анализ сырых событий
+      const hourlyRaw: Record<string, number> = {};
+      const dropReasons = { noDirection: 0, badDirection: 0, noAccessObjectId: 0, badAccessObjectIdType: 0, noTimestamp: 0 };
+      const droppedSamples: Record<string, unknown>[] = [];
+
+      for (const raw of rawEvents) {
+        // Почасовая разбивка
+        const ts = raw.timestamp as string | undefined;
+        if (ts) {
+          const hourMatch = ts.match(/T(\d{2}):/);
+          if (hourMatch) {
+            const hour = hourMatch[1];
+            hourlyRaw[hour] = (hourlyRaw[hour] || 0) + 1;
+          }
+        }
+
+        // Проверяем, проходит ли isRawPassEvent
+        const direction = raw.direction;
+        const accessObjectId = raw.accessObjectId;
+        const timestamp = raw.timestamp;
+        const passes = (direction === 'IN' || direction === 'OUT') &&
+          typeof accessObjectId === 'number' &&
+          typeof timestamp === 'string';
+
+        if (!passes && droppedSamples.length < 5) {
+          const reason: string[] = [];
+          if (direction === undefined) { dropReasons.noDirection++; reason.push('noDirection'); }
+          else if (direction !== 'IN' && direction !== 'OUT') { dropReasons.badDirection++; reason.push(`badDirection:${direction}`); }
+          if (accessObjectId === undefined) { dropReasons.noAccessObjectId++; reason.push('noAccessObjectId'); }
+          else if (typeof accessObjectId !== 'number') { dropReasons.badAccessObjectIdType++; reason.push(`badType:${typeof accessObjectId}`); }
+          if (typeof timestamp !== 'string') { dropReasons.noTimestamp++; reason.push('noTimestamp'); }
+          droppedSamples.push({ reason, raw: { id: raw.id, direction, accessObjectId, timestamp, eventTypeId: raw.eventTypeId } });
+        }
+      }
+
+      // 2. Обогащённые события (после enrichment)
+      const enrichedEvents = await sigurService.getEvents(
+        startTime as string,
+        endTime as string,
+        connection,
+        'PASS_DETECTED',
+        { pageSize: 3000 },
+      );
+
+      // Почасовая разбивка обогащённых
+      const hourlyEnriched: Record<string, number> = {};
+      const noNameCount = enrichedEvents.filter((e: Record<string, unknown>) => {
+        const ad = e.additionalData as Record<string, any> | undefined;
+        return !ad?.accessObject?.data?.name;
+      }).length;
+
+      for (const evt of enrichedEvents) {
+        const ts = evt.timestamp as string | undefined;
+        if (ts) {
+          const hourMatch = ts.match(/T(\d{2}):/);
+          if (hourMatch) {
+            const hour = hourMatch[1];
+            hourlyEnriched[hour] = (hourlyEnriched[hour] || 0) + 1;
+          }
+        }
+      }
+
+      // Маппинг через mapSigurEvent для финальной проверки
+      let mappedOk = 0;
+      let mappedNull = 0;
+      const mappedNullSamples: Record<string, unknown>[] = [];
+      for (const evt of enrichedEvents) {
+        const mapped = mapSigurEvent(evt as Record<string, unknown>);
+        if (mapped) {
+          mappedOk++;
+        } else {
+          mappedNull++;
+          if (mappedNullSamples.length < 5) {
+            mappedNullSamples.push({
+              timestamp: evt.timestamp,
+              eventType: evt.eventType,
+              hasName: !!(evt as any).additionalData?.accessObject?.data?.name,
+              hasCard: !!(evt as any).data?.cardKey,
+              accessObjectId: (evt as any).data?.employeeId,
+            });
+          }
+        }
+      }
+
+      // Проверка БД: сколько событий за указанный период с/без employee_id
+      const dateStr = (startTime as string).split('T')[0];
+      const { data: dbMatched } = await supabase
+        .from('skud_events')
+        .select('event_time, employee_id')
+        .eq('event_date', dateStr)
+        .not('employee_id', 'is', null);
+
+      const { data: dbUnmatched } = await supabase
+        .from('skud_events')
+        .select('event_time, physical_person')
+        .eq('event_date', dateStr)
+        .is('employee_id', null);
+
+      const dbMatchedHourly: Record<string, number> = {};
+      for (const evt of dbMatched || []) {
+        const h = evt.event_time?.substring(0, 2) || '??';
+        dbMatchedHourly[h] = (dbMatchedHourly[h] || 0) + 1;
+      }
+
+      const dbUnmatchedHourly: Record<string, number> = {};
+      const unmatchedPersons = new Map<string, number>();
+      for (const evt of dbUnmatched || []) {
+        const h = evt.event_time?.substring(0, 2) || '??';
+        dbUnmatchedHourly[h] = (dbUnmatchedHourly[h] || 0) + 1;
+        if (evt.physical_person) {
+          unmatchedPersons.set(evt.physical_person, (unmatchedPersons.get(evt.physical_person) || 0) + 1);
+        }
+      }
+
+      const topUnmatched = [...unmatchedPersons.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 10)
+        .map(([name, count]) => ({ name, count }));
+
+      // Проверка skud_daily_summary
+      const { count: summaryCount } = await supabase
+        .from('skud_daily_summary')
+        .select('id', { count: 'exact', head: true })
+        .eq('date', dateStr);
+
+      const { data: summaries, error: summaryErr } = await supabase
+        .from('skud_daily_summary')
+        .select('*')
+        .eq('date', dateStr)
+        .limit(5);
+
+      // Уникальные employee_id в skud_events за день
+      const { data: uniqueEmps } = await supabase
+        .from('skud_events')
+        .select('employee_id')
+        .eq('event_date', dateStr)
+        .not('employee_id', 'is', null);
+      const uniqueEmployeeIds = new Set((uniqueEmps || []).map(e => e.employee_id));
+
+      // Сотрудники с entry-событиями, но без first_entry в summary
+      // Находим employee_id у которых есть entry-events
+      const { data: entryEmps } = await supabase
+        .from('skud_events')
+        .select('employee_id')
+        .eq('event_date', dateStr)
+        .eq('direction', 'entry')
+        .not('employee_id', 'is', null)
+        .limit(1000);
+      const entryEmpIds = [...new Set((entryEmps || []).map(e => e.employee_id))];
+
+      // Из них — у кого summary без first_entry
+      const { data: brokenSummaries } = await supabase
+        .from('skud_daily_summary')
+        .select('employee_id, first_entry, last_exit, total_hours, organization_id')
+        .eq('date', dateStr)
+        .is('first_entry', null)
+        .in('employee_id', entryEmpIds.slice(0, 100))
+        .limit(5);
+
+      // Для первого "сломанного" — проверим его события + попробуем RPC пересчёт
+      let brokenSample = null;
+      if (brokenSummaries && brokenSummaries.length > 0) {
+        const empId = brokenSummaries[0].employee_id;
+        const orgId = brokenSummaries[0].organization_id;
+        const { data: empEvents } = await supabase
+          .from('skud_events')
+          .select('event_time, direction, access_point')
+          .eq('event_date', dateStr)
+          .eq('employee_id', empId)
+          .order('event_time');
+
+        // Пересчёт RPC для этого сотрудника
+        const { error: rpcErr } = await supabase.rpc('batch_recalculate_skud_daily_summary', {
+          p_pairs: [{ org_id: orgId, emp_id: empId, date: dateStr }],
+        });
+
+        // Перечитываем summary после RPC
+        const { data: afterRpc } = await supabase
+          .from('skud_daily_summary')
+          .select('first_entry, last_exit, total_hours')
+          .eq('date', dateStr)
+          .eq('employee_id', empId)
+          .single();
+
+        brokenSample = {
+          employee_id: empId,
+          events: empEvents,
+          rpcError: rpcErr?.message || null,
+          afterRpc,
+        };
+      }
+
+      const summaryInfo = {
+        totalExact: summaryCount,
+        uniqueEmployeesInEvents: uniqueEmployeeIds.size,
+        brokenSummaries: brokenSummaries || [],
+        brokenSample,
+        total: summaries?.length || 0,
+        error: summaryErr?.message || null,
+        samples: (summaries || []).slice(0, 5),
+        withFirstEntry: (summaries || []).filter(s => s.first_entry).length,
+        withoutFirstEntry: (summaries || []).filter(s => !s.first_entry).length,
+      };
+
+      res.json({
+        success: true,
+        timeRange: { startTime, endTime },
+        database: {
+          date: dateStr,
+          withEmployeeId: dbMatched?.length || 0,
+          withoutEmployeeId: dbUnmatched?.length || 0,
+          matchedHourly: dbMatchedHourly,
+          unmatchedHourly: dbUnmatchedHourly,
+          topUnmatchedPersons: topUnmatched,
+          dailySummary: summaryInfo,
+        },
+        raw: {
+          total: rawEvents.length,
+          hourlyBreakdown: hourlyRaw,
+          samples: rawEvents.slice(0, 3).map((r: Record<string, unknown>) => ({
+            id: r.id, timestamp: r.timestamp, direction: r.direction,
+            accessObjectId: r.accessObjectId, eventTypeId: r.eventTypeId,
+          })),
+        },
+        enrichmentFilter: {
+          droppedByPassFilter: rawEvents.length - enrichedEvents.length,
+          dropReasons,
+          droppedSamples,
+        },
+        enriched: {
+          total: enrichedEvents.length,
+          hourlyBreakdown: hourlyEnriched,
+          withoutName: noNameCount,
+          samples: enrichedEvents.slice(0, 3).map((e: Record<string, unknown>) => ({
+            timestamp: e.timestamp,
+            name: (e as any).additionalData?.accessObject?.data?.name || null,
+            direction: (e as any).data?.direction,
+            accessPointName: (e as any).additionalData?.accessPoint?.name || null,
+          })),
+        },
+        mapper: {
+          passedMapSigurEvent: mappedOk,
+          droppedByMapper: mappedNull,
+          droppedSamples: mappedNullSamples,
+        },
+      });
+    } catch (error) {
+      console.error('Sigur debug-events error:', error);
+      res.status(500).json({ success: false, error: (error as Error).message });
     }
   },
 

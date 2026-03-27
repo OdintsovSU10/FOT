@@ -40,7 +40,9 @@
       "Bash(npx kill-port:*)",
       "Bash(timeout:*)",
       "Bash(wmic process:*)",
-      "Bash(npm.cmd run:*)"
+      "Bash(npm.cmd run:*)",
+      "Bash(npx tsx -e \":*)",
+      "Bash(python3 -m json.tool)"
     ]
   }
 }

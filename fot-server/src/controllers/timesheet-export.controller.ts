@@ -2,17 +2,8 @@ import { Response } from 'express';
 import XLSX from 'xlsx';
 import { supabase } from '../config/database.js';
 import { getOrgId } from '../utils/org.utils.js';
-import type { AuthenticatedRequest } from '../types/index.js';
-
-function getWorkingDaysInMonth(year: number, month: number): number {
-  const daysInMonth = new Date(year, month, 0).getDate();
-  let count = 0;
-  for (let d = 1; d <= daysInMonth; d++) {
-    const day = new Date(year, month - 1, d).getDay();
-    if (day !== 0 && day !== 6) count++;
-  }
-  return count;
-}
+import type { AuthenticatedRequest, IResolvedSchedule } from '../types/index.js';
+import { resolveSchedulesBulk, isWorkingDay, needsSkudCheck, countWorkingDaysForSchedule } from '../services/schedule.service.js';
 
 /** GET /api/timesheet/export?month=YYYY-MM&department_id=... */
 export async function exportTimesheet(req: AuthenticatedRequest, res: Response) {
@@ -48,6 +39,12 @@ export async function exportTimesheet(req: AuthenticatedRequest, res: Response) 
 
     const { data: employees } = await empQuery;
     const employeeIds = (employees || []).map(e => e.id);
+
+    // Resolve графики
+    const empList = (employees || []).map(e => ({ id: e.id as number, org_department_id: (e.org_department_id as string | null) }));
+    const schedulesMap = organizationId
+      ? await resolveSchedulesBulk(empList, organizationId, startDate)
+      : new Map<number, IResolvedSchedule>();
 
     // Fetch internal access points
     const BATCH = 200;
@@ -193,6 +190,28 @@ export async function exportTimesheet(req: AuthenticatedRequest, res: Response) 
       });
     }
 
+    // Автозаполнение remote/hybrid-remote дней
+    const today = new Date();
+    const todayStr = today.toISOString().slice(0, 10);
+    for (const empId of employeeIds) {
+      const sched = schedulesMap.get(empId);
+      if (!sched) continue;
+      if (!dataMap.has(empId)) dataMap.set(empId, new Map());
+      const empData = dataMap.get(empId)!;
+
+      for (let d = 1; d <= daysInMonth; d++) {
+        const dateStr = `${year}-${String(mon).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+        if (dateStr > todayStr) continue;
+        if (empData.has(dateStr)) continue;
+
+        const dateObj = new Date(year, mon - 1, d);
+        if (!isWorkingDay(sched, dateObj)) continue;
+        if (!needsSkudCheck(sched, dateObj)) {
+          empData.set(dateStr, { status: 'remote', hours: sched.work_hours });
+        }
+      }
+    }
+
     // Position names
     const positionIds = [...new Set((employees || []).map(e => e.position_id).filter(Boolean))];
     const posMap = new Map<string, string>();
@@ -238,10 +257,12 @@ export async function exportTimesheet(req: AuthenticatedRequest, res: Response) 
     wsData.push(headerRow2);
 
     // Employee rows
-    const workingDays = getWorkingDaysInMonth(year, mon);
-    const normHours = workingDays * 8;
-
     (employees || []).forEach((emp, idx) => {
+      const sched = schedulesMap.get(emp.id);
+      const empNormHours = sched
+        ? countWorkingDaysForSchedule(year, mon, sched) * sched.work_hours
+        : new Date(year, mon, 0).getDate() * 8; // fallback
+
       const row: (string | number | null)[] = [
         idx + 1,
         emp.full_name,
@@ -253,10 +274,12 @@ export async function exportTimesheet(req: AuthenticatedRequest, res: Response) 
 
       for (let d = 1; d <= daysInMonth; d++) {
         const dateStr = `${year}-${String(mon).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-        const dayOfWeek = new Date(year, mon - 1, d).getDay();
-        const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
+        const dateObj = new Date(year, mon - 1, d);
 
-        if (isWeekend) {
+        // Выходной определяется по графику сотрудника
+        const isDayOff = sched ? !isWorkingDay(sched, dateObj) : (dateObj.getDay() === 0 || dateObj.getDay() === 6);
+
+        if (isDayOff) {
           row.push('—');
           continue;
         }
@@ -276,8 +299,8 @@ export async function exportTimesheet(req: AuthenticatedRequest, res: Response) 
         factHours += entry.hours;
       }
 
-      const diff = factHours - normHours;
-      row.push(formatHM(factHours), formatHM(normHours), `${diff >= 0 ? '+' : '−'}${formatHM(Math.abs(diff))}`);
+      const diff = factHours - empNormHours;
+      row.push(formatHM(factHours), formatHM(empNormHours), `${diff >= 0 ? '+' : '−'}${formatHM(Math.abs(diff))}`);
       wsData.push(row);
     });
 

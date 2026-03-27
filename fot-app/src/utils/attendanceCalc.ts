@@ -1,7 +1,20 @@
 import type { SkudEvent } from '../types';
+import type { IResolvedSchedule } from '../types/schedule';
 
 const WORK_START_MINUTES = 9 * 60; // 09:00
 const WORKDAY_TARGET_SECONDS = 8 * 3600; // 8 часов фактического присутствия
+
+/** ISO day-of-week: 1=Пн..7=Вс */
+const getISODow = (date: Date): number => {
+  const d = date.getDay();
+  return d === 0 ? 7 : d;
+};
+
+/** Проверка выходного дня с учётом графика */
+const isScheduleWeekend = (year: number, month: number, day: number, schedule?: IResolvedSchedule): boolean => {
+  if (!schedule) return isWeekend(year, month, day);
+  return !schedule.work_days.includes(getISODow(new Date(year, month, day)));
+};
 
 export interface IDayAttendance {
   day: number;
@@ -95,6 +108,7 @@ export const calculateAttendance = (
   internalPoints: Set<string>,
   year: number,
   month: number,
+  schedule?: IResolvedSchedule,
 ) => {
   const today = new Date();
   const todayDate = today.getDate();
@@ -116,8 +130,12 @@ export const calculateAttendance = (
   const arrivalMins: number[] = [];
   const arrivalByDow: number[][] = [[], [], [], [], []];
 
+  const workStartMin = schedule ? (() => { const [h, m] = schedule.work_start.split(':').map(Number); return h * 60 + m; })() : WORK_START_MINUTES;
+  const targetSeconds = schedule ? schedule.work_hours * 3600 : WORKDAY_TARGET_SECONDS;
+  const isRemoteSchedule = schedule && (schedule.schedule_type === 'remote');
+
   for (let d = 1; d <= daysInMonth; d++) {
-    if (isWeekend(year, month, d)) {
+    if (isScheduleWeekend(year, month, d, schedule)) {
       days.push({ day: d, status: 'weekend', totalSeconds: 0 });
       continue;
     }
@@ -127,6 +145,15 @@ export const calculateAttendance = (
     }
 
     totalWorkdays++;
+
+    // Для полной удалёнки — автоматически "present"
+    if (isRemoteSchedule) {
+      presentCount++;
+      totalWorkSecs += targetSeconds;
+      days.push({ day: d, status: 'present', totalSeconds: targetSeconds });
+      continue;
+    }
+
     const dayEvs = eventsByDay.get(d) || [];
 
     if (dayEvs.length === 0) {
@@ -149,14 +176,14 @@ export const calculateAttendance = (
       const dow = new Date(year, month, d).getDay();
       const dowIdx = dow === 0 ? 6 : dow - 1;
       if (dowIdx < 5) arrivalByDow[dowIdx].push(mins);
-      late = mins > WORK_START_MINUTES;
+      late = mins > workStartMin;
     }
 
     const isTodayDay = isCurrentMonth && d === todayDate;
     const workSecs = calcWorkSeconds(dayEvs, internalPoints, isTodayDay);
     totalWorkSecs += workSecs;
 
-    const status = workSecs < WORKDAY_TARGET_SECONDS ? 'underwork' : 'present';
+    const status = workSecs < targetSeconds ? 'underwork' : 'present';
 
     if (late) lateCount++;
     presentCount++;
@@ -172,7 +199,7 @@ export const calculateAttendance = (
   if (arrivalMins.length > 0) {
     const avg = arrivalMins.reduce((a, b) => a + b, 0) / arrivalMins.length;
     avgArrivalTime = minutesToTime(avg);
-    avgArrivalDiffMinutes = Math.round(avg - WORK_START_MINUTES);
+    avgArrivalDiffMinutes = Math.round(avg - workStartMin);
   }
 
   const DOW_LABELS = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт'];
@@ -215,7 +242,7 @@ export const calculateAttendance = (
 
   return {
     days,
-    stats: { attendancePercent, lateCount, hoursWorked: Math.round(totalWorkSecs / 3600), hoursPlanned: totalWorkdays * 8, avgArrivalTime, avgArrivalDiffMinutes } as IMonthStats,
+    stats: { attendancePercent, lateCount, hoursWorked: Math.round(totalWorkSecs / 3600), hoursPlanned: totalWorkdays * (schedule ? schedule.work_hours : 8), avgArrivalTime, avgArrivalDiffMinutes } as IMonthStats,
     weeklyPattern,
     alerts,
   };

@@ -19,6 +19,7 @@ import documentsRoutes from './routes/documents.routes.js';
 import payslipsRoutes from './routes/payslips.routes.js';
 import paymentsRoutes from './routes/payments.routes.js';
 import timesheetApprovalRoutes from './routes/timesheet-approval.routes.js';
+import scheduleRoutes from './routes/schedule.routes.js';
 
 const app = express();
 
@@ -56,6 +57,7 @@ app.use('/api/documents', documentsRoutes);
 app.use('/api/payslips', payslipsRoutes);
 app.use('/api/payments', paymentsRoutes);
 app.use('/api/timesheet-approvals', timesheetApprovalRoutes);
+app.use('/api/schedules', scheduleRoutes);
 
 // 404 handler
 app.use((_req, res) => {

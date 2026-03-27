@@ -3,9 +3,10 @@ import type { TimesheetStats as ITimesheetStats } from '../../types';
 
 interface ITimesheetStatsProps {
   stats: ITimesheetStats;
+  onLateClick?: () => void;
 }
 
-export const TimesheetStats: FC<ITimesheetStatsProps> = ({ stats }) => {
+export const TimesheetStats: FC<ITimesheetStatsProps> = ({ stats, onLateClick }) => {
   const totalDeviations = stats.deviations.late + stats.deviations.absent + stats.deviations.sick;
 
   const deviationParts: string[] = [];
@@ -27,7 +28,10 @@ export const TimesheetStats: FC<ITimesheetStatsProps> = ({ stats }) => {
         <div className="ts-stat-value ts-stat-value--green">{Math.round(stats.actualHours)}ч</div>
         <div className="ts-stat-label">факт</div>
       </div>
-      <div className="ts-stat-card">
+      <div
+        className={`ts-stat-card${onLateClick ? ' ts-stat-card--clickable' : ''}`}
+        onClick={onLateClick}
+      >
         <div className="ts-stat-value ts-stat-value--orange">{totalDeviations}</div>
         <div className="ts-stat-label">
           {deviationParts.length > 0 ? deviationParts.join(', ') : 'отклонений'}

@@ -166,6 +166,21 @@ export async function syncEventsLogic(
       paginatedDays++;
     }
 
+    // Почасовая разбивка для диагностики
+    if (rawEvents.length > 0) {
+      const hourly: Record<string, number> = {};
+      for (const evt of rawEvents) {
+        const ts = (evt as Record<string, any>).timestamp as string | undefined;
+        if (ts) {
+          const hm = ts.match(/T(\d{2}):/);
+          if (hm) hourly[hm[1]] = (hourly[hm[1]] || 0) + 1;
+        }
+      }
+      const firstTs = (rawEvents[0] as Record<string, any>).timestamp;
+      const lastTs = (rawEvents[rawEvents.length - 1] as Record<string, any>).timestamp;
+      console.log(`[syncEvents] day=${day} events=${rawEvents.length} first=${firstTs} last=${lastTs} hourly=${JSON.stringify(hourly)}`);
+    }
+
     if (rawEvents.length === 0) continue;
 
     const dayInserts: Record<string, unknown>[] = [];
@@ -174,9 +189,17 @@ export async function syncEventsLogic(
       const mapped = mapSigurEvent(raw as Record<string, unknown>);
       if (!mapped) {
         totalNoName++;
-        if (noNameSamples.length < 3) {
+        if (noNameSamples.length < 10) {
           const r = raw as Record<string, unknown>;
-          noNameSamples.push({ eventType: r.eventType, timestamp: r.timestamp, keys: Object.keys(r) });
+          const ad = r.additionalData as Record<string, any> | undefined;
+          noNameSamples.push({
+            eventType: r.eventType,
+            timestamp: r.timestamp,
+            accessObjectId: (r.data as Record<string, any>)?.employeeId,
+            hasName: !!ad?.accessObject?.data?.name,
+            hasCard: !!(r.data as Record<string, any>)?.cardKey,
+            keys: Object.keys(r),
+          });
         }
         continue;
       }

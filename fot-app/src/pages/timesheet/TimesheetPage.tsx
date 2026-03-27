@@ -1,9 +1,11 @@
 import { type FC, useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { ChevronLeft, ChevronRight, ChevronDown, Download } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ChevronDown, Download, Clock } from 'lucide-react';
 import { TimesheetStats } from '../../components/timesheet/TimesheetStats';
 import { TimesheetGrid } from '../../components/timesheet/TimesheetGrid';
 import { TimesheetSidePanel } from '../../components/timesheet/TimesheetSidePanel';
 import { TimesheetCorrectionModal } from '../../components/timesheet/TimesheetCorrectionModal';
+import { LateRatingModal } from '../../components/timesheet/LateRatingModal';
+import { ScheduleSettingsPanel } from '../../components/schedule/ScheduleSettingsPanel';
 import { timesheetService } from '../../services/timesheetService';
 import { apiClient } from '../../api/client';
 import { useAuth } from '../../contexts/AuthContext';
@@ -14,6 +16,7 @@ import type {
   TimesheetStats as ITimesheetStats,
   TimesheetStatus,
 } from '../../types';
+import type { IResolvedSchedule } from '../../types/schedule';
 import { TimesheetApprovalBar } from '../../components/timesheet/TimesheetApprovalBar';
 import './TimesheetPage.css';
 
@@ -57,7 +60,11 @@ export const TimesheetPage: FC = () => {
   const [employees, setEmployees] = useState<TimesheetEmployee[]>([]);
   const [entries, setEntries] = useState<TimesheetEntry[]>([]);
   const [stats, setStats] = useState<ITimesheetStats>(DEFAULT_STATS);
+  const [schedules, setSchedules] = useState<Record<number, IResolvedSchedule>>({});
   const [loading, setLoading] = useState(false);
+
+  // Schedule settings panel
+  const [schedPanelOpen, setSchedPanelOpen] = useState(false);
 
   // Department selector
   const [deptOptions, setDeptOptions] = useState<IDeptOption[]>([]);
@@ -69,6 +76,9 @@ export const TimesheetPage: FC = () => {
   // Side panel
   const [panelEmployee, setPanelEmployee] = useState<TimesheetEmployee | null>(null);
   const [panelOpen, setPanelOpen] = useState(false);
+
+  // Late rating modal
+  const [lateModalOpen, setLateModalOpen] = useState(false);
 
   // Modal
   const [modalOpen, setModalOpen] = useState(false);
@@ -115,6 +125,7 @@ export const TimesheetPage: FC = () => {
       setEmployees(res.employees || []);
       setEntries(res.entries || []);
       setStats(res.stats || DEFAULT_STATS);
+      setSchedules(res.schedules || {});
     } catch {
       setEmployees([]);
       setEntries([]);
@@ -273,6 +284,12 @@ export const TimesheetPage: FC = () => {
             departmentId={selectedDeptId}
             period={`${year}-${String(month).padStart(2, '0')}`}
           />
+          {selectedDeptId && (
+            <button className="ts-btn" onClick={() => setSchedPanelOpen(true)}>
+              <Clock size={16} />
+              График
+            </button>
+          )}
           <button className="ts-btn" onClick={handleExport}>
             <Download size={16} />
             Экспорт
@@ -281,7 +298,7 @@ export const TimesheetPage: FC = () => {
       </div>
 
       {/* Stats */}
-      <TimesheetStats stats={stats} />
+      <TimesheetStats stats={stats} onLateClick={() => setLateModalOpen(true)} />
 
       {/* Grid */}
       {loading ? (
@@ -298,6 +315,7 @@ export const TimesheetPage: FC = () => {
           entries={entries}
           year={year}
           month={month}
+          schedules={schedules}
           onEmployeeClick={handleEmployeeClick}
           onDayClick={handleDayClick}
         />
@@ -311,6 +329,23 @@ export const TimesheetPage: FC = () => {
         entries={panelEntries}
         year={year}
         month={month}
+      />
+
+      {/* Late Rating Modal */}
+      <LateRatingModal
+        open={lateModalOpen}
+        onClose={() => setLateModalOpen(false)}
+        employees={employees}
+        entries={entries}
+      />
+
+      {/* Schedule Settings Panel */}
+      <ScheduleSettingsPanel
+        open={schedPanelOpen}
+        onClose={() => { setSchedPanelOpen(false); loadData(); }}
+        departmentId={selectedDeptId}
+        departmentName={selectedDeptName}
+        employees={employees.map(e => ({ id: e.id, full_name: e.full_name }))}
       />
 
       {/* Correction Modal */}

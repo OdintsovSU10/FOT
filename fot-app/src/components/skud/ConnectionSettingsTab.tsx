@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import type { FC } from 'react';
-import { Wifi, WifiOff, RefreshCw, Eye, Search } from 'lucide-react';
+import { Wifi, WifiOff, RefreshCw, Eye, Search, ChevronDown } from 'lucide-react';
 import { sigurService } from '../../services/sigurService';
 import type { IPreviewData, SettingsTab } from './sigur-settings.types';
 import { FIELD_LABELS, DIRECTION_LABELS } from './sigur-settings.utils';
@@ -42,6 +42,20 @@ export const ConnectionSettingsTab: FC<IConnectionSettingsTabProps> = ({
   const [previewEnd, setPreviewEnd] = useState('');
   const [previewDepartment, setPreviewDepartment] = useState('');
   const [departments, setDepartments] = useState<{ id: number; name: string }[]>([]);
+  const [deptOpen, setDeptOpen] = useState(false);
+  const [deptSearch, setDeptSearch] = useState('');
+  const deptRef = useRef<HTMLDivElement>(null);
+
+  // Закрытие dropdown по клику вне
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (deptRef.current && !deptRef.current.contains(e.target as Node)) {
+        setDeptOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
 
   // Discover
   const [discovering, setDiscovering] = useState(false);
@@ -213,18 +227,53 @@ export const ConnectionSettingsTab: FC<IConnectionSettingsTabProps> = ({
               onChange={e => setPreviewEnd(e.target.value)}
             />
           </label>
-          <label>
-            Отдел:
-            <select
-              value={previewDepartment}
-              onChange={e => setPreviewDepartment(e.target.value)}
+          <div className="sigur-dept-dropdown" ref={deptRef}>
+            <span className="sigur-dept-label">Отдел:</span>
+            <button
+              type="button"
+              className={`sigur-dept-trigger${previewDepartment ? ' has-value' : ''}`}
+              onClick={() => { setDeptOpen(o => !o); setDeptSearch(''); }}
             >
-              <option value="">Все отделы</option>
-              {departments.map(d => (
-                <option key={d.id} value={String(d.id)}>{d.name}</option>
-              ))}
-            </select>
-          </label>
+              <span className="sigur-dept-trigger-text">
+                {previewDepartment
+                  ? departments.find(d => String(d.id) === previewDepartment)?.name || 'Все отделы'
+                  : 'Все отделы'}
+              </span>
+              <ChevronDown size={14} className={`sigur-dept-chevron${deptOpen ? ' open' : ''}`} />
+            </button>
+            {deptOpen && (
+              <div className="sigur-dept-menu">
+                <div className="sigur-dept-search-wrap">
+                  <Search size={14} />
+                  <input
+                    autoFocus
+                    placeholder="Поиск отдела..."
+                    value={deptSearch}
+                    onChange={e => setDeptSearch(e.target.value)}
+                  />
+                </div>
+                <div className="sigur-dept-list">
+                  <div
+                    className={`sigur-dept-item${!previewDepartment ? ' selected' : ''}`}
+                    onClick={() => { setPreviewDepartment(''); setDeptOpen(false); }}
+                  >
+                    Все отделы
+                  </div>
+                  {departments
+                    .filter(d => d.name.toLowerCase().includes(deptSearch.toLowerCase()))
+                    .map(d => (
+                      <div
+                        key={d.id}
+                        className={`sigur-dept-item${String(d.id) === previewDepartment ? ' selected' : ''}`}
+                        onClick={() => { setPreviewDepartment(String(d.id)); setDeptOpen(false); }}
+                      >
+                        {d.name}
+                      </div>
+                    ))}
+                </div>
+              </div>
+            )}
+          </div>
           <button
             className="sigur-btn"
             onClick={handlePreview}

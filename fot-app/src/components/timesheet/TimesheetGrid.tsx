@@ -1,5 +1,6 @@
 import { type FC, useMemo } from 'react';
 import type { TimesheetEntry, TimesheetEmployee, TimesheetStatus } from '../../types';
+import type { IResolvedSchedule } from '../../types/schedule';
 import {
   getDaysInMonth,
   isWeekend,
@@ -14,9 +15,21 @@ interface ITimesheetGridProps {
   entries: TimesheetEntry[];
   year: number;
   month: number;
+  schedules?: Record<number, IResolvedSchedule>;
   onEmployeeClick: (employee: TimesheetEmployee) => void;
   onDayClick: (employee: TimesheetEmployee, day: number, entry: TimesheetEntry | null) => void;
 }
+
+/** ISO day-of-week: 1=Пн..7=Вс */
+const getISODow = (date: Date): number => {
+  const d = date.getDay();
+  return d === 0 ? 7 : d;
+};
+
+const isScheduleDayOff = (sched: IResolvedSchedule | undefined, year: number, month: number, day: number): boolean => {
+  if (!sched) return isWeekend(year, month, day);
+  return !sched.work_days.includes(getISODow(new Date(year, month - 1, day)));
+};
 
 interface IRowData {
   employee: TimesheetEmployee;
@@ -53,7 +66,7 @@ const STATUS_CELL_TEXT: Record<TimesheetStatus, string> = {
   manual: '',
 };
 
-const getDayCellClass = (entry: TimesheetEntry | null, weekend: boolean, today: boolean, future: boolean): string => {
+const getDayCellClass = (entry: TimesheetEntry | null, weekend: boolean, today: boolean, future: boolean, workHoursNorm = 8): string => {
   const classes = ['ts-day'];
   if (today) classes.push('ts-day--today');
   if (weekend) {
@@ -67,9 +80,11 @@ const getDayCellClass = (entry: TimesheetEntry | null, weekend: boolean, today: 
   switch (entry.status) {
     case 'work':
     case 'manual':
-    case 'remote':
-      if (entry.hours_worked && entry.hours_worked >= 8) classes.push('ts-day--full');
+      if (entry.hours_worked && entry.hours_worked >= workHoursNorm) classes.push('ts-day--full');
       else classes.push('ts-day--partial');
+      break;
+    case 'remote':
+      classes.push('ts-day--remote');
       break;
     case 'sick':
       classes.push('ts-day--sick');
@@ -102,12 +117,13 @@ export const TimesheetGrid: FC<ITimesheetGridProps> = ({
   entries,
   year,
   month,
+  schedules = {},
   onEmployeeClick,
   onDayClick,
 }) => {
   const daysCount = getDaysInMonth(year, month);
   const days = Array.from({ length: daysCount }, (_, i) => i + 1);
-  const normHoursPerEmp = getWorkingDaysUpToToday(year, month) * 8;
+  const defaultNormHours = getWorkingDaysUpToToday(year, month) * 8;
 
   const rows: IRowData[] = useMemo(() => {
     const dc = getDaysInMonth(year, month);
@@ -116,9 +132,15 @@ export const TimesheetGrid: FC<ITimesheetGridProps> = ({
       entryMap.set(`${entry.employee_id}_${entry.work_date}`, entry);
     }
 
+    const now = new Date();
+    const todayDate = now.getDate();
+    const isCurrentMonth = now.getFullYear() === year && now.getMonth() + 1 === month;
+
     return employees.map(emp => {
+      const sched = schedules[emp.id];
       const dayMap = new Map<number, TimesheetEntry>();
       let factHours = 0;
+      let empWorkDays = 0;
 
       for (let d = 1; d <= dc; d++) {
         const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
@@ -127,11 +149,19 @@ export const TimesheetGrid: FC<ITimesheetGridProps> = ({
           dayMap.set(d, entry);
           if (entry.hours_worked) factHours += entry.hours_worked;
         }
+
+        // Считаем рабочие дни до сегодня
+        const dayOff = isScheduleDayOff(sched, year, month, d);
+        const isPast = !isCurrentMonth || d <= todayDate;
+        if (!dayOff && isPast) empWorkDays++;
       }
 
-      return { employee: emp, days: dayMap, factHours, normHours: normHoursPerEmp };
+      const workHours = sched ? sched.work_hours : 8;
+      const normHours = empWorkDays * workHours;
+
+      return { employee: emp, days: dayMap, factHours, normHours };
     });
-  }, [employees, entries, year, month, normHoursPerEmp]);
+  }, [employees, entries, year, month, schedules]);
 
   return (
     <div className="ts-table-container">
@@ -149,6 +179,9 @@ export const TimesheetGrid: FC<ITimesheetGridProps> = ({
           </div>
           <div className="ts-legend-item">
             <span className="ts-legend-dot ts-legend-dot--vacation">О</span>Отпуск
+          </div>
+          <div className="ts-legend-item">
+            <span className="ts-legend-dot ts-legend-dot--remote">У</span>Удалёнка
           </div>
           <div className="ts-legend-item">
             <span className="ts-legend-dot ts-legend-dot--absent">Н</span>Неявка
@@ -197,19 +230,21 @@ export const TimesheetGrid: FC<ITimesheetGridProps> = ({
                     <div className="ts-employee-role">{row.employee.position_name || '—'}</div>
                   </td>
                   {days.map(d => {
-                    const weekend = isWeekend(year, month, d);
+                    const sched = schedules[row.employee.id];
+                    const dayOff = isScheduleDayOff(sched, year, month, d);
                     const today = isToday(year, month, d);
                     const future = isFutureDay(year, month, d);
                     const entry = row.days.get(d) || null;
-                    const cls = getDayCellClass(entry, weekend, today, future);
-                    const text = getDayCellText(entry, weekend);
+                    const workHoursNorm = sched ? sched.work_hours : 8;
+                    const cls = getDayCellClass(entry, dayOff, today, future, workHoursNorm);
+                    const text = getDayCellText(entry, dayOff);
 
                     return (
                       <td
                         key={d}
                         className={cls}
                         onClick={() => {
-                          if (!weekend) onDayClick(row.employee, d, entry);
+                          if (!dayOff) onDayClick(row.employee, d, entry);
                         }}
                       >
                         {text}

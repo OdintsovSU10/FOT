@@ -4,6 +4,8 @@
 import { supabase } from '../config/database.js';
 import { formatDateToISO } from '../utils/date.utils.js';
 import { collectDeptIds, getMonday, DAY_NAMES, countWorkingDays } from './skud-shared.service.js';
+import { resolveSchedulesBulk, getEffectiveLateThreshold, needsSkudCheck } from './schedule.service.js';
+import type { IResolvedSchedule } from '../types/index.js';
 import type {
   IDashboardStatsParams,
   IDashboardStatsResult,
@@ -11,8 +13,8 @@ import type {
   IDashboardWeekMetrics,
 } from '../types/skud.types.js';
 
-const LATE_THRESHOLD = '09:00:00';
-const SLIGHTLY_LATE_THRESHOLD = '09:15:00';
+const LATE_THRESHOLD_DEFAULT = '09:00:00';
+const SLIGHTLY_LATE_THRESHOLD_DEFAULT = '09:15:00';
 
 export async function getDashboardStats(
   params: IDashboardStatsParams,
@@ -47,6 +49,27 @@ export async function getDashboardStats(
   for (const e of employees) {
     empNameMap.set(e.id, e.full_name || '');
   }
+
+  // Resolve графики — нужны для пороговых значений и исключения remote
+  // Загрузка org_department_id из employees
+  let empDeptQuery = supabase
+    .from('employees')
+    .select('id, org_department_id')
+    .in('id', empIds);
+  const { data: empDepts } = await empDeptQuery;
+  const empListForSched = (empDepts || []).map(e => ({ id: e.id as number, org_department_id: (e.org_department_id as string | null) }));
+  const schedulesMap = organizationId
+    ? await resolveSchedulesBulk(empListForSched, organizationId, formatDateToISO(new Date()))
+    : new Map<number, IResolvedSchedule>();
+
+  // Множество сотрудников, которым не нужен СКУД-контроль сегодня
+  const remoteEmpIds = new Set<number>();
+  for (const [empId, sched] of schedulesMap) {
+    if (!needsSkudCheck(sched, new Date())) remoteEmpIds.add(empId);
+  }
+
+  // Фильтрация: офисные сотрудники (для подсчёта опозданий/присутствия)
+  const officeEmpIds = empIds.filter(id => !remoteEmpIds.has(id));
 
   // Даты
   const today = new Date();
@@ -156,32 +179,50 @@ export async function getDashboardStats(
 
   // --- Агрегация ---
 
+  // Хелпер: получить порог опоздания для сотрудника
+  const getLateThresholdFor = (empId: number): string => {
+    const sched = schedulesMap.get(empId);
+    return sched ? getEffectiveLateThreshold(sched) : LATE_THRESHOLD_DEFAULT;
+  };
+
+  const getSlightlyLateFor = (empId: number): string => {
+    const sched = schedulesMap.get(empId);
+    if (!sched) return SLIGHTLY_LATE_THRESHOLD_DEFAULT;
+    const [h, m] = sched.work_start.split(':').map(Number);
+    const totalMin = h * 60 + m + sched.late_threshold_minutes + 15;
+    return `${String(Math.floor(totalMin / 60)).padStart(2, '0')}:${String(totalMin % 60).padStart(2, '0')}:00`;
+  };
+
   // Late today / yesterday
   let lateToday = 0;
   let lateYesterday = 0;
   for (const s of summaries || []) {
     if (!s.first_entry) continue;
-    if (s.date === todayStr && s.first_entry > LATE_THRESHOLD) lateToday++;
-    if (s.date === yesterdayStr && s.first_entry > LATE_THRESHOLD) lateYesterday++;
+    if (remoteEmpIds.has(s.employee_id)) continue;
+    const threshold = getLateThresholdFor(s.employee_id);
+    if (s.date === todayStr && s.first_entry > threshold) lateToday++;
+    if (s.date === yesterdayStr && s.first_entry > threshold) lateYesterday++;
   }
 
   // Period summaries
   const periodSummaries = (summaries || []).filter(s => s.date >= periodStartStr && s.date <= periodEndStr);
   const prevPeriodSummaries = (summaries || []).filter(s => s.date >= prevPeriodStartStr && s.date <= prevPeriodEndStr);
 
-  // Punctuality
-  const periodWithEntry = periodSummaries.filter(s => s.first_entry);
+  // Punctuality (только офисные сотрудники)
+  const periodWithEntry = periodSummaries.filter(s => s.first_entry && !remoteEmpIds.has(s.employee_id));
   let onTimeCount = 0;
   let slightlyLateCount = 0;
   let veryLateCount = 0;
   for (const s of periodWithEntry) {
-    if (s.first_entry! <= LATE_THRESHOLD) onTimeCount++;
-    else if (s.first_entry! <= SLIGHTLY_LATE_THRESHOLD) slightlyLateCount++;
+    const threshold = getLateThresholdFor(s.employee_id);
+    const slightlyThreshold = getSlightlyLateFor(s.employee_id);
+    if (s.first_entry! <= threshold) onTimeCount++;
+    else if (s.first_entry! <= slightlyThreshold) slightlyLateCount++;
     else veryLateCount++;
   }
   const daysWithPresence = new Set(periodWithEntry.map(s => s.date));
   const actualWorkDays = daysWithPresence.size;
-  const expectedTotal = empIds.length * (actualWorkDays || 1);
+  const expectedTotal = officeEmpIds.length * (actualWorkDays || 1);
   const absentCount = Math.max(0, expectedTotal - periodWithEntry.length);
   const punctuality = {
     onTime: Math.round((onTimeCount / expectedTotal) * 100),
@@ -237,7 +278,9 @@ export async function getDashboardStats(
   const lateCountByEmp = new Map<number, number>();
   const earlyLeaveByEmp = new Map<number, number>();
   for (const s of periodSummaries) {
-    if (s.first_entry && s.first_entry > LATE_THRESHOLD) {
+    if (remoteEmpIds.has(s.employee_id)) continue;
+    const threshold = getLateThresholdFor(s.employee_id);
+    if (s.first_entry && s.first_entry > threshold) {
       lateCountByEmp.set(s.employee_id, (lateCountByEmp.get(s.employee_id) || 0) + 1);
     }
     if (s.last_exit && s.last_exit < '17:00:00' && s.is_present) {
@@ -322,7 +365,10 @@ export async function getDashboardStats(
       ? Math.round((withHours.reduce((sum, s) => sum + (s.total_hours || 0), 0) / withHours.length) * 10) / 10
       : 0;
 
-    const lateCount = withEntry.filter(s => s.first_entry! > LATE_THRESHOLD).length;
+    const lateCount = withEntry.filter(s => {
+      if (remoteEmpIds.has(s.employee_id)) return false;
+      return s.first_entry! > getLateThresholdFor(s.employee_id);
+    }).length;
 
     return { attendanceRate, avgArrival, avgHours, lateCount };
   };
@@ -343,7 +389,8 @@ export async function getDashboardStats(
       const min = h * 60 + m;
       avgArrivalByEmp.set(s.employee_id, (avgArrivalByEmp.get(s.employee_id) || 0) + min);
       arrivalCountByEmp.set(s.employee_id, (arrivalCountByEmp.get(s.employee_id) || 0) + 1);
-      if (s.first_entry > SLIGHTLY_LATE_THRESHOLD) {
+      if (remoteEmpIds.has(s.employee_id)) continue;
+      if (s.first_entry > getSlightlyLateFor(s.employee_id)) {
         topLateCountByEmp.set(s.employee_id, (topLateCountByEmp.get(s.employee_id) || 0) + 1);
       }
     }
@@ -381,8 +428,8 @@ export async function getDashboardStats(
     const pExpectedTotal = empIds.length * pWorkDays;
     const attendanceRate = pExpectedTotal > 0 ? Math.round((totalPresent / pExpectedTotal) * 100) : 0;
 
-    const pLateCount = periodSummaries.filter(s => s.first_entry && s.first_entry > LATE_THRESHOLD).length;
-    const prevLateCount = prevPeriodSummaries.filter(s => s.first_entry && s.first_entry > LATE_THRESHOLD).length;
+    const pLateCount = periodSummaries.filter(s => s.first_entry && !remoteEmpIds.has(s.employee_id) && s.first_entry > getLateThresholdFor(s.employee_id)).length;
+    const prevLateCount = prevPeriodSummaries.filter(s => s.first_entry && !remoteEmpIds.has(s.employee_id) && s.first_entry > getLateThresholdFor(s.employee_id)).length;
 
     periodStats = { avgPresent, avgAbsent, attendanceRate, lateCount: pLateCount, prevLateCount };
   }

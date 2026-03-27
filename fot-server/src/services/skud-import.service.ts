@@ -156,6 +156,130 @@ export async function importFromExcel(params: IImportParams): Promise<IImportRes
  * Синхронизация событий Sigur для конкретного сотрудника.
  * Использует SSE-стрим, поэтому принимает req/res напрямую.
  */
+export async function syncEmployeeRange(params: {
+  employeeId: number;
+  startDate: string;
+  endDate: string;
+  organizationId: string | undefined;
+  connection?: 'external' | 'internal';
+}): Promise<{ inserted: number; skipped: number; total: number; rawFetched: number }> {
+  const { employeeId, startDate, endDate, organizationId } = params;
+
+  let empQuery = supabase
+    .from('employees')
+    .select('id, organization_id, full_name, sigur_employee_id')
+    .eq('id', employeeId)
+    .eq('is_archived', false);
+  if (organizationId) empQuery = empQuery.eq('organization_id', organizationId);
+
+  const { data: empData, error: empError } = await empQuery.single();
+  if (empError || !empData) {
+    throw Object.assign(new Error('Сотрудник не найден'), { statusCode: 404 });
+  }
+
+  const sigurEmpId: number | null = empData.sigur_employee_id;
+  const employeeOrgId: string = empData.organization_id;
+  const employeeName = normalizePersonName(empData.full_name || '');
+  const days = buildInclusiveDateRange(startDate, endDate);
+  const connection = params.connection;
+
+  const summariesToUpdate = new Set<string>();
+  let totalInserted = 0;
+  let totalSkipped = 0;
+  let totalRaw = 0;
+
+  for (const day of days) {
+    const dayStart = `${day}T00:00:00`;
+    const dayEnd = `${day}T23:59:59`;
+
+    const rawEvents = await sigurService.getEvents(dayStart, dayEnd, connection, 'PASS_DETECTED', { pageSize: 3000 });
+    totalRaw += rawEvents.length;
+    if (rawEvents.length === 0) continue;
+
+    const filtered = rawEvents.filter(raw => {
+      const r = raw as Record<string, unknown>;
+      const data = r.data as Record<string, unknown> | undefined;
+      const additionalData = r.additionalData as Record<string, unknown> | undefined;
+      const accessObject = additionalData?.accessObject as Record<string, unknown> | undefined;
+      const accessObjectData = accessObject?.data as Record<string, unknown> | undefined;
+      const evtEmpId = data?.employeeId ?? accessObjectData?.id;
+      if (sigurEmpId != null && evtEmpId != null && Number(evtEmpId) === Number(sigurEmpId)) return true;
+      const name = accessObjectData?.name;
+      return typeof name === 'string' && normalizePersonName(name) === employeeName;
+    });
+
+    const mapped = filtered
+      .map(raw => mapSigurEvent(raw as Record<string, unknown>))
+      .filter((m): m is NonNullable<typeof m> & { physicalPerson: string } => m !== null && m.physicalPerson !== null);
+
+    if (mapped.length === 0) continue;
+
+    const { data: existingHashes } = await supabase
+      .from('skud_events')
+      .select('dedup_hash')
+      .eq('event_date', day)
+      .eq('organization_id', employeeOrgId)
+      .not('dedup_hash', 'is', null);
+
+    const existingSet = new Set<string>();
+    for (const evt of existingHashes || []) {
+      if (evt.dedup_hash) existingSet.add(evt.dedup_hash);
+    }
+
+    const toInsert: ISkudEventRow[] = [];
+    for (const m of mapped) {
+      const dedupHash = computeDedupHash(
+        m.physicalPerson, m.eventDate, m.eventTime,
+        m.accessPoint, m.direction,
+      );
+      if (existingSet.has(dedupHash)) {
+        totalSkipped++;
+        continue;
+      }
+      existingSet.add(dedupHash);
+      toInsert.push({
+        organization_id: employeeOrgId,
+        physical_person: m.physicalPerson,
+        card_number: m.cardNumber || null,
+        event_date: m.eventDate,
+        event_time: m.eventTime,
+        access_point: m.accessPoint,
+        direction: m.direction,
+        employee_id: employeeId,
+        dedup_hash: dedupHash,
+      });
+      summariesToUpdate.add(m.eventDate);
+    }
+
+    const BATCH = 500;
+    for (let i = 0; i < toInsert.length; i += BATCH) {
+      const batch = toInsert.slice(i, i + BATCH);
+      const { error: insertErr } = await supabase
+        .from('skud_events')
+        .upsert(batch, { onConflict: 'dedup_hash', ignoreDuplicates: true });
+      if (!insertErr) {
+        totalInserted += batch.length;
+      }
+    }
+  }
+
+  if (summariesToUpdate.size > 0) {
+    const pairs = [...summariesToUpdate].map(date => ({
+      org_id: employeeOrgId,
+      emp_id: employeeId,
+      date,
+    }));
+    await supabase.rpc('batch_recalculate_skud_daily_summary', { p_pairs: pairs });
+  }
+
+  return {
+    inserted: totalInserted,
+    skipped: totalSkipped,
+    total: totalInserted + totalSkipped,
+    rawFetched: totalRaw,
+  };
+}
+
 export async function syncEmployee(
   req: AuthenticatedRequest,
   res: Response,

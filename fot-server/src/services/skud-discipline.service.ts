@@ -4,11 +4,18 @@
 import { supabase } from '../config/database.js';
 import { formatDateToISO } from '../utils/date.utils.js';
 import type { IDisciplineParams, IDisciplineResult, IDisciplineViolation, IDailySummaryRow } from '../types/skud.types.js';
+import type { IResolvedSchedule } from '../types/index.js';
+import { resolveSchedulesBulk, getEffectiveLateThreshold, needsSkudCheck } from './schedule.service.js';
 
-const LATE_THRESHOLD = '09:00:00';
-const WORK_NORM_HOURS = 9;
-const WORK_PRESENCE_HOURS = 8;
+const LATE_THRESHOLD_DEFAULT = '09:00:00';
+const WORK_NORM_HOURS_DEFAULT = 9;
+const WORK_PRESENCE_HOURS_DEFAULT = 8;
 const ABSENCE_THRESHOLD_HOURS = 3;
+
+function timeToMin(time: string): number {
+  const [h, m] = time.split(':').map(Number);
+  return h * 60 + m;
+}
 
 function fmtMinutes(min: number, sign = '+'): string {
   const h = Math.floor(min / 60);
@@ -113,6 +120,12 @@ export async function getDisciplineViolations(
     deptMap[d.id] = d.name;
   }
 
+  // Resolve графики для всех сотрудников
+  const empListForSched = employees.map(e => ({ id: e.id as number, org_department_id: (e.org_department_id as string | null) }));
+  const schedulesMap = organizationId
+    ? await resolveSchedulesBulk(empListForSched, organizationId, normalizedStartMonth + '-01')
+    : new Map<number, IResolvedSchedule>();
+
   const violations: IDisciplineViolation[] = [];
   const todayISO = formatDateToISO(new Date());
 
@@ -120,10 +133,27 @@ export async function getDisciplineViolations(
     if (!s.is_present) continue;
     const isToday = s.date === todayISO;
 
+    // Получаем график сотрудника
+    const sched = schedulesMap.get(s.employee_id);
+
+    // Пропускаем дисциплинарные проверки для remote и hybrid-remote дней
+    if (sched) {
+      const dateObj = new Date(s.date + 'T00:00:00');
+      if (!needsSkudCheck(sched, dateObj)) continue;
+    }
+
+    // Пороги с учётом графика
+    const lateThreshold = sched ? getEffectiveLateThreshold(sched) : LATE_THRESHOLD_DEFAULT;
+    const workPresenceHours = sched ? sched.work_hours : WORK_PRESENCE_HOURS_DEFAULT;
+    const workStartMin = sched ? timeToMin(sched.work_start) : 9 * 60;
+    const workNormHours = sched
+      ? (timeToMin(sched.work_end) - timeToMin(sched.work_start)) / 60
+      : WORK_NORM_HOURS_DEFAULT;
+
     // 1. Опоздание
-    if (s.first_entry && s.first_entry > LATE_THRESHOLD) {
+    if (s.first_entry && s.first_entry > lateThreshold) {
       const [h, m] = s.first_entry.split(':').map(Number);
-      const lateMin = (h * 60 + m) - 9 * 60;
+      const lateMin = (h * 60 + m) - workStartMin;
       violations.push({
         employee_id: s.employee_id,
         date: s.date,
@@ -144,8 +174,8 @@ export async function getDisciplineViolations(
     }
 
     // 2. Недоработка (не для сегодня — день ещё не завершён)
-    if (!isToday && s.total_hours !== null && s.total_hours < WORK_PRESENCE_HOURS) {
-      const diffMin = Math.round((WORK_PRESENCE_HOURS - s.total_hours) * 60);
+    if (!isToday && s.total_hours !== null && s.total_hours < workPresenceHours) {
+      const diffMin = Math.round((workPresenceHours - s.total_hours) * 60);
       violations.push({
         employee_id: s.employee_id,
         date: s.date,
@@ -160,7 +190,7 @@ export async function getDisciplineViolations(
     // 3. Ранний уход (не для сегодня — день ещё не завершён)
     if (!isToday && s.first_entry && s.last_exit) {
       const [eh, em] = s.first_entry.split(':').map(Number);
-      const expectedLeave = eh * 60 + em + WORK_NORM_HOURS * 60;
+      const expectedLeave = eh * 60 + em + workNormHours * 60;
       const expectedH = Math.floor(expectedLeave / 60);
       const expectedM = expectedLeave % 60;
       const expectedStr = `${String(expectedH).padStart(2, '0')}:${String(expectedM).padStart(2, '0')}`;
