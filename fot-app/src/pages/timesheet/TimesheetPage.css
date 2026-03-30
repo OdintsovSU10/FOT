@@ -1338,6 +1338,12 @@
   .ts-table-header-bar {
     padding: 10px 14px;
   }
+  .ts-table {
+    min-width: 800px;
+  }
+  .ts-table-scroll {
+    -webkit-overflow-scrolling: touch;
+  }
 }
 
 @media (max-width: 430px) {
@@ -1353,5 +1359,16 @@
   }
   .ts-title {
     font-size: 16px;
+  }
+  .ts-table {
+    min-width: 600px;
+  }
+  .ts-table thead th {
+    font-size: 10px;
+    padding: 6px 2px;
+  }
+  .ts-table td {
+    font-size: 11px;
+    padding: 4px 2px;
   }
 }

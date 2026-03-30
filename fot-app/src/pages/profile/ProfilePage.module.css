@@ -511,3 +511,46 @@
     width: 100%;
   }
 }
+
+@media (max-width: 430px) {
+  .container {
+    padding: 12px;
+  }
+
+  .profileCard,
+  .securityCard {
+    padding: 16px;
+  }
+
+  .name {
+    font-size: 20px;
+  }
+
+  .avatar {
+    width: 64px;
+    height: 64px;
+    font-size: 22px;
+  }
+
+  .header h1 {
+    font-size: 20px;
+  }
+
+  .modalHeader h2 {
+    font-size: 16px;
+  }
+
+  .modalContent,
+  .modalHeader {
+    padding: 14px;
+  }
+
+  .recoveryCodes {
+    grid-template-columns: 1fr;
+  }
+
+  .verifyInput {
+    font-size: 16px;
+    letter-spacing: 3px;
+  }
+}

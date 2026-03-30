@@ -103,3 +103,16 @@
 .info .icon {
   color: var(--accent);
 }
+
+@media (max-width: 430px) {
+  .toast {
+    min-width: auto;
+    max-width: calc(100vw - 32px);
+    padding: 12px 14px;
+    gap: 10px;
+  }
+
+  .message {
+    font-size: 13px;
+  }
+}

@@ -989,3 +989,26 @@
     flex-wrap: wrap;
   }
 }
+
+@media (max-width: 390px) {
+  .card-header-info h1 {
+    font-size: 1.2rem;
+  }
+
+  .card-info-grid .info-item {
+    padding: 10px;
+  }
+
+  .info-item .info-label {
+    font-size: 11px;
+  }
+
+  .info-item .info-value {
+    font-size: 13px;
+  }
+
+  .skud-nav-label {
+    font-size: 10px;
+    min-width: 70px;
+  }
+}

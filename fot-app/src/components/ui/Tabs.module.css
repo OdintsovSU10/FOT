@@ -36,6 +36,19 @@
 
 @media (max-width: 768px) {
   .tabs {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+
+  .tabs::-webkit-scrollbar {
     display: none;
+  }
+
+  .tab {
+    padding: 5px 10px;
+    font-size: 11px;
+    white-space: nowrap;
+    flex-shrink: 0;
   }
 }

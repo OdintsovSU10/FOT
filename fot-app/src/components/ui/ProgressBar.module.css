@@ -44,3 +44,17 @@
 .fill.low {
   background: var(--accent);
 }
+
+@media (max-width: 430px) {
+  .item {
+    padding: 10px 14px;
+  }
+
+  .label {
+    font-size: 12px;
+  }
+
+  .value {
+    font-size: 11px;
+  }
+}

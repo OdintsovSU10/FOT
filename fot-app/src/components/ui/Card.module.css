@@ -32,3 +32,17 @@
 .content {
   padding: 0;
 }
+
+@media (max-width: 430px) {
+  .header {
+    padding: 12px 14px;
+  }
+
+  .title {
+    font-size: 13px;
+  }
+
+  .card {
+    border-radius: 10px;
+  }
+}
