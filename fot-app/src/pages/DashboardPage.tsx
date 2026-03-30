@@ -34,13 +34,12 @@ interface IDeptFlatOption {
   level: number;
 }
 
-const flattenDbTree = (nodes: IDbDepartment[]): IDeptFlatOption[] => {
+const flattenDbTree = (nodes: IDbDepartment[], level = 0): IDeptFlatOption[] => {
   const result: IDeptFlatOption[] = [];
   for (const node of nodes) {
-    if (!node.children || node.children.length === 0) {
-      result.push({ id: node.id, name: node.name, level: 0 });
-    } else {
-      result.push(...flattenDbTree(node.children));
+    result.push({ id: node.id, name: node.name, level });
+    if (node.children && node.children.length > 0) {
+      result.push(...flattenDbTree(node.children, level + 1));
     }
   }
   return result;

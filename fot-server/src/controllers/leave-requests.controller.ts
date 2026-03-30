@@ -83,10 +83,10 @@ const getDepartment = async (req: AuthenticatedRequest, res: Response): Promise<
       return;
     }
 
-    // Получаем id сотрудников отдела
+    // Получаем id и ФИО сотрудников отдела
     const { data: employees } = await supabase
       .from('employees')
-      .select('id')
+      .select('id, full_name')
       .eq('org_department_id', departmentId)
       .eq('employment_status', 'active');
 
@@ -96,6 +96,8 @@ const getDepartment = async (req: AuthenticatedRequest, res: Response): Promise<
       return;
     }
 
+    const nameMap = new Map((employees || []).map((e: { id: number; full_name: string | null }) => [e.id, e.full_name]));
+
     const { data, error } = await supabase
       .from('leave_requests')
       .select('*')
@@ -103,7 +105,12 @@ const getDepartment = async (req: AuthenticatedRequest, res: Response): Promise<
       .order('created_at', { ascending: false });
 
     if (error) throw error;
-    res.json({ success: true, data: data || [] });
+
+    const enriched = (data || []).map(r => ({
+      ...r,
+      employee_name: nameMap.get(r.employee_id) || null,
+    }));
+    res.json({ success: true, data: enriched });
   } catch (err) {
     console.error('leave-requests.getDepartment error:', err);
     res.status(500).json({ success: false, error: 'Ошибка получения заявлений отдела' });
@@ -130,7 +137,23 @@ const getAll = async (req: AuthenticatedRequest, res: Response): Promise<void> =
 
     const { data, error } = await query;
     if (error) throw error;
-    res.json({ success: true, data: data || [] });
+
+    // Подгружаем ФИО сотрудников
+    const empIds = [...new Set((data || []).map(r => r.employee_id))];
+    let nameMap = new Map<number, string | null>();
+    if (empIds.length > 0) {
+      const { data: emps } = await supabase
+        .from('employees')
+        .select('id, full_name')
+        .in('id', empIds);
+      nameMap = new Map((emps || []).map((e: { id: number; full_name: string | null }) => [e.id, e.full_name]));
+    }
+
+    const enriched = (data || []).map(r => ({
+      ...r,
+      employee_name: nameMap.get(r.employee_id) || null,
+    }));
+    res.json({ success: true, data: enriched });
   } catch (err) {
     console.error('leave-requests.getAll error:', err);
     res.status(500).json({ success: false, error: 'Ошибка получения заявлений' });

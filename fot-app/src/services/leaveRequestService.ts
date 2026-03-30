@@ -17,6 +17,7 @@ export interface ILeaveRequest {
   review_comment: string | null;
   created_at: string;
   updated_at: string;
+  employee_name?: string | null;
 }
 
 export const REQUEST_TYPE_LABELS: Record<LeaveRequestType, string> = {

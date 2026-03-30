@@ -31,7 +31,6 @@ export const HeaderEmployeesPage: FC = () => {
   useEffect(() => { setPage(1); }, [debouncedSearch]);
 
   const loadEmployees = useCallback(async () => {
-    if (!departmentId) return;
     setLoading(true);
     try {
       const res = await employeeService.getPaginated({
@@ -39,7 +38,7 @@ export const HeaderEmployeesPage: FC = () => {
         pageSize: PAGE_SIZE,
         search: debouncedSearch || undefined,
         status: 'active',
-        departmentId,
+        departmentId: departmentId || undefined,
       });
       setEmployees(res.data);
       setMeta(res.meta);

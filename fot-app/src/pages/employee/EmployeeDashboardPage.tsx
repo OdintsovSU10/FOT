@@ -18,6 +18,13 @@ const timeToMinutes = (t: string): number => {
   return h * 60 + m;
 };
 
+const toLocalISO = (d: Date): string => {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+};
+
 const DAY_NAMES = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
 
 interface DayAttendance {
@@ -32,13 +39,13 @@ interface DayAttendance {
 
 const buildWeekAttendance = (events: SkudEvent[], startDate: string): DayAttendance[] => {
   const start = new Date(startDate + 'T00:00:00');
-  const todayStr = new Date().toISOString().slice(0, 10);
+  const todayStr = toLocalISO(new Date());
   const result: DayAttendance[] = [];
 
   for (let i = 0; i < 7; i++) {
     const d = new Date(start);
     d.setDate(start.getDate() + i);
-    const dateStr = d.toISOString().slice(0, 10);
+    const dateStr = toLocalISO(d);
     const dayEvents = events
       .filter((e) => e.event_date === dateStr)
       .sort((a, b) => a.event_time.localeCompare(b.event_time));
@@ -63,7 +70,7 @@ const getPeriodRange = (period: ViewPeriod, offset: number): { startDate: string
   if (period === 'day') {
     const d = new Date(today);
     d.setDate(today.getDate() + offset);
-    const dateStr = d.toISOString().slice(0, 10);
+    const dateStr = toLocalISO(d);
     const isToday = offset === 0;
     const label = isToday
       ? 'Сегодня'
@@ -78,14 +85,14 @@ const getPeriodRange = (period: ViewPeriod, offset: number): { startDate: string
     const end = new Date(start);
     end.setDate(start.getDate() + 6);
     const label = `${start.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })} – ${end.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })}`;
-    return { startDate: start.toISOString().slice(0, 10), endDate: end.toISOString().slice(0, 10), label };
+    return { startDate: toLocalISO(start), endDate: toLocalISO(end), label };
   }
 
   // month
   const d = new Date(today.getFullYear(), today.getMonth() + offset, 1);
   const last = new Date(d.getFullYear(), d.getMonth() + 1, 0);
   const label = d.toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' });
-  return { startDate: d.toISOString().slice(0, 10), endDate: last.toISOString().slice(0, 10), label };
+  return { startDate: toLocalISO(d), endDate: toLocalISO(last), label };
 };
 
 export const EmployeeDashboardPage: React.FC = () => {
@@ -109,6 +116,13 @@ export const EmployeeDashboardPage: React.FC = () => {
   const [isEnabling2FA, setIsEnabling2FA] = useState(false);
 
   const periodRange = useMemo(() => getPeriodRange(viewPeriod, periodOffset), [viewPeriod, periodOffset]);
+
+  // Обновить профиль если employee_id не привязан (после линковки через админку)
+  useEffect(() => {
+    if (!profile?.employee_id && refreshProfile) {
+      refreshProfile();
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Initial load: employee + access point settings
   useEffect(() => {
@@ -155,7 +169,7 @@ export const EmployeeDashboardPage: React.FC = () => {
     const currentDay = today.getDay() === 0 ? 6 : today.getDay() - 1;
     const start = new Date(today);
     start.setDate(today.getDate() - currentDay);
-    return start.toISOString().slice(0, 10);
+    return toLocalISO(start);
   }, [viewPeriod, periodRange.startDate]);
 
   const weekData = useMemo(
@@ -164,7 +178,7 @@ export const EmployeeDashboardPage: React.FC = () => {
   );
 
   const dayEvents = useMemo(() => {
-    const dateStr = viewPeriod === 'day' ? periodRange.startDate : new Date().toISOString().slice(0, 10);
+    const dateStr = viewPeriod === 'day' ? periodRange.startDate : toLocalISO(new Date());
     return skudEvents
       .filter((e) => e.event_date === dateStr)
       .sort((a, b) => a.event_time.localeCompare(b.event_time));
@@ -181,10 +195,10 @@ export const EmployeeDashboardPage: React.FC = () => {
     if (viewPeriod !== 'month') return [];
     const start = new Date(periodRange.startDate + 'T00:00:00');
     const end = new Date(periodRange.endDate + 'T00:00:00');
-    const todayStr = new Date().toISOString().slice(0, 10);
+    const todayStr = toLocalISO(new Date());
     const days: DayAttendance[] = [];
     for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-      const dateStr = d.toISOString().slice(0, 10);
+      const dateStr = toLocalISO(d);
       const dayEvts = skudEvents
         .filter(e => e.event_date === dateStr)
         .sort((a, b) => a.event_time.localeCompare(b.event_time));

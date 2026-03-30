@@ -15,16 +15,30 @@ interface IEmployeeInfoCardsProps {
 const formatDateRu = (d: string) =>
   new Date(d).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' });
 
-const calcYears = (from: string): string => {
-  const diff = Date.now() - new Date(from).getTime();
-  const years = Math.floor(diff / (365.25 * 24 * 60 * 60 * 1000));
-  if (years === 0) return 'менее года';
-  const lastDigit = years % 10;
-  const lastTwo = years % 100;
-  if (lastTwo >= 11 && lastTwo <= 14) return `${years} лет`;
-  if (lastDigit === 1) return `${years} год`;
-  if (lastDigit >= 2 && lastDigit <= 4) return `${years} года`;
-  return `${years} лет`;
+const pluralize = (n: number, one: string, few: string, many: string): string => {
+  const lastTwo = n % 100;
+  const lastDigit = n % 10;
+  if (lastTwo >= 11 && lastTwo <= 14) return `${n} ${many}`;
+  if (lastDigit === 1) return `${n} ${one}`;
+  if (lastDigit >= 2 && lastDigit <= 4) return `${n} ${few}`;
+  return `${n} ${many}`;
+};
+
+const calcExperience = (from: string): string => {
+  const start = new Date(from);
+  const now = new Date();
+
+  let years = now.getFullYear() - start.getFullYear();
+  let months = now.getMonth() - start.getMonth();
+  if (now.getDate() < start.getDate()) months--;
+  if (months < 0) { years--; months += 12; }
+
+  if (years <= 0 && months <= 0) return 'менее месяца';
+
+  const parts: string[] = [];
+  if (years > 0) parts.push(pluralize(years, 'год', 'года', 'лет'));
+  if (months > 0) parts.push(pluralize(months, 'месяц', 'месяца', 'месяцев'));
+  return parts.join(' ');
 };
 
 export const EmployeeInfoCards: FC<IEmployeeInfoCardsProps> = ({
@@ -66,7 +80,7 @@ export const EmployeeInfoCards: FC<IEmployeeInfoCardsProps> = ({
           </div>
           <div className={styles.vacationDetail}>
             <span className={styles.vacationDetailLabel}>Стаж</span>
-            <span className={styles.vacationDetailValue}>{employee.hire_date ? calcYears(employee.hire_date) : '—'}</span>
+            <span className={styles.vacationDetailValue}>{employee.hire_date ? calcExperience(employee.hire_date) : '—'}</span>
           </div>
           <div className={styles.vacationDetail}>
             <span className={styles.vacationDetailLabel}>Таб. номер</span>

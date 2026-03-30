@@ -8,7 +8,6 @@ import {
   type ILeaveRequest,
   type LeaveRequestStatus,
 } from '../services/leaveRequestService';
-import { employeeService } from '../services/employeeService';
 import './LeaveRequestsManagePage.css';
 
 const STATUS_COLORS: Record<LeaveRequestStatus, string> = {
@@ -44,16 +43,10 @@ export const LeaveRequestsManagePage: FC = () => {
         : await leaveRequestService.getAll(filter === 'pending' ? 'pending' : undefined);
       setRequests(data);
 
-      // Загружаем имена сотрудников
-      const empIds = [...new Set(data.map(r => r.employee_id))];
+      // ФИО приходят с бэкенда в employee_name
       const map = new Map<number, string>();
-      for (const id of empIds) {
-        try {
-          const emp = await employeeService.getById(id);
-          map.set(id, emp.full_name);
-        } catch {
-          map.set(id, `Сотрудник #${id}`);
-        }
+      for (const r of data) {
+        if (r.employee_name) map.set(r.employee_id, r.employee_name);
       }
       setEmployeeMap(map);
     } catch {
