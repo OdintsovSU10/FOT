@@ -26,9 +26,6 @@ interface AuthContextType extends AuthState {
   refreshProfile: () => Promise<void>;
   hasPosition: (positions: EmployeePositionType | EmployeePositionType[]) => boolean;
   canAccess: (requiredPosition?: EmployeePositionType) => boolean;
-  // Dev mode override
-  devOverride: EmployeePositionType | null;
-  setDevOverride: (position: EmployeePositionType | null) => void;
   // Deprecated aliases for compatibility
   role: EmployeePositionType | null;
   hasRole: (roles: EmployeePositionType | EmployeePositionType[]) => boolean;
@@ -49,14 +46,6 @@ const initialState: AuthState = {
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [state, setState] = useState<AuthState>(initialState);
-  const [devOverride, setDevOverrideState] = useState<EmployeePositionType | null>(null);
-
-  const setDevOverride = useCallback((position: EmployeePositionType | null) => {
-    if (import.meta.env.DEV) {
-      setDevOverrideState(position);
-    }
-  }, []);
-
   // Check existing session on mount
   useEffect(() => {
     const checkAuth = async () => {
@@ -188,8 +177,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, [logout]);
 
-  // Effective position type (dev override takes priority in DEV mode)
-  const effectivePositionType = (import.meta.env.DEV && devOverride) ? devOverride : state.positionType;
+  const effectivePositionType = state.positionType;
 
   // Check if user has one of the specified positions
   const hasPosition = useCallback((positions: EmployeePositionType | EmployeePositionType[]): boolean => {
@@ -231,8 +219,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     refreshProfile,
     hasPosition,
     canAccess,
-    devOverride,
-    setDevOverride,
     // Deprecated aliases for compatibility
     role: effectivePositionType,
     hasRole,

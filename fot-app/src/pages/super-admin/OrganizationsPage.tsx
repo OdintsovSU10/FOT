@@ -75,6 +75,7 @@ export const OrganizationsPage: React.FC = () => {
     const positionNames: Record<EmployeePositionType, string> = {
       super_admin: 'Супер-админ',
       admin: 'Администратор',
+      hr: 'HR',
       header: 'Руководитель',
       worker: 'Сотрудник',
     };

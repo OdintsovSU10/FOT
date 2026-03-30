@@ -5,10 +5,9 @@ import type {
 } from '../types';
 
 interface ApiResponse<T> {
-  success: boolean;
   data?: T;
-  error?: string;
   message?: string;
+  error?: string;
 }
 
 const orgQuery = (orgId?: string) => orgId ? `?organization_id=${orgId}` : '';
@@ -16,10 +15,10 @@ const orgQuery = (orgId?: string) => orgId ? `?organization_id=${orgId}` : '';
 export const structureApi = {
   async getTree(organizationId?: string): Promise<ApiResponse<OrgStructureResponse>> {
     try {
-      return await apiClient.get<ApiResponse<OrgStructureResponse>>(`/structure${orgQuery(organizationId)}`);
+      const res = await apiClient.get<ApiResponse<OrgStructureResponse>>(`/structure${orgQuery(organizationId)}`);
+      return { data: res.data, message: res.message || 'ok' };
     } catch (error) {
       return {
-        success: false,
         error: error instanceof Error ? error.message : 'Ошибка загрузки структуры',
       };
     }
@@ -32,14 +31,14 @@ export const structureApi = {
     parentId?: string | null,
   ): Promise<ApiResponse<OrgDepartment>> {
     try {
-      return await apiClient.post<ApiResponse<OrgDepartment>>(`/structure/departments${orgQuery(organizationId)}`, {
+      const res = await apiClient.post<ApiResponse<OrgDepartment>>(`/structure/departments${orgQuery(organizationId)}`, {
         name,
         parent_id: parentId || null,
         description,
       });
+      return { data: res.data, message: res.message || 'ok' };
     } catch (error) {
       return {
-        success: false,
         error: error instanceof Error ? error.message : 'Ошибка создания отдела',
       };
     }
@@ -47,10 +46,10 @@ export const structureApi = {
 
   async clearStructure(organizationId?: string): Promise<ApiResponse<{ employeesDeleted: number; departmentsDeleted: number }>> {
     try {
-      return await apiClient.delete<ApiResponse<{ employeesDeleted: number; departmentsDeleted: number }>>(`/structure/clear${orgQuery(organizationId)}`);
+      const res = await apiClient.delete<ApiResponse<{ employeesDeleted: number; departmentsDeleted: number }>>(`/structure/clear${orgQuery(organizationId)}`);
+      return { data: res.data, message: res.message || 'ok' };
     } catch (error) {
       return {
-        success: false,
         error: error instanceof Error ? error.message : 'Ошибка очистки структуры',
       };
     }
@@ -58,10 +57,10 @@ export const structureApi = {
 
   async deleteDepartment(id: string, organizationId?: string): Promise<ApiResponse<void>> {
     try {
-      return await apiClient.delete<ApiResponse<void>>(`/structure/departments/${id}${orgQuery(organizationId)}`);
+      await apiClient.delete(`/structure/departments/${id}${orgQuery(organizationId)}`);
+      return { message: 'ok' };
     } catch (error) {
       return {
-        success: false,
         error: error instanceof Error ? error.message : 'Ошибка удаления отдела',
       };
     }

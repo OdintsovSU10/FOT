@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, type FC } from 'react';
-import { X, CheckCircle, AlertCircle, Users, ChevronDown, ChevronUp, Search, Link2, SkipForward, Check } from 'lucide-react';
+import { X, CheckCircle, AlertCircle, Users, ChevronDown, ChevronUp, Search, SkipForward, Check } from 'lucide-react';
 import { employeeService } from '../../services/employeeService';
 import type { EnrichPreview, Employee } from '../../types';
 

@@ -25,8 +25,8 @@ export const APPROVAL_STATUS_LABELS: Record<TimesheetApprovalStatus, string> = {
 };
 
 interface ApiResponse<T> {
-  success: boolean;
   data: T;
+  message?: string;
 }
 
 export const timesheetApprovalService = {

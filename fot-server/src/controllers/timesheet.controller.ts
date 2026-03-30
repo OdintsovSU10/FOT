@@ -5,7 +5,7 @@ import { auditService } from '../services/audit.service.js';
 import { getOrgId } from '../utils/org.utils.js';
 import type { AuthenticatedRequest, TimeStatus, IResolvedSchedule } from '../types/index.js';
 import { exportTimesheet } from './timesheet-export.controller.js';
-import { resolveSchedulesBulk, isWorkingDay, needsSkudCheck, countWorkingDaysUpToToday as schedWorkingDaysUpToToday } from '../services/schedule.service.js';
+import { resolveSchedulesBulk, isWorkingDay, needsSkudCheck, countWorkingDaysUpToToday as schedWorkingDaysUpToToday, getEffectiveLateThreshold } from '../services/schedule.service.js';
 
 const validStatuses: TimeStatus[] = ['work', 'vacation', 'dayoff', 'remote', 'unpaid', 'absent', 'sick', 'business_trip', 'manual'];
 
@@ -211,7 +211,7 @@ export const timesheetController = {
             p_employee_ids: empIds,
           })).then(() => {
             console.log(`[timesheet] backfilled employee_id on ${idsToBackfill.length} events`);
-          }).catch(() => {});
+          }).catch((err: unknown) => console.error('[timesheet] backfill failed:', err));
         }
       }
 
@@ -373,10 +373,10 @@ export const timesheetController = {
         if (entry.status === 'absent') deviations.absent++;
         if (entry.status === 'sick') deviations.sick++;
 
-        // Проверка "недоработка" с учётом графика сотрудника
+        // Проверка опоздания по времени прихода
         const empSched = schedulesMap.get(entry.employee_id as number);
-        const threshold = empSched ? empSched.work_hours : 8;
-        if (entry.status === 'work' && typeof entry.hours_worked === 'number' && entry.hours_worked < threshold) {
+        const lateThreshold = empSched ? getEffectiveLateThreshold(empSched) : '09:00:00';
+        if (entry.status === 'work' && entry.first_entry && entry.first_entry > lateThreshold) {
           deviations.late++;
         }
       }

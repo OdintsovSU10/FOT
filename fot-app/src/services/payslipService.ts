@@ -15,8 +15,8 @@ export interface IPayslip {
 }
 
 interface ApiResponse<T> {
-  success: boolean;
   data: T;
+  message?: string;
 }
 
 export const payslipService = {

@@ -1,5 +1,5 @@
 import { type FC, useMemo, useState, useEffect, useCallback } from 'react';
-import { X, ChevronDown, ChevronRight, LogIn, LogOut, Clock, Timer } from 'lucide-react';
+import { X, ChevronDown, ChevronRight, LogIn, LogOut, Timer } from 'lucide-react';
 import type { TimesheetEntry, TimesheetEmployee, SkudEvent } from '../../types';
 import { skudService } from '../../services/skudService';
 import {

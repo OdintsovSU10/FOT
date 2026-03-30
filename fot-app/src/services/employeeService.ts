@@ -2,8 +2,8 @@ import { apiClient } from '../api/client';
 import type { Employee, EmployeeInput, EmployeeHistoryEvent, EnrichPreview, EnrichResult } from '../types';
 
 interface ApiResponse<T> {
-  success: boolean;
   data: T;
+  message?: string;
 }
 
 interface ImportResult {
@@ -59,7 +59,7 @@ export const employeeService = {
     if (params.status) qs.set('status', params.status);
     if (params.departmentId) qs.set('department_id', params.departmentId);
     if (params.archived) qs.set('archived', 'true');
-    const response = await apiClient.get<{ success: boolean; data: Employee[]; meta: PaginatedMeta; counts: EmployeeCounts }>(`/employees?${qs}`);
+    const response = await apiClient.get<{ data: Employee[]; meta: PaginatedMeta; counts: EmployeeCounts }>(`/employees?${qs}`);
     return { data: response.data || [], meta: response.meta || { page: 1, pageSize: 50, total: 0, totalPages: 0 }, counts: response.counts || { byDepartment: {}, byStatus: { active: 0, fired: 0 } } };
   },
 

@@ -1,8 +1,8 @@
 import { apiClient } from '../api/client';
 
 interface ApiResponse<T> {
-  success: boolean;
   data: T;
+  message?: string;
 }
 
 export interface IChatConversation {

@@ -36,8 +36,8 @@ export const STATUS_LABELS: Record<LeaveRequestStatus, string> = {
 };
 
 interface ApiResponse<T> {
-  success: boolean;
   data: T;
+  message?: string;
 }
 
 export const leaveRequestService = {

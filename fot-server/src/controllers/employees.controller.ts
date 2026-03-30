@@ -104,7 +104,7 @@ export const employeesController = {
 
         auditService.logFromRequest(req, req.user.id, 'VIEW_EMPLOYEES', {
           details: { count: employees.length, page, archived: showArchived },
-        }).catch(() => {});
+        }).catch((err: unknown) => console.error('[audit] VIEW_EMPLOYEES log failed:', err));
 
         console.log(`[getAll] Paginated page=${page} size=${pageSize} total=${total} in ${Date.now() - t0}ms`);
         res.json({
@@ -152,7 +152,7 @@ export const employeesController = {
 
       auditService.logFromRequest(req, req.user.id, 'VIEW_EMPLOYEES', {
         details: { count: employees.length, archived: showArchived },
-      }).catch(() => {});
+      }).catch((err: unknown) => console.error('[audit] VIEW_EMPLOYEES log failed:', err));
       console.log(`[getAll] Legacy total=${employees.length} in ${Date.now() - t0}ms`);
 
       res.json({ success: true, data: employees });

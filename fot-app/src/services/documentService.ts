@@ -25,8 +25,8 @@ export const CATEGORY_LABELS: Record<DocumentCategory, string> = {
 };
 
 interface ApiResponse<T> {
-  success: boolean;
   data: T;
+  message?: string;
 }
 
 export const documentService = {

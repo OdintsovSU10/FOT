@@ -46,7 +46,7 @@ const formatDuration = (seconds: number): string => {
 };
 
 const TYPE_OPTIONS: ITypeOption[] = [
-  { status: 'work', icon: '✓', label: 'Присутствие' },
+  { status: 'work', icon: '✔', label: 'Присутствие' },
   { status: 'sick', icon: '🏥', label: 'Больничный' },
   { status: 'vacation', icon: '🏖', label: 'Отпуск' },
   { status: 'business_trip', icon: '✈️', label: 'Командировка' },
@@ -57,6 +57,7 @@ const TYPE_OPTIONS: ITypeOption[] = [
 const EventsTab: FC<{ employeeId: number; workDate: string }> = ({ employeeId, workDate }) => {
   const [events, setEvents] = useState<SkudEvent[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [internalPoints, setInternalPoints] = useState<Set<string>>(new Set());
 
   useEffect(() => {
@@ -67,12 +68,14 @@ const EventsTab: FC<{ employeeId: number; workDate: string }> = ({ employeeId, w
 
   const loadEvents = useCallback(async () => {
     setLoading(true);
+    setError(null);
     try {
       const data = await skudService.getEmployeeEvents(employeeId, workDate, workDate);
       data.sort((a, b) => a.event_time.localeCompare(b.event_time));
       setEvents(data);
-    } catch {
+    } catch (err) {
       setEvents([]);
+      setError(err instanceof Error ? err.message : 'Не удалось загрузить события СКУД');
     } finally {
       setLoading(false);
     }
@@ -80,7 +83,6 @@ const EventsTab: FC<{ employeeId: number; workDate: string }> = ({ employeeId, w
 
   useEffect(() => { loadEvents(); }, [loadEvents]);
 
-  // Calculate summary
   const extEvents = events.filter(e => !e.access_point || !internalPoints.has(e.access_point));
   const calcPairs = (evts: SkudEvent[]): number => {
     let total = 0;
@@ -95,14 +97,16 @@ const EventsTab: FC<{ employeeId: number; workDate: string }> = ({ employeeId, w
     }
     return total;
   };
+
   let totalSec = calcPairs(extEvents);
   if (totalSec === 0 && events.length > 0) totalSec = calcPairs(events);
 
-  const srcEvents = (calcPairs(extEvents) > 0 ? extEvents : events);
+  const srcEvents = calcPairs(extEvents) > 0 ? extEvents : events;
   const firstEntry = srcEvents.find(e => e.direction === 'entry');
   const lastExit = [...srcEvents].reverse().find(e => e.direction === 'exit');
 
   if (loading) return <div className="ts-modal-events-empty">Загрузка...</div>;
+  if (error) return <div className="ts-modal-events-empty">{error}</div>;
   if (events.length === 0) return <div className="ts-modal-events-empty">Нет событий СКУД за этот день</div>;
 
   return (

@@ -15,8 +15,6 @@ export default defineConfig({
               return 'vendor-icons'
             if (id.includes('exceljs'))
               return 'vendor-exceljs'
-            if (id.includes('socket.io'))
-              return 'vendor-socket'
             if (id.includes('react-dom') || id.includes('/react/'))
               return 'vendor-react'
           }

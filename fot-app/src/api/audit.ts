@@ -26,35 +26,29 @@ export interface AuditSummary {
 }
 
 interface ApiResponse<T> {
-  success: boolean;
   data?: T;
+  message?: string;
   error?: string;
 }
 
 export const auditApi = {
-  /**
-   * Запустить полный аудит данных
-   */
   async runFullAudit(): Promise<ApiResponse<AuditSummary>> {
     try {
-      return await apiClient.get<ApiResponse<AuditSummary>>('/audit/run');
+      const res = await apiClient.get<ApiResponse<AuditSummary>>('/audit/run');
+      return { data: res.data, message: res.message || 'ok' };
     } catch (error) {
       return {
-        success: false,
         error: error instanceof Error ? error.message : 'Ошибка запуска аудита',
       };
     }
   },
 
-  /**
-   * Запустить конкретную проверку
-   */
   async runSingleCheck(checkType: string): Promise<ApiResponse<AuditCheckResult>> {
     try {
-      return await apiClient.get<ApiResponse<AuditCheckResult>>(`/audit/check/${checkType}`);
+      const res = await apiClient.get<ApiResponse<AuditCheckResult>>(`/audit/check/${checkType}`);
+      return { data: res.data, message: res.message || 'ok' };
     } catch (error) {
       return {
-        success: false,
         error: error instanceof Error ? error.message : 'Ошибка запуска проверки',
       };
     }

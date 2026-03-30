@@ -2,7 +2,6 @@ import { apiClient } from '../api/client';
 import type { TwoFactorData, EmployeePositionType, Organization } from '../types';
 
 interface ApiResponse<T> {
-  success: boolean;
   data: T;
   message?: string;
 }

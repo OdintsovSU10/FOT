@@ -1,44 +1,18 @@
-import { useEffect, useRef, useSyncExternalStore } from 'react';
-import { io, Socket } from 'socket.io-client';
+import { useEffect } from 'react';
+import { wsService } from '../services/websocket';
 
-const SOCKET_URL = import.meta.env.VITE_API_URL?.replace('/api', '') || 'http://localhost:3000';
-
-export const useSocket = (token: string | null): Socket | null => {
-  const socketRef = useRef<Socket | null>(null);
-  const listenersRef = useRef(new Set<() => void>());
-
-  const subscribe = (cb: () => void) => {
-    listenersRef.current.add(cb);
-    return () => { listenersRef.current.delete(cb); };
-  };
-
-  const getSnapshot = () => socketRef.current;
-
+export const useSocket = (token: string | null): typeof wsService | null => {
   useEffect(() => {
     if (!token) {
-      if (socketRef.current) {
-        socketRef.current.disconnect();
-        socketRef.current = null;
-        listenersRef.current.forEach(cb => cb());
-      }
+      wsService.disconnect();
       return;
     }
 
-    const s = io(SOCKET_URL, {
-      auth: { token },
-      transports: ['websocket', 'polling'],
-    });
-
-    socketRef.current = s;
-    listenersRef.current.forEach(cb => cb());
-
-    const listeners = listenersRef.current;
+    wsService.connect(token);
     return () => {
-      s.disconnect();
-      socketRef.current = null;
-      listeners.forEach(cb => cb());
+      wsService.disconnect();
     };
   }, [token]);
 
-  return useSyncExternalStore(subscribe, getSnapshot);
+  return token ? wsService : null;
 };

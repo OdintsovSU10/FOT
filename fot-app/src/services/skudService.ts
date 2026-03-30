@@ -2,9 +2,8 @@ import { apiClient } from '../api/client';
 import type { SkudEvent, SkudDailySummary, IEmployeePresence, IAccessPointSetting, IDashboardStats } from '../types';
 
 interface ApiResponse<T> {
-  success: boolean;
   data: T;
-  error?: string;
+  message?: string;
 }
 
 interface ImportResult {
@@ -81,59 +80,44 @@ export const skudService = {
     endDate: string,
     onProgress?: (msg: string) => void,
   ): Promise<{ inserted: number; skipped: number; total: number }> {
-    const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
-    const token = localStorage.getItem('access_token');
-
-    const response = await fetch(`${API_URL}/skud/sync-employee`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
-      body: JSON.stringify({ employeeId, startDate, endDate }),
+    // Go API: POST creates a sync command, returns ID for polling
+    const response = await apiClient.post<ApiResponse<{ id: number }>>('/skud/sync-employee', {
+      employeeId,
+      startDate,
+      endDate,
     });
+    const commandId = response.data.id;
 
-    if (!response.ok) {
-      const err = await response.json().catch(() => ({ error: 'Ошибка' }));
-      throw new Error(err.error || 'Ошибка синхронизации');
-    }
-
-    const reader = response.body?.getReader();
-    if (!reader) throw new Error('SSE не поддерживается');
-
-    const decoder = new TextDecoder();
+    // Poll progress
+    const MAX_POLLS = 300;
+    const POLL_INTERVAL = 1000;
     let result = { inserted: 0, skipped: 0, total: 0 };
-    let buffer = '';
-    let sseError: string | null = null;
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
+    for (let i = 0; i < MAX_POLLS; i++) {
+      const res = await apiClient.get<ApiResponse<{
+        status: string;
+        progress?: string;
+        result?: { inserted: number; skipped: number; total: number };
+        error?: string;
+      }>>(`/skud/sync-employee-progress/${commandId}`);
 
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || '';
+      const data = res.data;
 
-      for (const line of lines) {
-        if (!line.startsWith('data: ')) continue;
-        try {
-          const data = JSON.parse(line.slice(6));
-          if (data.type === 'day_start' && onProgress) {
-            onProgress(`День ${data.dayIndex + 1}/${data.totalDays} (${data.day})...`);
-          } else if (data.type === 'day_done' && onProgress && data.inserted > 0) {
-            onProgress(`${data.day}: +${data.inserted} событий`);
-          } else if (data.type === 'error') {
-            sseError = data.error || 'Ошибка синхронизации';
-          } else if (data.type === 'done') {
-            result = { inserted: data.inserted, skipped: data.skipped, total: data.total };
-          }
-        } catch { /* JSON parse error — skip */ }
+      if (data.progress && onProgress) {
+        onProgress(data.progress);
       }
 
-      if (sseError) break;
-    }
+      if (data.status === 'done' && data.result) {
+        result = data.result;
+        break;
+      }
 
-    if (sseError) throw new Error(sseError);
+      if (data.status === 'error') {
+        throw new Error(data.error || 'Ошибка синхронизации');
+      }
+
+      await new Promise((r) => setTimeout(r, POLL_INTERVAL));
+    }
 
     return result;
   },

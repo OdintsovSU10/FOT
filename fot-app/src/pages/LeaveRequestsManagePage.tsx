@@ -9,7 +9,6 @@ import {
   type LeaveRequestStatus,
 } from '../services/leaveRequestService';
 import { employeeService } from '../services/employeeService';
-import type { Employee } from '../types';
 import './LeaveRequestsManagePage.css';
 
 const STATUS_COLORS: Record<LeaveRequestStatus, string> = {

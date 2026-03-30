@@ -45,3 +45,8 @@ temp/
 
 # Data exports
 *.xlsx
+
+# Unused Go modules (future migration)
+fot-core/
+fot-worker/
+shared/

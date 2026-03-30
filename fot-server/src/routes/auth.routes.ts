@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { authController } from '../controllers/auth.controller.js';
+import { auth2faSelfController } from '../controllers/auth-2fa-self.controller.js';
 import { authenticate } from '../middleware/auth.js';
 import { authLimiter, twoFactorLimiter } from '../middleware/rateLimit.js';
 
@@ -28,5 +29,10 @@ router.post(
 );
 
 router.get('/me', authenticate, authController.getMe);
+
+// Self-service 2FA
+router.post('/2fa/setup', authenticate, auth2faSelfController.setup2FA);
+router.post('/2fa/enable', twoFactorLimiter, authenticate, auth2faSelfController.enable2FA);
+router.post('/2fa/disable', authenticate, auth2faSelfController.disable2FA);
 
 export default router;

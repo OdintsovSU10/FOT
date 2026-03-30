@@ -1,5 +1,5 @@
 import { type FC, useState, useEffect, useCallback, useRef } from 'react';
-import { Upload, Download, FileText, Trash2 } from 'lucide-react';
+import { Upload, Download, FileText } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import {
   documentService,

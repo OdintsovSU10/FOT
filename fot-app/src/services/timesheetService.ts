@@ -7,8 +7,8 @@ interface TimesheetFilters {
 }
 
 interface ApiResponse<T> {
-  success: boolean;
   data?: T;
+  message?: string;
   error?: string;
 }
 
@@ -18,7 +18,7 @@ export const timesheetService = {
     params.append('month', filters.month);
     if (filters.department_id) params.append('department_id', filters.department_id);
     const res = await apiClient.get<ApiResponse<TimesheetResponse>>(`/timesheet?${params.toString()}`);
-    if (!res.success || !res.data) throw new Error(res.error || 'Ошибка загрузки табеля');
+    if (!res.data) throw new Error(res.error || 'Ошибка загрузки табеля');
     return res.data;
   },
 
@@ -30,13 +30,13 @@ export const timesheetService = {
     notes?: string | null;
   }): Promise<TimesheetEntry> {
     const res = await apiClient.post<ApiResponse<TimesheetEntry>>('/timesheet', data);
-    if (!res.success || !res.data) throw new Error(res.error || 'Ошибка создания записи');
+    if (!res.data) throw new Error(res.error || 'Ошибка создания записи');
     return res.data;
   },
 
   async update(id: number, data: Partial<Pick<TimesheetEntry, 'status' | 'hours_worked' | 'notes'>>): Promise<TimesheetEntry> {
     const res = await apiClient.put<ApiResponse<TimesheetEntry>>(`/timesheet/${id}`, data);
-    if (!res.success || !res.data) throw new Error(res.error || 'Ошибка обновления записи');
+    if (!res.data) throw new Error(res.error || 'Ошибка обновления записи');
     return res.data;
   },
 

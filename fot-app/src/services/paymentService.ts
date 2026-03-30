@@ -25,8 +25,8 @@ export const PAYMENT_TYPE_LABELS: Record<PaymentType, string> = {
 };
 
 interface ApiResponse<T> {
-  success: boolean;
   data: T;
+  message?: string;
 }
 
 export const paymentService = {

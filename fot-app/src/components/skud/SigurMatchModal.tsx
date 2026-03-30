@@ -190,7 +190,7 @@ export const SigurMatchModal: FC<ISigurMatchModalProps> = ({ unmatched, onClose,
                             }}
                           >
                             <span className="sigur-match-dropdown-name">{r.full_name}</span>
-                            {r.department_name && <span className="sigur-match-dropdown-dept">{r.department_name}</span>}
+                            {r.department && <span className="sigur-match-dropdown-dept">{r.department}</span>}
                           </button>
                         ))}
                       </div>

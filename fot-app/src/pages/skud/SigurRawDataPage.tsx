@@ -51,6 +51,17 @@ export const SigurRawDataPage: React.FC = () => {
   const [fromCache, setFromCache] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
 
+  // Фильтры для events
+  const [employeeIdInput, setEmployeeIdInput] = useState('');
+  const [eventStartDate, setEventStartDate] = useState(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  });
+  const [eventEndDate, setEventEndDate] = useState(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  });
+
   const loadData = useCallback(async (tabId: string, skipCache = false) => {
     // Проверяем кэш
     if (!skipCache) {
@@ -80,7 +91,13 @@ export const SigurRawDataPage: React.FC = () => {
     const token = localStorage.getItem('access_token');
 
     try {
-      const response = await fetch(`${apiUrl}/sigur/stream?type=${tabId}`, {
+      const params = new URLSearchParams({ type: tabId });
+      if (tabId === 'events') {
+        if (employeeIdInput.trim()) params.append('employeeId', employeeIdInput.trim());
+        if (eventStartDate) params.append('startDate', eventStartDate);
+        if (eventEndDate) params.append('endDate', eventEndDate);
+      }
+      const response = await fetch(`${apiUrl}/sigur/stream?${params}`, {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
         signal: controller.signal,
       });
@@ -135,7 +152,7 @@ export const SigurRawDataPage: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    loadData(activeTab);
+    if (activeTab !== 'events') loadData(activeTab);
     return () => abortRef.current?.abort();
   }, [activeTab, loadData]);
 
@@ -197,6 +214,43 @@ export const SigurRawDataPage: React.FC = () => {
           </button>
         ))}
       </div>
+
+      {activeTab === 'events' && (
+        <div className="sigur-raw-events-filters">
+          <div className="sigur-raw-events-dates">
+            <label>
+              С:
+              <input type="date" value={eventStartDate} onChange={e => setEventStartDate(e.target.value)} className="sigur-raw-date-input" />
+            </label>
+            <label>
+              По:
+              <input type="date" value={eventEndDate} onChange={e => setEventEndDate(e.target.value)} className="sigur-raw-date-input" />
+            </label>
+          </div>
+          <label className="sigur-raw-employee-label">
+            Employee ID:
+            <input
+              type="number"
+              placeholder="ID сотрудника..."
+              value={employeeIdInput}
+              onChange={e => setEmployeeIdInput(e.target.value)}
+              className="sigur-raw-employee-input"
+            />
+            {employeeIdInput && (
+              <button className="sigur-raw-employee-clear" onClick={() => setEmployeeIdInput('')}>
+                <X size={14} />
+              </button>
+            )}
+          </label>
+          <button
+            className="sigur-raw-refresh"
+            onClick={() => loadData(activeTab, true)}
+            disabled={loading}
+          >
+            Загрузить
+          </button>
+        </div>
+      )}
 
       <div className="sigur-raw-search-wrap">
         <Search size={16} className="sigur-raw-search-icon" />

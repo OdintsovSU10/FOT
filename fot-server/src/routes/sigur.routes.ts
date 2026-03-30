@@ -7,9 +7,6 @@ import { authenticate, requireMinPosition } from '../middleware/auth.js';
 
 const router = Router();
 
-// ВРЕМЕННО: debug-events без авторизации (убрать после диагностики!)
-router.get('/debug-events', sigurController.debugEvents);
-
 // Все роуты требуют аутентификации и роли admin/super_admin
 router.use(authenticate);
 router.use(requireMinPosition('header'));

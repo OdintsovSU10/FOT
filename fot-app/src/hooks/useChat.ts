@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Socket } from 'socket.io-client';
+import type { wsService } from '../services/websocket';
 import { chatService, type IChatConversation, type IChatMessage } from '../services/chatService';
 
-export const useChat = (socket: Socket | null) => {
+export const useChat = (ws: typeof wsService | null) => {
   const [conversations, setConversations] = useState<IChatConversation[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [messages, setMessages] = useState<IChatMessage[]>([]);
@@ -33,26 +33,26 @@ export const useChat = (socket: Socket | null) => {
       const data = await chatService.getMessages(conversationId);
       setMessages(data.reverse()); // API returns newest first, we want oldest first
       await chatService.markAsRead(conversationId);
-      socket?.emit('mark_read', conversationId);
+      ws?.send('mark_read', { conversation_id: conversationId });
     } catch {
       // ignore
     } finally {
       setLoading(false);
     }
-  }, [socket]);
+  }, [ws]);
 
   // Select conversation
   const selectConversation = useCallback(async (conversationId: string) => {
     // Leave previous
     if (activeConvRef.current) {
-      socket?.emit('leave_conversation', activeConvRef.current);
+      ws?.send('leave_conversation', { conversation_id: activeConvRef.current });
     }
 
     setActiveConversationId(conversationId);
-    socket?.emit('join_conversation', conversationId);
+    ws?.send('join_conversation', { conversation_id: conversationId });
     await loadMessages(conversationId);
     await loadConversations(); // refresh unread counts
-  }, [socket, loadMessages, loadConversations]);
+  }, [ws, loadMessages, loadConversations]);
 
   // Send message
   const sendMessage = useCallback(async (content: string) => {
@@ -61,7 +61,7 @@ export const useChat = (socket: Socket | null) => {
     try {
       const message = await chatService.sendMessage(activeConvRef.current, content);
       setMessages(prev => [...prev, message]);
-      // Socket will broadcast to others
+      // WebSocket will broadcast to others
       await loadConversations();
     } catch {
       // ignore
@@ -80,11 +80,12 @@ export const useChat = (socket: Socket | null) => {
     }
   }, [loadConversations, selectConversation]);
 
-  // Socket events
+  // WebSocket events
   useEffect(() => {
-    if (!socket) return;
+    if (!ws) return;
 
-    const handleNewMessage = (message: IChatMessage) => {
+    const unsubMessage = ws.on('new_message', (payload: unknown) => {
+      const message = payload as IChatMessage;
       if (message.conversation_id === activeConvRef.current) {
         setMessages(prev => {
           // Avoid duplicates
@@ -93,23 +94,21 @@ export const useChat = (socket: Socket | null) => {
         });
       }
       loadConversations();
-    };
+    });
 
-    const handleMessageNotification = (data: { conversationId: string; message: IChatMessage }) => {
+    const unsubNotification = ws.on('message_notification', (payload: unknown) => {
+      const data = payload as { conversationId: string; message: IChatMessage };
       if (data.conversationId !== activeConvRef.current) {
         setUnreadTotal(prev => prev + 1);
       }
       loadConversations();
-    };
-
-    socket.on('new_message', handleNewMessage);
-    socket.on('message_notification', handleMessageNotification);
+    });
 
     return () => {
-      socket.off('new_message', handleNewMessage);
-      socket.off('message_notification', handleMessageNotification);
+      unsubMessage();
+      unsubNotification();
     };
-  }, [socket, loadConversations]);
+  }, [ws, loadConversations]);
 
   // Initial load
   useEffect(() => {

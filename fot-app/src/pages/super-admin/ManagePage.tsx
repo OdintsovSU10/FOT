@@ -67,7 +67,7 @@ export const ManagePage: FC = () => {
       setDeptLoading(true);
       setError(null);
       const response = await structureApi.getTree();
-      if (response.success && response.data) {
+      if (response.data) {
         setStructure(response.data);
         setExpandedNodes(prev => {
           if (prev.size > 0) return prev;
@@ -134,7 +134,7 @@ export const ManagePage: FC = () => {
     const orgId = profile?.organization_id || structure?.departments[0]?.organization_id;
     const res = await structureApi.createDepartment(newDeptName.trim(), undefined, orgId || undefined, parentId);
     setCreating(false);
-    if (res.success) {
+    if (!res.error) {
       cancelAdding();
       await loadStructure();
     } else {
@@ -147,7 +147,7 @@ export const ManagePage: FC = () => {
     if (!confirm('Удалить этот отдел?')) return;
     const orgId = profile?.organization_id || structure?.departments[0]?.organization_id;
     const res = await structureApi.deleteDepartment(id, orgId || undefined);
-    if (res.success) {
+    if (!res.error) {
       if (selectedDeptId === id) {
         setSelectedDeptId(null);
         setEmployees([]);

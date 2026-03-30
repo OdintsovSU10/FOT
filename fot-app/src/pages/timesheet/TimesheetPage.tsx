@@ -337,6 +337,7 @@ export const TimesheetPage: FC = () => {
         onClose={() => setLateModalOpen(false)}
         employees={employees}
         entries={entries}
+        schedules={schedules}
       />
 
       {/* Schedule Settings Panel */}

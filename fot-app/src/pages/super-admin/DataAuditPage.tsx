@@ -85,7 +85,7 @@ export const DataAuditPage: React.FC = () => {
     try {
       const response = await auditApi.runFullAudit();
 
-      if (response.success && response.data) {
+      if (response.data) {
         setAuditResult(response.data);
         // Раскрываем проверки с критическими проблемами
         const criticalChecks = response.data.checks

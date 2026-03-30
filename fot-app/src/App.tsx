@@ -7,8 +7,6 @@ import { Layout } from './components/layout/Layout';
 import { EmployeeLayout } from './components/layout/EmployeeLayout';
 import { useTheme } from './hooks/useTheme';
 import { PageLoader } from './components/ui/PageLoader';
-import { DevRoleSwitcher } from './components/ui/DevRoleSwitcher';
-
 import './App.css';
 
 // Auth pages
@@ -24,8 +22,6 @@ const DashboardPage = lazy(() => import('./pages/DashboardPage').then(m => ({ de
 
 // Super Admin
 const UserManagementPage = lazy(() => import('./pages/super-admin/UserManagementPage').then(m => ({ default: m.UserManagementPage })));
-const OrganizationsPage = lazy(() => import('./pages/super-admin/OrganizationsPage').then(m => ({ default: m.OrganizationsPage })));
-const ManagePage = lazy(() => import('./pages/super-admin/ManagePage').then(m => ({ default: m.ManagePage })));
 const AdminManagePage = lazy(() => import('./pages/super-admin/AdminManagePage').then(m => ({ default: m.AdminManagePage })));
 const DataAuditPage = lazy(() => import('./pages/super-admin/DataAuditPage').then(m => ({ default: m.DataAuditPage })));
 
@@ -349,7 +345,6 @@ const App = () => {
       <AuthProvider>
         <ToastProvider>
           <AppRoutes />
-          {import.meta.env.DEV && <DevRoleSwitcher />}
         </ToastProvider>
       </AuthProvider>
     </BrowserRouter>

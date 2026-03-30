@@ -7,7 +7,6 @@ import {
   getWeekdayShort,
   isToday,
   isFutureDay,
-  getWorkingDaysUpToToday,
 } from '../../utils/calendarUtils';
 
 interface ITimesheetGridProps {
@@ -123,8 +122,6 @@ export const TimesheetGrid: FC<ITimesheetGridProps> = ({
 }) => {
   const daysCount = getDaysInMonth(year, month);
   const days = Array.from({ length: daysCount }, (_, i) => i + 1);
-  const defaultNormHours = getWorkingDaysUpToToday(year, month) * 8;
-
   const rows: IRowData[] = useMemo(() => {
     const dc = getDaysInMonth(year, month);
     const entryMap = new Map<string, TimesheetEntry>();

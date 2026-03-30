@@ -15,7 +15,6 @@ import {
   getAccessPointCacheEntry,
   setAccessPointCacheEntry,
 } from '../services/skud-shared.service.js';
-import { syncEmployeeRange } from '../services/skud-import.service.js';
 import { skudWriteController } from './skud-write.controller.js';
 
 const skudReadController = {
@@ -144,40 +143,6 @@ const skudReadController = {
 
       const seenIds = new Set(byId.map((e: Record<string, unknown>) => e.id));
       let events = [...byId, ...byName.filter((e: Record<string, unknown>) => !seenIds.has(e.id))];
-
-      const today = formatDateToISO(new Date());
-      const shouldTrySigurBackfill =
-        events.length === 0 &&
-        typeof startDate === 'string' &&
-        typeof endDate === 'string' &&
-        startDate === today &&
-        endDate === today &&
-        !!effectiveOrgId &&
-        sigurService.isConfigured();
-
-      if (shouldTrySigurBackfill) {
-        console.log(`[employee-events] no local events for today, trying direct Sigur sync for employee ${employeeId}`);
-        try {
-          const syncResult = await syncEmployeeRange({
-            employeeId,
-            startDate,
-            endDate,
-            organizationId: effectiveOrgId,
-          });
-          console.log(
-            `[employee-events] direct Sigur sync done: raw=${syncResult.rawFetched} inserted=${syncResult.inserted} skipped=${syncResult.skipped}`,
-          );
-
-          const refreshedById = await queryEventsByEmployeeId(employeeId, effectiveOrgId, startDate, endDate);
-          const refreshedByName = empData?.full_name
-            ? await searchAndBackfillByName(employeeId, empData.full_name.toLowerCase().trim(), effectiveOrgId, startDate, endDate)
-            : [];
-          const refreshedSeenIds = new Set(refreshedById.map((e: Record<string, unknown>) => e.id));
-          events = [...refreshedById, ...refreshedByName.filter((e: Record<string, unknown>) => !refreshedSeenIds.has(e.id))];
-        } catch (syncError) {
-          console.warn('[employee-events] direct Sigur sync failed:', (syncError as Error).message);
-        }
-      }
 
       console.log(`[employee-events] total=${events.length}`);
 

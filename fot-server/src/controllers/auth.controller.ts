@@ -296,12 +296,9 @@ async function forgotPassword(req: Request, res: Response): Promise<void> {
       details: { email },
     });
 
-    console.log(`[Password Reset] Token for ${email}: ${resetToken}`);
-
     res.json({
       success: true,
       message: 'Если аккаунт с таким email существует, инструкции по сбросу пароля будут отправлены.',
-      ...(env.NODE_ENV === 'development' && { reset_token: resetToken }),
     });
   } catch (error) {
     if (error instanceof z.ZodError) {

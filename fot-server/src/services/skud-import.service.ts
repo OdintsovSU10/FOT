@@ -5,7 +5,7 @@ import * as XLSX from 'xlsx';
 import { supabase } from '../config/database.js';
 import { auditService } from './audit.service.js';
 import { sigurService } from './sigur.service.js';
-import { mapSigurEvent } from '../utils/sigur.mapper.js';
+import { mapSigurEvent, type IMappedSigurEvent } from '../utils/sigur.mapper.js';
 import { buildInclusiveDateRange, parseDate } from '../utils/date.utils.js';
 import { computeDedupHash } from '../utils/dedup.utils.js';
 import { isHeaderRow, parseTimeFromDateTime } from './skud-shared.service.js';
@@ -156,6 +156,86 @@ export async function importFromExcel(params: IImportParams): Promise<IImportRes
  * Синхронизация событий Sigur для конкретного сотрудника.
  * Использует SSE-стрим, поэтому принимает req/res напрямую.
  */
+async function loadMappedEmployeeDayEvents(params: {
+  day: string;
+  connection?: 'external' | 'internal';
+  employeeName: string;
+  employeeFullName: string;
+  sigurEmpId: number | null;
+}): Promise<{ rawCount: number; matchedCount: number; mapped: (IMappedSigurEvent & { physicalPerson: string })[] }> {
+  const { day, connection, employeeName, employeeFullName, sigurEmpId } = params;
+  const dayStart = `${day}T00:00:00`;
+  const dayEnd = `${day}T23:59:59`;
+
+  if (sigurEmpId != null) {
+    const rawEvents = await sigurService.getRawEvents(dayStart, dayEnd, connection, {
+      pageSize: 3000,
+      eventTypeId: 6,
+    }) as Record<string, unknown>[];
+
+    const accessPointMap = await sigurService.getAccessPointMapCached(connection);
+    const filteredRaw = rawEvents.filter(raw => Number(raw.accessObjectId) === Number(sigurEmpId));
+
+    const mapped = filteredRaw
+      .map(raw => mapSigurEvent({
+        id: raw.id,
+        eventType: 'PASS_DETECTED',
+        timestamp: raw.timestamp,
+        data: {
+          direction: raw.direction,
+          employeeId: sigurEmpId,
+          accessPointId: raw.accessPointId,
+          cardKey: raw.cardKey ?? null,
+        },
+        additionalData: {
+          accessObject: {
+            type: 'EMPLOYEE',
+            data: {
+              id: sigurEmpId,
+              name: employeeFullName,
+            },
+          },
+          accessPoint: typeof raw.accessPointId === 'number'
+            ? {
+                id: raw.accessPointId,
+                name: accessPointMap.get(raw.accessPointId) || null,
+              }
+            : undefined,
+        },
+      }))
+      .filter((event): event is IMappedSigurEvent & { physicalPerson: string } => event !== null && event.physicalPerson !== null);
+
+    return {
+      rawCount: rawEvents.length,
+      matchedCount: filteredRaw.length,
+      mapped,
+    };
+  }
+
+  const rawEvents = await sigurService.getEvents(dayStart, dayEnd, connection, 'PASS_DETECTED', { pageSize: 3000 });
+  const filtered = rawEvents.filter(raw => {
+    const r = raw as Record<string, unknown>;
+    const data = r.data as Record<string, unknown> | undefined;
+    const additionalData = r.additionalData as Record<string, unknown> | undefined;
+    const accessObject = additionalData?.accessObject as Record<string, unknown> | undefined;
+    const accessObjectData = accessObject?.data as Record<string, unknown> | undefined;
+    const evtEmpId = data?.employeeId ?? accessObjectData?.id;
+    if (sigurEmpId != null && evtEmpId != null && Number(evtEmpId) === Number(sigurEmpId)) return true;
+    const name = accessObjectData?.name;
+    return typeof name === 'string' && normalizePersonName(name) === employeeName;
+  });
+
+  const mapped = filtered
+    .map(raw => mapSigurEvent(raw as Record<string, unknown>))
+    .filter((event): event is IMappedSigurEvent & { physicalPerson: string } => event !== null && event.physicalPerson !== null);
+
+  return {
+    rawCount: rawEvents.length,
+    matchedCount: filtered.length,
+    mapped,
+  };
+}
+
 export async function syncEmployeeRange(params: {
   employeeId: number;
   startDate: string;
@@ -180,6 +260,7 @@ export async function syncEmployeeRange(params: {
   const sigurEmpId: number | null = empData.sigur_employee_id;
   const employeeOrgId: string = empData.organization_id;
   const employeeName = normalizePersonName(empData.full_name || '');
+  const employeeFullName = empData.full_name || '';
   const days = buildInclusiveDateRange(startDate, endDate);
   const connection = params.connection;
 
@@ -189,28 +270,16 @@ export async function syncEmployeeRange(params: {
   let totalRaw = 0;
 
   for (const day of days) {
-    const dayStart = `${day}T00:00:00`;
-    const dayEnd = `${day}T23:59:59`;
-
-    const rawEvents = await sigurService.getEvents(dayStart, dayEnd, connection, 'PASS_DETECTED', { pageSize: 3000 });
-    totalRaw += rawEvents.length;
-    if (rawEvents.length === 0) continue;
-
-    const filtered = rawEvents.filter(raw => {
-      const r = raw as Record<string, unknown>;
-      const data = r.data as Record<string, unknown> | undefined;
-      const additionalData = r.additionalData as Record<string, unknown> | undefined;
-      const accessObject = additionalData?.accessObject as Record<string, unknown> | undefined;
-      const accessObjectData = accessObject?.data as Record<string, unknown> | undefined;
-      const evtEmpId = data?.employeeId ?? accessObjectData?.id;
-      if (sigurEmpId != null && evtEmpId != null && Number(evtEmpId) === Number(sigurEmpId)) return true;
-      const name = accessObjectData?.name;
-      return typeof name === 'string' && normalizePersonName(name) === employeeName;
+    const { rawCount, matchedCount, mapped } = await loadMappedEmployeeDayEvents({
+      day,
+      connection,
+      employeeName,
+      employeeFullName,
+      sigurEmpId,
     });
-
-    const mapped = filtered
-      .map(raw => mapSigurEvent(raw as Record<string, unknown>))
-      .filter((m): m is NonNullable<typeof m> & { physicalPerson: string } => m !== null && m.physicalPerson !== null);
+    totalRaw += rawCount;
+    console.log(`[sync-employee-range] day=${day} raw=${rawCount} matched=${matchedCount} mapped=${mapped.length}`);
+    if (rawCount === 0) continue;
 
     if (mapped.length === 0) continue;
 

@@ -170,7 +170,7 @@ export const StructureSyncSection: FC<IStructureSyncSectionProps> = ({
     setError('');
     try {
       const result = await structureApi.clearStructure(organizationId);
-      if (result.success && result.data) {
+      if (result.data) {
         setClearStructureResult(result.data);
       } else {
         setError(result.error || 'Ошибка очистки структуры');

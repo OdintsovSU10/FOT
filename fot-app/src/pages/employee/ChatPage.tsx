@@ -7,7 +7,7 @@ import styles from './ChatPage.module.css';
 
 export const ChatPage: React.FC = () => {
   const { profile, token } = useAuth();
-  const socket = useSocket(token);
+  const ws = useSocket(token);
   const {
     conversations,
     activeConversationId,
@@ -16,7 +16,7 @@ export const ChatPage: React.FC = () => {
     selectConversation,
     sendMessage,
     startConversation,
-  } = useChat(socket);
+  } = useChat(ws);
 
   const [inputValue, setInputValue] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
