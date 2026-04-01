@@ -11,6 +11,8 @@ interface UserFromApi {
   full_name: string | null;
   organization_id: string | null;
   organization_name: string | null;
+  department_id: string | null;
+  department_name: string | null;
   position_type: EmployeePositionType;
   imported_position: string | null;
   employee_id: string | null;

@@ -91,12 +91,6 @@ export const AllUsersTab: FC<IAllUsersTabProps> = ({ allUsers, organizations, on
     setEmpSearch(null);
   };
 
-  const getOrgName = (orgId: string | null) => {
-    if (!orgId) return 'Не назначена';
-    const org = organizations.find(o => o.id === orgId);
-    return org?.name || 'Неизвестная';
-  };
-
   const getDeptName = (user: IUserFromApi) => {
     return user.department_name || 'Не назначен';
   };
@@ -158,16 +152,6 @@ export const AllUsersTab: FC<IAllUsersTabProps> = ({ allUsers, organizations, on
       await onReload();
     } catch {
       toast.error('Ошибка изменения должности');
-    }
-  };
-
-  const handleOrgChange = async (userId: string, orgId: string) => {
-    try {
-      await adminService.assignOrganization(userId, orgId);
-      toast.success('Организация назначена');
-      await onReload();
-    } catch {
-      toast.error('Ошибка назначения организации');
     }
   };
 
