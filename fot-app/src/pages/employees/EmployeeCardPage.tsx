@@ -414,81 +414,109 @@ export const EmployeeCardPage: FC = () => {
       </div>
 
       {/* ===== Tab Content ===== */}
-      {activeTab === 'attendance' && (
-        <div className="ec-grid">
-          <div style={{ display: 'flex', gap: 16 }}>
-            <div style={{ flex: '0 0 50%', minWidth: 0 }}>
-              <AttendanceCalendar
-                days={attendance.days}
-                month={calMonth}
-                year={calYear}
-                onPrevMonth={prevMonth}
-                onNextMonth={nextMonth}
-                onDayClick={handleDayClick}
-              />
-            </div>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div className="ec-card" style={{ height: '100%' }}>
-                <div className="ec-card-header">
-                  <div className="ec-card-title">
-                    <Clock size={18} />
-                    {selectedCalDay
-                      ? new Date(selectedCalDay + 'T00:00:00').toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' })
-                      : `Сегодня, ${todayLabel}`}
+      {activeTab === 'attendance' && (() => {
+        // Показываемые события: выбранный день или сегодня
+        const showDate = selectedCalDay || new Date().toISOString().slice(0, 10);
+        const showEvents = selectedCalDay ? selectedDayEvents : todayEvents.filter(e => !e.access_point || !internalPoints.has(e.access_point)).sort((a, b) => a.event_time.localeCompare(b.event_time));
+        const dayLabel = selectedCalDay
+          ? new Date(selectedCalDay + 'T00:00:00').toLocaleDateString('ru-RU', { weekday: 'short', day: 'numeric', month: 'long' })
+          : `Сегодня, ${todayLabel}`;
+
+        // Расчёт часов для показываемого дня
+        const workCalc = (() => {
+          if (showEvents.length === 0) return null;
+          let total = 0;
+          let entry: number | null = null;
+          for (const ev of showEvents) {
+            const [h, m, s = 0] = ev.event_time.split(':').map(Number);
+            const sec = h * 3600 + m * 60 + s;
+            if (ev.direction === 'entry') { if (entry === null) entry = sec; }
+            else if (ev.direction === 'exit' && entry !== null) { total += sec - entry; entry = null; }
+          }
+          const todayStr = new Date().toISOString().slice(0, 10);
+          if (entry !== null && showDate === todayStr) {
+            const now = new Date();
+            const nowSec = now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds();
+            if (nowSec > entry) total += nowSec - entry;
+          }
+          const h = Math.floor(total / 3600);
+          const m = Math.floor((total % 3600) / 60);
+          return `${h}ч ${m}м`;
+        })();
+
+        const firstEntry = showEvents.find(e => e.direction === 'entry')?.event_time?.slice(0, 5) || null;
+        const lastExit = [...showEvents].reverse().find(e => e.direction === 'exit')?.event_time?.slice(0, 5) || null;
+
+        return (
+          <div className="ec-grid">
+            <div style={{ display: 'flex', gap: 16, alignItems: 'stretch' }}>
+              <div style={{ flex: '0 0 50%', minWidth: 0 }}>
+                <AttendanceCalendar
+                  days={attendance.days}
+                  month={calMonth}
+                  year={calYear}
+                  onPrevMonth={prevMonth}
+                  onNextMonth={nextMonth}
+                  onDayClick={handleDayClick}
+                />
+              </div>
+              <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+                <div className="ec-card" style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+                  <div className="ec-card-header">
+                    <div className="ec-card-title">
+                      <Clock size={18} />
+                      {dayLabel}
+                    </div>
                   </div>
-                  {selectedDayWork && (
-                    <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--color-success, #22c55e)' }}>
-                      {selectedDayWork.hours}ч {selectedDayWork.minutes}м
+                  {/* Статистика дня */}
+                  {workCalc && (
+                    <div style={{ display: 'flex', gap: 12, padding: '8px 16px', borderBottom: '1px solid var(--border)' }}>
+                      {firstEntry && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 13 }}>
+                          <LogIn size={14} style={{ color: 'var(--color-success, #22c55e)' }} />
+                          <span style={{ color: 'var(--color-success, #22c55e)', fontWeight: 600 }}>{firstEntry}</span>
+                        </div>
+                      )}
+                      {lastExit && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 13 }}>
+                          <LogOut size={14} style={{ color: 'var(--color-danger, #ef4444)' }} />
+                          <span style={{ color: 'var(--color-danger, #ef4444)', fontWeight: 600 }}>{lastExit}</span>
+                        </div>
+                      )}
+                      <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--color-success, #22c55e)', marginLeft: 'auto' }}>
+                        {workCalc}
+                      </div>
                     </div>
                   )}
-                </div>
-                {(selectedCalDay ? selectedDayEvents : todayTimeline).length > 0 ? (
-                  <div className="ec-timeline">
-                    {selectedCalDay ? (
-                      selectedDayEvents.map((ev, i) => {
-                        const isInternal = ev.access_point && internalPoints.has(ev.access_point);
-                        if (isInternal) return null;
-                        return (
-                          <div key={i} className="ec-tl-item">
-                            <div className={`ec-tl-icon ${ev.direction === 'entry' ? 'in' : 'out'}`}>
-                              {ev.direction === 'entry' ? <LogIn size={16} /> : <LogOut size={16} />}
-                            </div>
-                            <div className="ec-tl-content">
-                              <div className="ec-tl-title">{ev.direction === 'entry' ? 'Вход' : 'Выход'}</div>
-                              <div className="ec-tl-meta">{ev.access_point || ''}</div>
-                            </div>
-                            <div className="ec-tl-time">{ev.event_time.slice(0, 5)}</div>
-                          </div>
-                        );
-                      })
-                    ) : (
-                      todayTimeline.map(ev => (
-                        <div key={ev.id} className="ec-tl-item">
+                  {showEvents.length > 0 ? (
+                    <div className="ec-timeline" style={{ flex: 1, overflowY: 'auto' }}>
+                      {showEvents.map((ev, i) => (
+                        <div key={i} className="ec-tl-item">
                           <div className={`ec-tl-icon ${ev.direction === 'entry' ? 'in' : 'out'}`}>
                             {ev.direction === 'entry' ? <LogIn size={16} /> : <LogOut size={16} />}
                           </div>
                           <div className="ec-tl-content">
                             <div className="ec-tl-title">{ev.direction === 'entry' ? 'Вход' : 'Выход'}</div>
-                            <div className="ec-tl-meta">{ev.accessPoint || ''}</div>
+                            <div className="ec-tl-meta">{ev.access_point || ''}</div>
                           </div>
-                          <div className="ec-tl-time">{ev.time}</div>
+                          <div className="ec-tl-time">{ev.event_time.slice(0, 5)}</div>
                         </div>
-                      ))
-                    )}
-                  </div>
-                ) : (
-                  <div className="ec-tl-empty">{selectedCalDay ? 'Нет событий за этот день' : 'Нет событий за сегодня'}</div>
-                )}
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="ec-tl-empty" style={{ flex: 1 }}>Нет событий</div>
+                  )}
+                </div>
               </div>
             </div>
+            <EmployeeCardSidebar
+              weeklyPattern={periodData.weeklyPattern}
+              alerts={attendance.alerts}
+              employee={employee}
+            />
           </div>
-          <EmployeeCardSidebar
-            weeklyPattern={periodData.weeklyPattern}
-            alerts={attendance.alerts}
-            employee={employee}
-          />
-        </div>
-      )}
+        );
+      })()}
 
       {activeTab === 'info' && (
         <div className="ec-tab-content-full">

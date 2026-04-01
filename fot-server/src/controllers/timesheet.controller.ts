@@ -227,7 +227,8 @@ export const timesheetController = {
       }
 
       // Helper: calculate total ms from entry/exit pairs
-      const calcTodayStr = new Date().toISOString().slice(0, 10);
+      const nowLocal = new Date();
+      const calcTodayStr = `${nowLocal.getFullYear()}-${String(nowLocal.getMonth() + 1).padStart(2, '0')}-${String(nowLocal.getDate()).padStart(2, '0')}`;
       const calcPairMs = (evts: IRawEvent[]): number => {
         let total = 0;
         let entry: number | null = null;
