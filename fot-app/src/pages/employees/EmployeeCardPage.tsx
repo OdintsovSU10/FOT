@@ -15,7 +15,7 @@ import { EmployeeSkudSection } from '../../components/employees/EmployeeSkudSect
 import { AttendanceCalendar } from '../../components/employees/AttendanceCalendar';
 import { EmployeeCardSidebar } from '../../components/employees/EmployeeCardSidebar';
 import {
-  calculateAttendance, getTodayTimeline, isEmployeeOnSite, computePeriodData,
+  calculateAttendance, isEmployeeOnSite, computePeriodData,
 } from '../../utils/attendanceCalc';
 import type { Employee, EmployeeInput, EmployeeHistoryEvent, OrgDepartmentNode, SkudEvent } from '../../types';
 import '../../styles/EmployeeCardPage.css';
@@ -158,7 +158,6 @@ export const EmployeeCardPage: FC = () => {
     () => calculateAttendance(skudEvents, internalPoints, calYear, calMonth),
     [skudEvents, internalPoints, calYear, calMonth],
   );
-  const todayTimeline = useMemo(() => getTodayTimeline(todayEvents), [todayEvents]);
   const onSite = useMemo(() => isEmployeeOnSite(todayEvents, internalPoints), [todayEvents, internalPoints]);
 
   // Period-filtered stats + weekly pattern
@@ -189,29 +188,6 @@ export const EmployeeCardPage: FC = () => {
       .filter(e => e.event_date === selectedCalDay)
       .sort((a, b) => a.event_time.localeCompare(b.event_time));
   }, [skudEvents, selectedCalDay]);
-
-  const selectedDayWork = useMemo(() => {
-    if (selectedDayEvents.length === 0) return null;
-    const ext = selectedDayEvents.filter(e => !e.access_point || !internalPoints.has(e.access_point));
-    const src = ext.length > 0 ? ext : selectedDayEvents;
-    let total = 0;
-    let entry: number | null = null;
-    for (const ev of src) {
-      const [h, m, s = 0] = ev.event_time.split(':').map(Number);
-      const sec = h * 3600 + m * 60 + s;
-      if (ev.direction === 'entry') { if (entry === null) entry = sec; }
-      else if (ev.direction === 'exit' && entry !== null) { total += sec - entry; entry = null; }
-    }
-    const todayStr = new Date().toISOString().slice(0, 10);
-    if (entry !== null && selectedCalDay === todayStr) {
-      const now = new Date();
-      const nowSec = now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds();
-      if (nowSec > entry) total += nowSec - entry;
-    }
-    const h = Math.floor(total / 3600);
-    const m = Math.floor((total % 3600) / 60);
-    return { hours: h, minutes: m, totalSeconds: total };
-  }, [selectedDayEvents, internalPoints, selectedCalDay]);
 
   // Actions
   const startEditing = () => {
