@@ -4,7 +4,7 @@ import { useAuth } from './AuthContext';
 import { useToast } from './ToastContext';
 import { wsService } from '../services/websocket';
 import { useChat } from '../hooks/useChat';
-import type { IChatMessage } from '../services/chatService';
+import type { IChatConversation, IChatMessage } from '../services/chatService';
 
 interface IChatContextType {
   isOpen: boolean;
