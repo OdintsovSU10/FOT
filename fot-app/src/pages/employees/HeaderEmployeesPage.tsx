@@ -140,6 +140,7 @@ export const HeaderEmployeesPage: FC = () => {
           selectedEmps={new Set()}
           presenceMap={presenceMap}
           canEdit={true}
+          showMove={false}
           onEmpClick={handleEmpClick}
           onToggleSelection={() => {}}
           onFire={handleFire}

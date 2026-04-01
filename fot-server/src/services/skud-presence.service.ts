@@ -188,6 +188,18 @@ export async function getPresence(params: IPresenceParams): Promise<IPresenceIte
     const empEvents = allExternalEvents.get(emp.id) || [];
     const { exit_count, time_outside_minutes } = computeExitMetrics(empEvents);
 
+    // Если сотрудник на месте (online) и total_hours = 0 или null — считаем от first_entry до сейчас
+    let totalHours = summary?.total_hours || null;
+    if (status === 'online' && summary?.first_entry && (!totalHours || totalHours === 0)) {
+      const [fh, fm, fs] = summary.first_entry.split(':').map(Number);
+      const entryMs = (fh * 3600 + fm * 60 + (fs || 0)) * 1000;
+      const now = new Date();
+      const nowMs = (now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds()) * 1000;
+      if (nowMs > entryMs) {
+        totalHours = (nowMs - entryMs) / 3_600_000;
+      }
+    }
+
     return {
       employee_id: emp.id,
       full_name: emp.full_name || '',
@@ -196,7 +208,7 @@ export async function getPresence(params: IPresenceParams): Promise<IPresenceIte
       status,
       since,
       first_entry: summary?.first_entry || null,
-      total_hours: summary?.total_hours || null,
+      total_hours: totalHours,
       exit_count,
       time_outside_minutes,
       last_access_point: last?.access_point || null,

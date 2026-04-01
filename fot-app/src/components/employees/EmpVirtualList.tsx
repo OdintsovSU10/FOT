@@ -27,6 +27,7 @@ interface IEmpVirtualListProps {
   selectedEmps: Set<number>;
   presenceMap: Map<number, IEmployeePresence>;
   canEdit: boolean;
+  showMove?: boolean;
   onEmpClick: (emp: Employee) => void;
   onToggleSelection: (id: number, e: React.MouseEvent) => void;
   onFire: (emp: Employee, e: React.MouseEvent) => void;
@@ -35,7 +36,7 @@ interface IEmpVirtualListProps {
 }
 
 export const EmpVirtualList: FC<IEmpVirtualListProps> = ({
-  employees, loading, selectedEmps, presenceMap, canEdit,
+  employees, loading, selectedEmps, presenceMap, canEdit, showMove = true,
   onEmpClick, onToggleSelection, onFire, onRehire, onMove,
 }) => {
   const listRef = useRef<HTMLDivElement>(null);
@@ -118,9 +119,11 @@ export const EmpVirtualList: FC<IEmpVirtualListProps> = ({
                   <button className="ep-action-btn dismiss" onClick={e => onFire(emp, e)}>
                     Уволить
                   </button>
-                  <button className="ep-action-btn move" onClick={e => onMove(emp.id, e)}>
-                    Переместить
-                  </button>
+                  {showMove && (
+                    <button className="ep-action-btn move" onClick={e => onMove(emp.id, e)}>
+                      Переместить
+                    </button>
+                  )}
                 </div>
               )}
               {emp.employment_status === 'fired' && (

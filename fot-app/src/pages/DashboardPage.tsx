@@ -80,6 +80,13 @@ export const DashboardPage: React.FC = () => {
   const [deptSearchQuery, setDeptSearchQuery] = useState('');
   const deptDropdownRef = useRef<HTMLDivElement>(null);
 
+  // Для header: сразу ставим отдел в URL без ожидания загрузки структуры
+  useEffect(() => {
+    if (isHeaderOnly && profile?.department_id && !searchParams.get('dept')) {
+      setSearchParams({ dept: profile.department_id }, { replace: true });
+    }
+  }, [isHeaderOnly, profile?.department_id]); // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => {
     apiClient.get<{ success: boolean; data: { departments: IDbDepartment[] } }>('/structure')
       .then(res => {
@@ -87,14 +94,9 @@ export const DashboardPage: React.FC = () => {
         const collator = new Intl.Collator('ru', { sensitivity: 'base', ignorePunctuation: true });
         const flat = flattenDbTree(departments).sort((a, b) => collator.compare(a.name.trim(), b.name.trim()));
         setDeptOptions(flat);
-
-        // Для header: автоматически выбираем его отдел
-        if (isHeaderOnly && profile?.department_id && !selectedDeptId) {
-          setSearchParams({ dept: profile.department_id }, { replace: true });
-        }
       })
       .catch(() => {});
-  }, [isHeaderOnly, profile?.department_id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
