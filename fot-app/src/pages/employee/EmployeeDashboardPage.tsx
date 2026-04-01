@@ -18,11 +18,38 @@ const timeToMinutes = (t: string): number => {
   return h * 60 + m;
 };
 
+const timeToSeconds = (t: string): number => {
+  const [h, m, s = 0] = t.split(':').map(Number);
+  return h * 3600 + m * 60 + s;
+};
+
 const toLocalISO = (d: Date): string => {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, '0');
   const day = String(d.getDate()).padStart(2, '0');
   return `${y}-${m}-${day}`;
+};
+
+/** Парный расчёт entry/exit с фильтром внутренних точек и учётом «на работе сейчас» */
+const calcPairMinutes = (events: SkudEvent[], internalPoints: Set<string>, isToday: boolean): number => {
+  const ext = events.filter(e => !e.access_point || !internalPoints.has(e.access_point));
+  const sorted = ext.length > 0 ? ext : events;
+  let total = 0;
+  let entry: number | null = null;
+  for (const ev of sorted) {
+    if (ev.direction === 'entry') {
+      if (entry === null) entry = timeToSeconds(ev.event_time);
+    } else if (ev.direction === 'exit' && entry !== null) {
+      total += timeToSeconds(ev.event_time) - entry;
+      entry = null;
+    }
+  }
+  if (entry !== null && isToday) {
+    const now = new Date();
+    const nowSec = now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds();
+    if (nowSec > entry) total += nowSec - entry;
+  }
+  return Math.round(total / 60);
 };
 
 const DAY_NAMES = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
@@ -37,7 +64,7 @@ interface DayAttendance {
   isWeekend: boolean;
 }
 
-const buildWeekAttendance = (events: SkudEvent[], startDate: string): DayAttendance[] => {
+const buildWeekAttendance = (events: SkudEvent[], startDate: string, internalPoints: Set<string>): DayAttendance[] => {
   const start = new Date(startDate + 'T00:00:00');
   const todayStr = toLocalISO(new Date());
   const result: DayAttendance[] = [];
@@ -50,11 +77,13 @@ const buildWeekAttendance = (events: SkudEvent[], startDate: string): DayAttenda
       .filter((e) => e.event_date === dateStr)
       .sort((a, b) => a.event_time.localeCompare(b.event_time));
 
-    const firstEntry = dayEvents.length > 0 ? dayEvents[0].event_time : null;
-    const lastExit = dayEvents.length > 1 ? dayEvents[dayEvents.length - 1].event_time : null;
-    const totalMinutes = firstEntry && lastExit
-      ? Math.max(0, timeToMinutes(lastExit) - timeToMinutes(firstEntry))
-      : 0;
+    const ext = dayEvents.filter(e => !e.access_point || !internalPoints.has(e.access_point));
+    const src = ext.length > 0 ? ext : dayEvents;
+    const entries = src.filter(e => e.direction === 'entry');
+    const exits = src.filter(e => e.direction === 'exit');
+    const firstEntry = entries.length > 0 ? entries[0].event_time : null;
+    const lastExit = exits.length > 0 ? exits[exits.length - 1].event_time : null;
+    const totalMinutes = calcPairMinutes(dayEvents, internalPoints, dateStr === todayStr);
 
     result.push({
       date: dateStr, dayName: DAY_NAMES[i], firstEntry, lastExit, totalMinutes,
@@ -173,7 +202,7 @@ export const EmployeeDashboardPage: React.FC = () => {
   }, [viewPeriod, periodRange.startDate]);
 
   const weekData = useMemo(
-    () => buildWeekAttendance(skudEvents, viewPeriod === 'week' ? periodRange.startDate : weekStartDate),
+    () => buildWeekAttendance(skudEvents, viewPeriod === 'week' ? periodRange.startDate : weekStartDate, internalPoints),
     [skudEvents, viewPeriod, periodRange.startDate, weekStartDate]
   );
 
@@ -185,11 +214,16 @@ export const EmployeeDashboardPage: React.FC = () => {
   }, [skudEvents, viewPeriod, periodRange.startDate]);
 
   const dayData = useMemo(() => {
-    const first = dayEvents.length > 0 ? dayEvents[0].event_time : null;
-    const last = dayEvents.length > 1 ? dayEvents[dayEvents.length - 1].event_time : null;
-    const totalMinutes = first && last ? Math.max(0, timeToMinutes(last) - timeToMinutes(first)) : 0;
+    const ext = dayEvents.filter(e => !e.access_point || !internalPoints.has(e.access_point));
+    const src = ext.length > 0 ? ext : dayEvents;
+    const entries = src.filter(e => e.direction === 'entry');
+    const exits = src.filter(e => e.direction === 'exit');
+    const first = entries.length > 0 ? entries[0].event_time : null;
+    const last = exits.length > 0 ? exits[exits.length - 1].event_time : null;
+    const dateStr = viewPeriod === 'day' ? periodRange.startDate : toLocalISO(new Date());
+    const totalMinutes = calcPairMinutes(dayEvents, internalPoints, dateStr === toLocalISO(new Date()));
     return { firstEntry: first, lastExit: last, totalMinutes };
-  }, [dayEvents]);
+  }, [dayEvents, internalPoints, viewPeriod, periodRange.startDate]);
 
   const monthDays = useMemo(() => {
     if (viewPeriod !== 'month') return [];
@@ -202,10 +236,13 @@ export const EmployeeDashboardPage: React.FC = () => {
       const dayEvts = skudEvents
         .filter(e => e.event_date === dateStr)
         .sort((a, b) => a.event_time.localeCompare(b.event_time));
-      const firstEntry = dayEvts.length > 0 ? dayEvts[0].event_time : null;
-      const lastExit = dayEvts.length > 1 ? dayEvts[dayEvts.length - 1].event_time : null;
-      const totalMinutes = firstEntry && lastExit
-        ? Math.max(0, timeToMinutes(lastExit) - timeToMinutes(firstEntry)) : 0;
+      const ext = dayEvts.filter(e => !e.access_point || !internalPoints.has(e.access_point));
+      const src = ext.length > 0 ? ext : dayEvts;
+      const entries = src.filter(e => e.direction === 'entry');
+      const exits = src.filter(e => e.direction === 'exit');
+      const firstEntry = entries.length > 0 ? entries[0].event_time : null;
+      const lastExit = exits.length > 0 ? exits[exits.length - 1].event_time : null;
+      const totalMinutes = calcPairMinutes(dayEvts, internalPoints, dateStr === todayStr);
       const dow = d.getDay() === 0 ? 6 : d.getDay() - 1;
       days.push({ date: dateStr, dayName: DAY_NAMES[dow], firstEntry, lastExit, totalMinutes, isToday: dateStr === todayStr, isWeekend: dow >= 5 });
     }

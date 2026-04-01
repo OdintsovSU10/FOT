@@ -50,7 +50,12 @@ const formatDuration = (seconds: number): string => {
   return `${h}ч ${m}м`;
 };
 
-const calcPairSeconds = (evts: SkudEvent[]): number => {
+const todayISO = (): string => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+
+const calcPairSeconds = (evts: SkudEvent[], dateStr?: string): number => {
   let total = 0;
   let entry: number | null = null;
   for (const ev of evts) {
@@ -60,6 +65,12 @@ const calcPairSeconds = (evts: SkudEvent[]): number => {
       total += timeToSeconds(ev.event_time) - entry;
       entry = null;
     }
+  }
+  // Открытый вход (на работе сейчас) — считаем до текущего времени
+  if (entry !== null && dateStr === todayISO()) {
+    const now = new Date();
+    const nowSec = now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds();
+    if (nowSec > entry) total += nowSec - entry;
   }
   return total;
 };
@@ -80,9 +91,9 @@ const groupEventsByDay = (events: SkudEvent[], internalPoints: Set<string>): Map
     const extEvents = dayEvents.filter(e => !e.access_point || !internalPoints.has(e.access_point));
 
     // Calculate from external events; fallback to all if external gives 0
-    let totalSeconds = calcPairSeconds(extEvents);
+    let totalSeconds = calcPairSeconds(extEvents, date);
     if (totalSeconds === 0 && dayEvents.length > 0) {
-      totalSeconds = calcPairSeconds(dayEvents);
+      totalSeconds = calcPairSeconds(dayEvents, date);
     }
 
     const srcEvents = extEvents.length > 0 ? extEvents : dayEvents;
@@ -190,7 +201,7 @@ export const TimesheetSidePanel: FC<ISidePanelProps> = ({
     for (const entry of entries) {
       if (entry.hours_worked) factHours += entry.hours_worked;
       if (entry.status === 'absent') absentCount++;
-      if (entry.status === 'work' && entry.hours_worked && entry.hours_worked < 8) lateCount++;
+      if (entry.status === 'work' && entry.first_entry && entry.first_entry > '09:00:00') lateCount++;
     }
 
     return { factHours, normHours, lateCount, absentCount };
