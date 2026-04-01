@@ -1,108 +1,59 @@
+import { io, Socket } from 'socket.io-client';
+
 type MessageHandler = (payload: unknown) => void;
 
-interface WSMessage {
-  type: string;
-  payload: unknown;
-}
-
 class WebSocketService {
-  private ws: WebSocket | null = null;
-  private listeners: Map<string, Set<MessageHandler>> = new Map();
-  private reconnectAttempts = 0;
-  private maxReconnectAttempts = 5;
-  private reconnectDelay = 1000;
+  private socket: Socket | null = null;
   private token: string | null = null;
-  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-  private intentionalClose = false;
 
   connect(token: string): void {
+    if (this.socket?.connected) {
+      this.socket.disconnect();
+    }
+
     this.token = token;
-    this.intentionalClose = false;
-    this.createConnection();
-  }
 
-  private createConnection(): void {
-    if (!this.token) return;
-
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
-    // Extract host from API URL: "http://localhost:3000/api" -> "localhost:3000"
     const url = new URL(apiUrl);
-    const host = url.host;
+    const baseUrl = `${url.protocol}//${url.host}`;
 
-    this.ws = new WebSocket(`${protocol}//${host}/api/ws?token=${this.token}`);
-
-    this.ws.onopen = () => {
-      this.reconnectAttempts = 0;
-    };
-
-    this.ws.onmessage = (event) => {
-      try {
-        const msg: WSMessage = JSON.parse(event.data);
-        const handlers = this.listeners.get(msg.type);
-        if (handlers) {
-          handlers.forEach((handler) => handler(msg.payload));
-        }
-      } catch {
-        // ignore non-JSON messages
-      }
-    };
-
-    this.ws.onclose = () => {
-      if (this.intentionalClose) return;
-      this.scheduleReconnect();
-    };
-
-    this.ws.onerror = () => {
-      // onclose will fire after onerror
-    };
+    this.socket = io(baseUrl, {
+      auth: { token },
+      transports: ['websocket'],
+      reconnection: true,
+      reconnectionAttempts: 5,
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 16000,
+    });
   }
 
-  private scheduleReconnect(): void {
-    if (this.reconnectAttempts >= this.maxReconnectAttempts) return;
-    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
-
-    const delay = this.reconnectDelay * Math.pow(2, this.reconnectAttempts);
-    this.reconnectAttempts++;
-
-    this.reconnectTimer = setTimeout(() => {
-      this.createConnection();
-    }, delay);
-  }
-
-  send(type: string, payload: unknown): void {
-    if (this.ws?.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify({ type, payload }));
+  send(type: string, payload: unknown, callback?: (response: unknown) => void): void {
+    if (!this.socket?.connected) return;
+    if (callback) {
+      this.socket.emit(type, payload, callback);
+    } else {
+      this.socket.emit(type, payload);
     }
   }
 
   on(type: string, callback: MessageHandler): () => void {
-    if (!this.listeners.has(type)) {
-      this.listeners.set(type, new Set());
-    }
-    this.listeners.get(type)!.add(callback);
-
+    if (!this.socket) return () => {};
+    this.socket.on(type, callback);
     return () => {
-      this.listeners.get(type)?.delete(callback);
+      this.socket?.off(type, callback);
     };
   }
 
   disconnect(): void {
-    this.intentionalClose = true;
-    if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer);
-      this.reconnectTimer = null;
-    }
     this.token = null;
-    this.reconnectAttempts = 0;
-    if (this.ws) {
-      this.ws.close();
-      this.ws = null;
+    if (this.socket) {
+      this.socket.disconnect();
+      this.socket = null;
     }
   }
 
   get connected(): boolean {
-    return this.ws?.readyState === WebSocket.OPEN;
+    return this.socket?.connected ?? false;
   }
 }
 

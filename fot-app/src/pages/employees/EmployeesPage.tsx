@@ -117,22 +117,22 @@ export const EmployeesPage: FC = () => {
     } catch { /* ignore */ }
   }, []);
 
-  const loadPresence = useCallback(async (deptId: string | null) => {
-    if (!deptId) {
-      setPresenceMap(new Map());
-      return;
-    }
+  const loadPresence = useCallback(async () => {
     try {
-      const data = await skudService.getPresence(deptId);
+      const data = await skudService.getPresence(selectedDeptId ?? undefined);
       const map = new Map<number, IEmployeePresence>();
       data.forEach(p => map.set(p.employee_id, p));
       setPresenceMap(map);
     } catch { /* ignore */ }
-  }, []);
+  }, [selectedDeptId]);
 
   useEffect(() => { loadPage(); }, [loadPage]);
   useEffect(() => { loadDepartments(); }, [loadDepartments]);
-  useEffect(() => { loadPresence(selectedDeptId); }, [selectedDeptId, loadPresence]);
+  useEffect(() => {
+    loadPresence();
+    const interval = setInterval(loadPresence, 30_000);
+    return () => clearInterval(interval);
+  }, [loadPresence]);
 
   // Department employee counts from server
   const deptCounts = useMemo(() => {

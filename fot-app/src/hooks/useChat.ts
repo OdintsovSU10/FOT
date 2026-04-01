@@ -33,7 +33,7 @@ export const useChat = (ws: typeof wsService | null) => {
       const data = await chatService.getMessages(conversationId);
       setMessages(data.reverse()); // API returns newest first, we want oldest first
       await chatService.markAsRead(conversationId);
-      ws?.send('mark_read', { conversation_id: conversationId });
+      ws?.send('mark_read', conversationId);
     } catch {
       // ignore
     } finally {
@@ -45,28 +45,36 @@ export const useChat = (ws: typeof wsService | null) => {
   const selectConversation = useCallback(async (conversationId: string) => {
     // Leave previous
     if (activeConvRef.current) {
-      ws?.send('leave_conversation', { conversation_id: activeConvRef.current });
+      ws?.send('leave_conversation', activeConvRef.current);
     }
 
     setActiveConversationId(conversationId);
-    ws?.send('join_conversation', { conversation_id: conversationId });
+    ws?.send('join_conversation', conversationId);
     await loadMessages(conversationId);
     await loadConversations(); // refresh unread counts
   }, [ws, loadMessages, loadConversations]);
 
-  // Send message
+  // Send message via socket (fallback to REST)
   const sendMessage = useCallback(async (content: string) => {
     if (!activeConvRef.current || !content.trim()) return;
 
-    try {
-      const message = await chatService.sendMessage(activeConvRef.current, content);
-      setMessages(prev => [...prev, message]);
-      // WebSocket will broadcast to others
-      await loadConversations();
-    } catch {
-      // ignore
+    if (ws?.connected) {
+      ws.send('send_message', {
+        conversationId: activeConvRef.current,
+        content: content.trim(),
+      });
+      // Message will arrive via 'new_message' event
+    } else {
+      // Fallback to REST
+      try {
+        const message = await chatService.sendMessage(activeConvRef.current, content);
+        setMessages(prev => [...prev, message]);
+        await loadConversations();
+      } catch {
+        // ignore
+      }
     }
-  }, [loadConversations]);
+  }, [ws, loadConversations]);
 
   // Start new conversation
   const startConversation = useCallback(async (participantId: string) => {

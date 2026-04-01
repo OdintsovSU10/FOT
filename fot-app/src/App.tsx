@@ -2,6 +2,9 @@ import { lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { ToastProvider } from './contexts/ToastContext';
+import { ChatProvider } from './contexts/ChatContext';
+import { ChatButton } from './components/chat/ChatButton';
+import { ChatSidePanel } from './components/chat/ChatSidePanel';
 import { ProtectedRoute, PublicRoute } from './components/auth/ProtectedRoute';
 import { Layout } from './components/layout/Layout';
 import { EmployeeLayout } from './components/layout/EmployeeLayout';
@@ -45,7 +48,6 @@ const ProfilePage = lazy(() => import('./pages/profile/ProfilePage').then(m => (
 
 // Employee portal
 const EmployeeDashboardPage = lazy(() => import('./pages/employee/EmployeeDashboardPage').then(m => ({ default: m.EmployeeDashboardPage })));
-const ChatPage = lazy(() => import('./pages/employee/ChatPage').then(m => ({ default: m.ChatPage })));
 const LeaveRequestsPage = lazy(() => import('./pages/employee/LeaveRequestsPage').then(m => ({ default: m.LeaveRequestsPage })));
 const PayslipsPage = lazy(() => import('./pages/employee/PayslipsPage').then(m => ({ default: m.PayslipsPage })));
 const PaymentsPage = lazy(() => import('./pages/employee/PaymentsPage').then(m => ({ default: m.PaymentsPage })));
@@ -125,14 +127,6 @@ const AppRoutes = () => {
             element={
               <EmployeeLayout title="Личный кабинет">
                 <EmployeeDashboardPage />
-              </EmployeeLayout>
-            }
-          />
-          <Route
-            path="/employee/chat"
-            element={
-              <EmployeeLayout title="Сообщения">
-                <ChatPage />
               </EmployeeLayout>
             }
           />
@@ -344,7 +338,11 @@ const App = () => {
     <BrowserRouter>
       <AuthProvider>
         <ToastProvider>
-          <AppRoutes />
+          <ChatProvider>
+            <AppRoutes />
+            <ChatButton />
+            <ChatSidePanel />
+          </ChatProvider>
         </ToastProvider>
       </AuthProvider>
     </BrowserRouter>

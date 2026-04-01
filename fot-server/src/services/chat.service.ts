@@ -1,4 +1,5 @@
 import { supabase } from '../config/database.js';
+import { encryptionService } from './encryption.service.js';
 
 export interface IChatConversation {
   id: string;
@@ -18,6 +19,21 @@ export interface IChatMessage {
   is_read: boolean;
   created_at: string;
 }
+
+/**
+ * Расшифровать контент или вернуть как есть (для старых незашифрованных сообщений)
+ */
+const decryptOrPassthrough = (content: string): string => {
+  // Encrypted format: hex:hex:hex (iv:authTag:encrypted)
+  if (/^[0-9a-f]+:[0-9a-f]+:[0-9a-f]+$/i.test(content)) {
+    try {
+      return encryptionService.decrypt(content);
+    } catch {
+      return content;
+    }
+  }
+  return content;
+};
 
 export const chatService = {
   /**
@@ -55,7 +71,7 @@ export const chatService = {
   },
 
   /**
-   * Отправить сообщение
+   * Отправить сообщение (шифрует контент перед сохранением)
    */
   async sendMessage(conversationId: string, senderId: string, content: string): Promise<IChatMessage> {
     // Проверяем что отправитель — участник
@@ -70,12 +86,15 @@ export const chatService = {
       throw new Error('Not a participant of this conversation');
     }
 
+    const plainContent = content.trim();
+    const encryptedContent = encryptionService.encrypt(plainContent);
+
     const { data: message, error } = await supabase
       .from('chat_messages')
       .insert({
         conversation_id: conversationId,
         sender_id: senderId,
-        content: content.trim(),
+        content: encryptedContent,
       })
       .select('*')
       .single();
@@ -90,11 +109,12 @@ export const chatService = {
       .update({ updated_at: new Date().toISOString() })
       .eq('id', conversationId);
 
-    return message as IChatMessage;
+    // Возвращаем с расшифрованным контентом для socket broadcast
+    return { ...message, content: plainContent } as IChatMessage;
   },
 
   /**
-   * Получить сообщения диалога
+   * Получить сообщения диалога (расшифровывает контент)
    */
   async getMessages(conversationId: string, userId: string, limit = 50, offset = 0): Promise<IChatMessage[]> {
     // Проверяем участие
@@ -118,7 +138,10 @@ export const chatService = {
 
     if (error) throw new Error('Failed to fetch messages');
 
-    return (data || []) as IChatMessage[];
+    return (data || []).map(msg => ({
+      ...msg,
+      content: decryptOrPassthrough(msg.content),
+    })) as IChatMessage[];
   },
 
   /**
@@ -189,7 +212,10 @@ export const chatService = {
           created_at: conv.created_at,
           updated_at: conv.updated_at,
           participants,
-          last_message: lastMsg || null,
+          last_message: lastMsg ? {
+            ...lastMsg,
+            content: decryptOrPassthrough(lastMsg.content),
+          } : null,
           unread_count: unreadCount || 0,
         };
       })
@@ -241,12 +267,13 @@ export const chatService = {
       .from('user_profiles')
       .select('id, full_name')
       .eq('organization_id', organizationId)
+      .eq('is_approved', true)
       .neq('id', currentUserId)
       .order('full_name', { ascending: true })
-      .limit(20);
+      .limit(50);
 
-    if (query && query.length >= 2) {
-      dbQuery = dbQuery.ilike('full_name', `%${query}%`);
+    if (query && query.trim()) {
+      dbQuery = dbQuery.ilike('full_name', `%${query.trim()}%`);
     }
 
     const { data } = await dbQuery;
