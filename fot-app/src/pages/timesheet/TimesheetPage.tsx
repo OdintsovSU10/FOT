@@ -357,6 +357,7 @@ export const TimesheetPage: FC = () => {
         initialStatus={modalEntry?.status || 'work'}
         initialHours={modalEntry?.hours_worked}
         dayLabel={`${formatDateRu(modalDay, month)}`}
+        employeeName={modalEmployee?.full_name}
         employeeId={modalEmployee?.id}
         workDate={`${year}-${String(month).padStart(2, '0')}-${String(modalDay).padStart(2, '0')}`}
       />

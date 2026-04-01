@@ -227,6 +227,7 @@ export const timesheetController = {
       }
 
       // Helper: calculate total ms from entry/exit pairs
+      const calcTodayStr = new Date().toISOString().slice(0, 10);
       const calcPairMs = (evts: IRawEvent[]): number => {
         let total = 0;
         let entry: number | null = null;
@@ -238,6 +239,14 @@ export const timesheetController = {
           } else if (evt.direction === 'exit' && entry !== null) {
             total += ms - entry;
             entry = null;
+          }
+        }
+        // Если остался открытый вход (сотрудник на месте) и это сегодня — считаем до текущего времени
+        if (entry !== null && evts.length > 0 && evts[0].event_date === calcTodayStr) {
+          const now = new Date();
+          const nowMs = (now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds()) * 1000;
+          if (nowMs > entry) {
+            total += nowMs - entry;
           }
         }
         return total;

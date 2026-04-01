@@ -10,6 +10,7 @@ interface ICorrectionModalProps {
   initialStatus?: TimesheetStatus;
   initialHours?: number | null;
   dayLabel?: string;
+  employeeName?: string;
   employeeId?: number;
   workDate?: string;
 }
@@ -227,16 +228,26 @@ const ModalContent: FC<Omit<ICorrectionModalProps, 'open'>> = ({
   initialStatus = 'work',
   initialHours = 8,
   dayLabel,
+  employeeName,
   employeeId,
   workDate,
 }) => {
   const [tab, setTab] = useState<ModalTab>('events');
+
+  // Формат "Голотин Д.С." из полного ФИО
+  const shortName = employeeName ? (() => {
+    const parts = employeeName.trim().split(/\s+/);
+    if (parts.length >= 3) return `${parts[0]} ${parts[1][0]}.${parts[2][0]}.`;
+    if (parts.length === 2) return `${parts[0]} ${parts[1][0]}.`;
+    return parts[0];
+  })() : null;
 
   return (
     <div className="ts-modal" onClick={e => e.stopPropagation()}>
       <div className="ts-modal-header">
         <h3 className="ts-modal-title">
           {dayLabel || 'День'}
+          {shortName && <div style={{ fontSize: 13, fontWeight: 400, color: 'var(--text-secondary)', marginTop: 2 }}>{shortName}</div>}
         </h3>
         <button className="ts-panel-close" onClick={onClose}>
           <X size={18} />
