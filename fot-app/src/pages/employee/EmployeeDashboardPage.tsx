@@ -13,11 +13,6 @@ import styles from './EmployeeDashboard.module.css';
 type RequestType = 'vacation' | 'sick' | 'remote' | 'docs';
 type ViewPeriod = 'day' | 'week' | 'month';
 
-const timeToMinutes = (t: string): number => {
-  const [h, m] = t.split(':').map(Number);
-  return h * 60 + m;
-};
-
 const timeToSeconds = (t: string): number => {
   const [h, m, s = 0] = t.split(':').map(Number);
   return h * 3600 + m * 60 + s;

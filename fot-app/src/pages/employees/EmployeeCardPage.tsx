@@ -82,7 +82,7 @@ export const EmployeeCardPage: FC = () => {
   const [editData, setEditData] = useState<Partial<EmployeeInput>>({});
   const [statsPeriod, setStatsPeriod] = useState<StatsPeriod>('month');
   const [skudFocusDate, setSkudFocusDate] = useState<string | null>(urlDate || null);
-  const [skudFocusKey, setSkudFocusKey] = useState(urlDate ? 1 : 0);
+  const [skudFocusKey] = useState(urlDate ? 1 : 0);
 
   // Calendar month — если есть urlDate, начинаем с его месяца
   const now = new Date();
