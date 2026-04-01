@@ -1,10 +1,12 @@
 import { useState, useEffect, useCallback, type FC } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Search } from 'lucide-react';
+import { Search, ChevronLeft, ChevronRight } from 'lucide-react';
 import { employeeService } from '../../services/employeeService';
 import type { PaginatedMeta } from '../../services/employeeService';
+import { skudService } from '../../services/skudService';
 import { useAuth } from '../../contexts/AuthContext';
-import type { Employee } from '../../types';
+import { EmpVirtualList } from '../../components/employees/EmpVirtualList';
+import type { Employee, IEmployeePresence } from '../../types';
 import '../../styles/EmployeesPage.css';
 
 const PAGE_SIZE = 50;
@@ -15,20 +17,22 @@ export const HeaderEmployeesPage: FC = () => {
   const departmentId = profile?.department_id || null;
 
   const [employees, setEmployees] = useState<Employee[]>([]);
+  const [presenceMap, setPresenceMap] = useState<Map<number, IEmployeePresence>>(new Map());
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [page, setPage] = useState(1);
   const [meta, setMeta] = useState<PaginatedMeta>({ page: 1, pageSize: PAGE_SIZE, total: 0, totalPages: 0 });
+  const [activeTab, setActiveTab] = useState<'all' | 'fired'>('all');
+  const [error, setError] = useState('');
 
   // Debounce search
   useEffect(() => {
-    const timer = setTimeout(() => setDebouncedSearch(search), 300);
+    const timer = setTimeout(() => { setDebouncedSearch(search); setPage(1); }, 300);
     return () => clearTimeout(timer);
   }, [search]);
 
-  // Reset page on search change
-  useEffect(() => { setPage(1); }, [debouncedSearch]);
+  useEffect(() => { setPage(1); }, [activeTab]);
 
   const loadEmployees = useCallback(async () => {
     setLoading(true);
@@ -37,7 +41,7 @@ export const HeaderEmployeesPage: FC = () => {
         page,
         pageSize: PAGE_SIZE,
         search: debouncedSearch || undefined,
-        status: 'active',
+        status: activeTab === 'fired' ? 'fired' : 'active',
         departmentId: departmentId || undefined,
       });
       setEmployees(res.data);
@@ -47,63 +51,111 @@ export const HeaderEmployeesPage: FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [page, debouncedSearch, departmentId]);
+  }, [page, debouncedSearch, departmentId, activeTab]);
+
+  const loadPresence = useCallback(async () => {
+    try {
+      const data = await skudService.getPresence(departmentId ?? undefined);
+      const map = new Map<number, IEmployeePresence>();
+      data.forEach(p => map.set(p.employee_id, p));
+      setPresenceMap(map);
+    } catch { /* ignore */ }
+  }, [departmentId]);
 
   useEffect(() => { loadEmployees(); }, [loadEmployees]);
+  useEffect(() => {
+    loadPresence();
+    const interval = setInterval(loadPresence, 30_000);
+    return () => clearInterval(interval);
+  }, [loadPresence]);
 
-  const getInitials = (name: string) => {
-    const parts = name.split(' ');
-    return parts.length >= 2 ? (parts[0][0] + parts[1][0]).toUpperCase() : name.slice(0, 2).toUpperCase();
+  const handleEmpClick = (emp: Employee) => navigate(`/tender/${emp.id}`);
+
+  const handleFire = async (emp: Employee, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!confirm(`Уволить ${emp.full_name}?`)) return;
+    try {
+      await employeeService.fire(emp.id);
+      loadEmployees();
+    } catch { setError('Ошибка увольнения'); }
   };
 
+  const handleRehire = async (emp: Employee, e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      await employeeService.rehire(emp.id);
+      loadEmployees();
+    } catch { setError('Ошибка восстановления'); }
+  };
+
+  const canPrev = page > 1;
+  const canNext = page < meta.totalPages;
+
   return (
-    <div className="emp-page">
-      <div className="emp-page__header">
-        <h1 className="emp-page__title">Сотрудники</h1>
-        <span className="emp-page__count">{meta.total} чел.</span>
-      </div>
-
-      <div className="emp-page__toolbar">
-        <div className="emp-search-wrap">
-          <Search size={16} className="emp-search-icon" />
-          <input
-            className="emp-search-input"
-            type="text"
-            placeholder="Поиск по ФИО..."
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-          />
+    <div className="employees-page" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      <div className="ep-emp-panel" style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+        <div className="ep-emp-header">
+          <div className="ep-emp-title">
+            <h2>Сотрудники</h2>
+            <span className="ep-emp-count">{meta.total} чел.</span>
+          </div>
+          <div className="ep-emp-tabs">
+            <button
+              className={`ep-tab ${activeTab === 'all' ? 'active' : ''}`}
+              onClick={() => setActiveTab('all')}
+            >
+              Все
+            </button>
+            <button
+              className={`ep-tab ${activeTab === 'fired' ? 'active' : ''}`}
+              onClick={() => setActiveTab('fired')}
+            >
+              Уволенные
+            </button>
+          </div>
         </div>
-      </div>
 
-      <div className="emp-page__content" style={{ padding: 0 }}>
-        {loading ? (
-          <div className="emp-loading">Загрузка...</div>
-        ) : employees.length === 0 ? (
-          <div className="emp-loading">Нет сотрудников</div>
-        ) : (
-          <div className="header-emp-list">
-            {employees.map(emp => (
-              <div
-                key={emp.id}
-                className="header-emp-row"
-                onClick={() => navigate(`/tender/${emp.id}`)}
-              >
-                <div className="header-emp-avatar">{getInitials(emp.full_name)}</div>
-                <div className="header-emp-info">
-                  <div className="header-emp-name">{emp.full_name}</div>
-                  <div className="header-emp-position">{emp.position_name || '—'}</div>
-                </div>
-              </div>
-            ))}
+        <div className="ep-emp-toolbar">
+          <div className="ep-toolbar-search">
+            <Search size={15} />
+            <input
+              type="text"
+              placeholder="Поиск по имени..."
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+            />
+          </div>
+        </div>
+
+        {error && (
+          <div className="ep-error">
+            {error}
+            <button onClick={() => setError('')}>×</button>
           </div>
         )}
 
+        <EmpVirtualList
+          employees={employees}
+          loading={loading}
+          selectedEmps={new Set()}
+          presenceMap={presenceMap}
+          canEdit={true}
+          onEmpClick={handleEmpClick}
+          onToggleSelection={() => {}}
+          onFire={handleFire}
+          onRehire={handleRehire}
+          onMove={() => {}}
+        />
+
         {meta.totalPages > 1 && (
-          <div className="emp-pagination">
-            <button disabled={page <= 1} onClick={() => setPage(p => p - 1)} className="emp-pagination__btn">Назад</button>
-            <span className="emp-pagination__info">{page} / {meta.totalPages}</span>
-            <button disabled={page >= meta.totalPages} onClick={() => setPage(p => p + 1)} className="emp-pagination__btn">Далее</button>
+          <div className="ep-pagination">
+            <button className="ep-pagination-btn" disabled={!canPrev} onClick={() => setPage(p => p - 1)}>
+              <ChevronLeft size={16} />
+            </button>
+            <span className="ep-pagination-info">{meta.page} / {meta.totalPages}</span>
+            <button className="ep-pagination-btn" disabled={!canNext} onClick={() => setPage(p => p + 1)}>
+              <ChevronRight size={16} />
+            </button>
           </div>
         )}
       </div>
