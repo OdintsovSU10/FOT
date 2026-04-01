@@ -4,14 +4,11 @@ type MessageHandler = (payload: unknown) => void;
 
 class WebSocketService {
   private socket: Socket | null = null;
-  private token: string | null = null;
 
   connect(token: string): void {
     if (this.socket?.connected) {
       this.socket.disconnect();
     }
-
-    this.token = token;
 
     const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
     const url = new URL(apiUrl);
@@ -45,7 +42,6 @@ class WebSocketService {
   }
 
   disconnect(): void {
-    this.token = null;
     if (this.socket) {
       this.socket.disconnect();
       this.socket = null;
