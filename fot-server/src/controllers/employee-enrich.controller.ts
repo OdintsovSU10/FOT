@@ -4,7 +4,6 @@ import { supabase } from '../config/database.js';
 import { auditService } from '../services/audit.service.js';
 import { parseDate } from '../utils/date.utils.js';
 import { parseFIO } from '../utils/fio.utils.js';
-import { getOrgId } from '../utils/org.utils.js';
 import type { AuthenticatedRequest } from '../types/index.js';
 
 interface MulterRequest extends AuthenticatedRequest {
@@ -103,8 +102,6 @@ function parseEnrichExcel(buffer: Buffer): ParsedRow[] {
 export const employeeEnrichController = {
   async enrich(req: MulterRequest, res: Response): Promise<void> {
     try {
-      let organizationId = getOrgId(req);
-
       if (!req.file) {
         res.status(400).json({ success: false, error: 'File is required' });
         return;
@@ -123,21 +120,7 @@ export const employeeEnrichController = {
         return;
       }
 
-      // Для super_admin без организации — определяем из первого сотрудника
-      if (!organizationId) {
-        const { data: firstEmp } = await supabase
-          .from('employees')
-          .select('organization_id')
-          .limit(1)
-          .single();
-        organizationId = firstEmp?.organization_id;
-        if (!organizationId) {
-          res.status(400).json({ success: false, error: 'Нет сотрудников в системе' });
-          return;
-        }
-      }
-
-      // Загружаем всех сотрудников организации (пагинация для >1000)
+      // Загружаем всех сотрудников (пагинация для >1000)
       const dbEmployees: Array<{ id: number; full_name: string; [k: string]: unknown }> = [];
       const PAGE_SIZE = 1000;
       let from = 0;
@@ -145,7 +128,6 @@ export const employeeEnrichController = {
         const { data, error: empError } = await supabase
           .from('employees')
           .select('id, full_name, country, hire_date, position_id, org_department_id, tab_number, current_status, permit_expiry_date, registration_cat1, registration_cat4, doc_receipt_date, work_object')
-          .eq('organization_id', organizationId)
           .eq('is_archived', false)
           .range(from, from + PAGE_SIZE - 1);
 
@@ -179,7 +161,6 @@ export const employeeEnrichController = {
       const { data: positions } = await supabase
         .from('positions')
         .select('id, name')
-        .eq('organization_id', organizationId)
         .eq('is_active', true);
 
       const posNameToId = new Map<string, string>();
@@ -289,7 +270,6 @@ export const employeeEnrichController = {
       // 1. Создаём недостающие позиции
       if (newPositions.size > 0) {
         const posInserts = Array.from(newPositions).map(name => ({
-          organization_id: organizationId,
           name,
           is_active: true,
           sort_order: 0,
@@ -297,7 +277,7 @@ export const employeeEnrichController = {
 
         const { data: createdPos } = await supabase
           .from('positions')
-          .upsert(posInserts, { onConflict: 'organization_id,name', ignoreDuplicates: true })
+          .upsert(posInserts, { onConflict: 'name', ignoreDuplicates: true })
           .select('id, name');
 
         for (const p of (createdPos || [])) {

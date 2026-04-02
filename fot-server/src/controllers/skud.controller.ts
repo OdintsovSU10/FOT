@@ -2,7 +2,6 @@ import { Response } from 'express';
 import { supabase } from '../config/database.js';
 import { sigurService } from '../services/sigur.service.js';
 import { formatDateToISO } from '../utils/date.utils.js';
-import { getOrgId } from '../utils/org.utils.js';
 import type { AuthenticatedRequest } from '../types/index.js';
 
 import { getDashboardStats } from '../services/skud-dashboard.service.js';
@@ -23,7 +22,6 @@ const skudReadController = {
    */
   async getDashboardStats(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
-      const organizationId = getOrgId(req);
       const departmentId = req.user.position_type === 'header' && req.user.department_id
         ? req.user.department_id
         : (typeof req.query.department_id === 'string' ? req.query.department_id : null);
@@ -34,7 +32,7 @@ const skudReadController = {
         return;
       }
 
-      const data = await getDashboardStats({ organizationId, departmentId, period });
+      const data = await getDashboardStats({ departmentId, period });
       res.json({ success: true, data });
     } catch (error) {
       console.error('getDashboardStats error:', error);
@@ -47,7 +45,6 @@ const skudReadController = {
    */
   async getDailySummary(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
-      const organizationId = getOrgId(req);
       const { date } = req.query;
 
       if (!date || typeof date !== 'string') {
@@ -67,9 +64,7 @@ const skudReadController = {
         .lte('date', endStr)
         .order('date');
 
-      if (organizationId) query = query.eq('organization_id', organizationId);
-
-      const syncFilter = await getSyncFilteredEmployees(organizationId);
+      const syncFilter = await getSyncFilteredEmployees();
       if (syncFilter) {
         const { empIds: allowedIds } = syncFilter;
         if (allowedIds.size > 0) {
@@ -113,32 +108,21 @@ const skudReadController = {
       }
 
       const { startDate, endDate } = req.query;
-      const organizationId = getOrgId(req);
 
-      const isSelfRequest = req.user.position_type === 'worker' &&
-        req.user.employee_id !== null &&
-        req.user.employee_id === employeeId;
-
-      let empQuery = supabase.from('employees').select('full_name, organization_id').eq('id', employeeId);
-      if (organizationId && !isSelfRequest) empQuery = empQuery.eq('organization_id', organizationId);
-      const { data: empData, error: empError } = await empQuery.single();
+      const { data: empData, error: empError } = await supabase.from('employees').select('full_name').eq('id', employeeId).single();
       console.log(`[employee-events] empData=`, JSON.stringify(empData), `empError=`, empError?.message);
 
-      const effectiveOrgId = isSelfRequest
-        ? (empData?.organization_id || organizationId || undefined)
-        : (organizationId || empData?.organization_id || undefined);
-
-      const byId = await queryEventsByEmployeeId(employeeId, effectiveOrgId, startDate, endDate);
-      console.log(`[employee-events] id=${employeeId} byId=${byId.length} orgId=${effectiveOrgId} dates=${startDate as string}..${endDate as string}`);
+      const byId = await queryEventsByEmployeeId(employeeId, startDate, endDate);
+      console.log(`[employee-events] id=${employeeId} byId=${byId.length} dates=${startDate as string}..${endDate as string}`);
 
       let byName: Record<string, unknown>[] = [];
-      if (empData?.full_name && effectiveOrgId) {
+      if (empData?.full_name) {
         const employeeName = empData.full_name.toLowerCase().trim();
         console.log(`[employee-events] searching by name: "${employeeName}"`);
-        byName = await searchAndBackfillByName(employeeId, employeeName, effectiveOrgId, startDate, endDate);
+        byName = await searchAndBackfillByName(employeeId, employeeName, startDate, endDate);
         console.log(`[employee-events] byName=${byName.length}`);
       } else {
-        console.log(`[employee-events] skip name search: empData=${!!empData} orgId=${effectiveOrgId}`);
+        console.log(`[employee-events] skip name search: empData=${!!empData}`);
       }
 
       const seenIds = new Set(byId.map((e: Record<string, unknown>) => e.id));
@@ -169,7 +153,6 @@ const skudReadController = {
    */
   async getEvents(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
-      const organizationId = getOrgId(req);
       const { startDate, endDate, accessPoint, employeeId, search } = req.query;
       const searchStr = typeof search === 'string' ? search.trim().toLowerCase() : '';
 
@@ -181,13 +164,12 @@ const skudReadController = {
 
       query = query.limit(searchStr ? 10000 : 1000);
 
-      if (organizationId) query = query.eq('organization_id', organizationId);
       if (startDate && typeof startDate === 'string') query = query.gte('event_date', startDate);
       if (endDate && typeof endDate === 'string') query = query.lte('event_date', endDate);
       if (accessPoint && typeof accessPoint === 'string') query = query.eq('access_point', accessPoint);
       if (employeeId && typeof employeeId === 'string') query = query.eq('employee_id', parseInt(employeeId, 10));
 
-      const syncFilter = await getSyncFilteredEmployees(organizationId);
+      const syncFilter = await getSyncFilteredEmployees();
       if (syncFilter) {
         const { empIds: allowedIds } = syncFilter;
         if (allowedIds.size > 0) {
@@ -239,7 +221,7 @@ const skudReadController = {
   /**
    * GET /api/skud/access-points
    */
-  async getAccessPoints(req: AuthenticatedRequest, res: Response): Promise<void> {
+  async getAccessPoints(_req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
       if (sigurService.isConfigured()) {
         try {
@@ -255,20 +237,18 @@ const skudReadController = {
         }
       }
 
-      const organizationId = getOrgId(req);
-      const cacheKey = organizationId || '__all__';
+      const cacheKey = '__all__';
       const cached = getAccessPointCacheEntry(cacheKey);
       if (cached) {
         res.json({ success: true, data: cached });
         return;
       }
 
-      let query = supabase
+      const query = supabase
         .from('skud_events')
         .select('access_point')
         .not('access_point', 'is', null)
         .limit(5000);
-      if (organizationId) query = query.eq('organization_id', organizationId);
 
       const { data, error } = await query;
       if (error) {
@@ -292,23 +272,12 @@ const skudReadController = {
    */
   async getAccessPointSettings(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
-      let organizationId = getOrgId(req);
-      let departmentId = typeof req.query.department_id === 'string' ? req.query.department_id : null;
-
-      if (!organizationId) {
-        const { data: orgs } = await supabase.from('organizations').select('id').limit(1);
-        organizationId = orgs?.[0]?.id;
-      }
+      const departmentId = typeof req.query.department_id === 'string' ? req.query.department_id : null;
 
       if (!departmentId) {
-        if (!organizationId) {
-          res.json({ success: true, data: [] });
-          return;
-        }
         const { data, error } = await supabase
           .from('skud_access_point_settings')
-          .select('access_point_name, is_internal')
-          .eq('organization_id', organizationId);
+          .select('access_point_name, is_internal');
 
         if (error) {
           console.error('Get access point settings error:', error);
@@ -324,16 +293,10 @@ const skudReadController = {
         return;
       }
 
-      if (!organizationId) {
-        const { data: dept } = await supabase.from('org_departments').select('organization_id').eq('id', departmentId).maybeSingle();
-        organizationId = dept?.organization_id;
-      }
-
-      let query = supabase
+      const query = supabase
         .from('skud_access_point_settings')
         .select('access_point_name, is_internal')
         .eq('department_id', departmentId);
-      if (organizationId) query = query.eq('organization_id', organizationId);
 
       const { data, error } = await query;
       if (error) {
@@ -359,27 +322,15 @@ const skudReadController = {
    */
   async getOrganizations(_req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
-      const { data: rows, error } = await supabase
-        .from('skud_events')
-        .select('organization_id')
-        .not('organization_id', 'is', null);
+      const { data: orgs, error } = await supabase
+        .from('organizations')
+        .select('id, name')
+        .order('name');
 
       if (error) {
         res.status(500).json({ success: false, error: error.message });
         return;
       }
-
-      const uniqueOrgIds = [...new Set((rows || []).map(r => r.organization_id))];
-      if (uniqueOrgIds.length === 0) {
-        res.json({ success: true, data: [] });
-        return;
-      }
-
-      const { data: orgs } = await supabase
-        .from('organizations')
-        .select('id, name')
-        .in('id', uniqueOrgIds)
-        .order('name');
 
       res.json({ success: true, data: orgs || [] });
     } catch (error) {
@@ -393,7 +344,6 @@ const skudReadController = {
    */
   async getDisciplineViolations(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
-      const organizationId = getOrgId(req);
       const fallbackMonth = formatDateToISO(new Date()).slice(0, 7);
       const startMonth = (req.query.startMonth as string) || (req.query.month as string) || fallbackMonth;
       const endMonth = (req.query.endMonth as string) || startMonth;
@@ -404,7 +354,7 @@ const skudReadController = {
         return;
       }
 
-      const data = await getDisciplineViolations({ organizationId, startMonth, endMonth });
+      const data = await getDisciplineViolations({ startMonth, endMonth });
       res.json({ success: true, data });
     } catch (error) {
       console.error('getDisciplineViolations error:', error);
@@ -417,12 +367,11 @@ const skudReadController = {
    */
   async getPresence(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
-      const organizationId = getOrgId(req);
       const departmentId = req.user.position_type === 'header' && req.user.department_id
         ? req.user.department_id
         : (typeof req.query.department_id === 'string' ? req.query.department_id : null);
 
-      const data = await getPresence({ organizationId, departmentId });
+      const data = await getPresence({ departmentId });
       res.json({ success: true, data });
     } catch (error) {
       console.error('Get presence error:', error);

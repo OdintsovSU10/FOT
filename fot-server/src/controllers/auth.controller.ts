@@ -19,7 +19,6 @@ const registerSchema = z.object({
   email: z.string().email(),
   password: z.string().min(8),
   full_name: z.string().min(2, 'Введите ФИО'),
-  organization_id: z.string().uuid().optional(),
 });
 
 const forgotPasswordSchema = z.object({
@@ -56,7 +55,6 @@ export function generateToken(
   const payload: Omit<JWTPayload, 'iat' | 'exp'> = {
     sub: profile.id,
     email,
-    organization_id: profile.organization_id,
     position_type: profile.position_type,
     employee_id: profile.employee_id,
     department_id: departmentId,
@@ -73,7 +71,7 @@ export function generateToken(
  */
 async function register(req: Request, res: Response): Promise<void> {
   try {
-    const { email, password, full_name, organization_id } = registerSchema.parse(req.body);
+    const { email, password, full_name } = registerSchema.parse(req.body);
 
     const { data: authData, error: authError } = await supabase.auth.admin.createUser({
       email,
@@ -94,7 +92,6 @@ async function register(req: Request, res: Response): Promise<void> {
     const { error: profileError } = await supabase.from('user_profiles').insert({
       id: authData.user.id,
       full_name,
-      organization_id: organization_id || null,
       position_type: 'worker',
       is_approved: false,
       two_factor_enabled: false,
@@ -203,7 +200,6 @@ async function login(req: Request, res: Response): Promise<void> {
           full_name: profile.full_name,
           position_type: positionType,
           imported_position: profile.imported_position,
-          organization_id: profile.organization_id,
           is_approved: profile.is_approved,
           two_factor_enabled: profile.two_factor_enabled,
         },
@@ -232,7 +228,6 @@ async function login(req: Request, res: Response): Promise<void> {
         employee_id: profile.employee_id,
         department_id: departmentId,
         supervisor_id: profile.supervisor_id,
-        organization_id: profile.organization_id,
         is_approved: profile.is_approved,
         two_factor_enabled: profile.two_factor_enabled,
       },
@@ -423,7 +418,6 @@ async function getMe(req: AuthenticatedRequest, res: Response): Promise<void> {
         employee_id: profile.employee_id,
         department_id: departmentId,
         supervisor_id: profile.supervisor_id,
-        organization_id: profile.organization_id,
         is_approved: profile.is_approved,
         two_factor_enabled: profile.two_factor_enabled,
         created_at: profile.created_at,

@@ -3,7 +3,6 @@ import { encryptionService } from './encryption.service.js';
 
 export interface IChatConversation {
   id: string;
-  organization_id: string;
   created_at: string;
   updated_at: string;
   participants: { user_id: string; full_name: string | null }[];
@@ -39,7 +38,7 @@ export const chatService = {
   /**
    * Получить или создать диалог между двумя пользователями
    */
-  async getOrCreateConversation(userId1: string, userId2: string, organizationId: string): Promise<string> {
+  async getOrCreateConversation(userId1: string, userId2: string): Promise<string> {
     // Ищем существующий диалог между этими двумя пользователями
     const { data: existing } = await supabase
       .rpc('find_direct_conversation', { user1: userId1, user2: userId2 });
@@ -51,7 +50,7 @@ export const chatService = {
     // Создаём новый диалог
     const { data: conv, error: convError } = await supabase
       .from('chat_conversations')
-      .insert({ organization_id: organizationId })
+      .insert({})
       .select('id')
       .single();
 
@@ -208,7 +207,6 @@ export const chatService = {
 
         return {
           id: conv.id,
-          organization_id: conv.organization_id,
           created_at: conv.created_at,
           updated_at: conv.updated_at,
           participants,
@@ -260,49 +258,14 @@ export const chatService = {
   },
 
   /**
-   * Определить эффективную организацию пользователя через employee → org
-   */
-  async resolveOrganizationId(userId: string, fallbackOrgId: string | null): Promise<string | null> {
-    const { data: profile } = await supabase
-      .from('user_profiles')
-      .select('employee_id')
-      .eq('id', userId)
-      .single();
-
-    if (profile?.employee_id) {
-      const { data: emp } = await supabase
-        .from('employees')
-        .select('organization_id')
-        .eq('id', profile.employee_id)
-        .single();
-      if (emp?.organization_id) return emp.organization_id;
-    }
-
-    return fallbackOrgId;
-  },
-
-  /**
    * Поиск пользователей для начала диалога
-   * Организация определяется через отдел сотрудника (employee → organization)
    */
-  async searchUsers(query: string, organizationId: string, currentUserId: string): Promise<{ id: string; full_name: string | null }[]> {
-    // Определяем организацию через employee
-    const effectiveOrgId = await this.resolveOrganizationId(currentUserId, organizationId);
-    if (!effectiveOrgId) return [];
-
-    // Находим всех employees этой организации
-    const { data: orgEmployees } = await supabase
-      .from('employees')
-      .select('id')
-      .eq('organization_id', effectiveOrgId);
-
-    const employeeIds = (orgEmployees || []).map(e => e.id);
-
-    // Ищем user_profiles: либо напрямую в организации, либо привязанные к employees этой организации
+  async searchUsers(query: string, currentUserId: string): Promise<{ id: string; full_name: string | null }[]> {
     let dbQuery = supabase
       .from('user_profiles')
-      .select('id, full_name, employee_id, organization_id')
+      .select('id, full_name')
       .neq('id', currentUserId)
+      .eq('is_approved', true)
       .order('full_name', { ascending: true })
       .limit(50);
 
@@ -312,12 +275,6 @@ export const chatService = {
 
     const { data } = await dbQuery;
 
-    // Фильтруем: user_profiles.organization_id совпадает ИЛИ employee_id в списке employees организации
-    const filtered = (data || []).filter(u =>
-      u.organization_id === effectiveOrgId ||
-      (u.employee_id && employeeIds.includes(u.employee_id))
-    );
-
-    return filtered.map(u => ({ id: u.id, full_name: u.full_name }));
+    return (data || []).map(u => ({ id: u.id, full_name: u.full_name }));
   },
 };

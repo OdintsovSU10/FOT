@@ -39,7 +39,6 @@ export interface ISyncEventsResult {
 // ─── Чистая функция синхронизации ───
 
 export async function syncEventsLogic(
-  organizationId: string,
   startDate: string,
   endDate: string,
   connection?: 'external' | 'internal',
@@ -56,26 +55,25 @@ export async function syncEventsLogic(
   // 1. Загружаем сотрудников
   const { data: employeesData } = await supabase
     .from('employees')
-    .select('id, organization_id, full_name, sigur_employee_id')
+    .select('id, full_name, sigur_employee_id')
     .eq('is_archived', false);
 
-  const employeeByNameOrg = new Map<string, { id: number; organization_id: string }>();
-  const sigurIdMap = new Map<number, { id: number; organization_id: string }>();
+  const employeeByName = new Map<string, { id: number }>();
+  const sigurIdMap = new Map<number, { id: number }>();
   for (const emp of employeesData || []) {
     const name = normalizePersonName(emp.full_name || '');
-    const empRef = { id: emp.id, organization_id: emp.organization_id };
-    const key = `${name}|${emp.organization_id}`;
-    if (!employeeByNameOrg.has(key)) employeeByNameOrg.set(key, empRef);
+    const empRef = { id: emp.id };
+    if (!employeeByName.has(name)) employeeByName.set(name, empRef);
     if (emp.sigur_employee_id != null) sigurIdMap.set(emp.sigur_employee_id, empRef);
   }
 
   // 2. Whitelist
-  const whitelist = await getWhitelistedDepartmentIdsCached(organizationId, context);
+  const whitelist = await getWhitelistedDepartmentIdsCached(context);
   let allowedNames: Set<string> | null = null;
   let allowedSigurIds: Set<number> | null = null;
 
   if (whitelist) {
-    const dbWhitelistSets = await getWhitelistedDbEmployeeSets(organizationId, whitelist);
+    const dbWhitelistSets = await getWhitelistedDbEmployeeSets(whitelist);
     if (dbWhitelistSets && (dbWhitelistSets.allowedNames.size > 0 || dbWhitelistSets.allowedSigurIds.size > 0)) {
       allowedNames = dbWhitelistSets.allowedNames;
       allowedSigurIds = dbWhitelistSets.allowedSigurIds;
@@ -86,7 +84,7 @@ export async function syncEventsLogic(
       console.log('[syncEvents] whitelist DB cache is empty, falling back to Sigur employees');
       let whitelistCache = context?.whitelistedSigurEmployees || null;
       if (!whitelistCache) {
-        const sigurEmployees = await getWhitelistedSigurEmployees(organizationId, connection, context, send);
+        const sigurEmployees = await getWhitelistedSigurEmployees(connection, context, send);
         whitelistCache = buildWhitelistedEmployeesCache(sigurEmployees);
         if (context) {
           context.whitelistedSigurEmployees = whitelistCache;
@@ -232,7 +230,7 @@ export async function syncEventsLogic(
       if (emp) {
         matchedBySigurId++;
       } else {
-        emp = employeeByNameOrg.get(`${nameKey}|${organizationId}`);
+        emp = employeeByName.get(nameKey);
         if (emp) matchedByName++;
       }
       if (emp) {
@@ -241,11 +239,8 @@ export async function syncEventsLogic(
         unmatchedEvents++;
         unmatchedNames.set(personName, (unmatchedNames.get(personName) || 0) + 1);
       }
-      const orgId = emp?.organization_id || organizationId;
-      if (!orgId) { totalNoOrg++; continue; }
 
       dayInserts.push({
-        organization_id: orgId,
         physical_person: personName,
         card_number: mapped.cardNumber || null,
         event_date: mapped.eventDate,
@@ -256,7 +251,7 @@ export async function syncEventsLogic(
         dedup_hash: dedupHash,
       });
 
-      if (emp) summariesToUpdate.add(`${emp.id}:${orgId}:${mapped.eventDate}`);
+      if (emp) summariesToUpdate.add(`${emp.id}:${mapped.eventDate}`);
     }
 
     // Вставка батчами с паузами (защита от 502 на облачном Supabase)
@@ -286,8 +281,8 @@ export async function syncEventsLogic(
   if (summariesToUpdate.size > 0) {
     send({ type: 'events_summaries', count: summariesToUpdate.size });
     const allPairs = [...summariesToUpdate].map(key => {
-      const [empId, orgId, date] = key.split(':');
-      return { org_id: orgId, emp_id: parseInt(empId, 10), date };
+      const [empId, date] = key.split(':');
+      return { emp_id: parseInt(empId, 10), date };
     });
     const SUMMARY_BATCH = 200;
     for (let i = 0; i < allPairs.length; i += SUMMARY_BATCH) {

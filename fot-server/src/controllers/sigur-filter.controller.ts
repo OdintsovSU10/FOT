@@ -7,34 +7,11 @@ export const sigurFilterController = {
    * GET /api/sigur/sync-filter
    * Возвращает текущий whitelist отделов для синхронизации
    */
-  async getFilter(req: AuthenticatedRequest, res: Response): Promise<void> {
+  async getFilter(_req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
-      const orgId = req.user.organization_id || req.query.organization_id;
-      if (!orgId) {
-        const { data: orgs } = await supabase.from('organizations').select('id').limit(1);
-        if (!orgs?.[0]?.id) {
-          res.status(400).json({ success: false, error: 'organization_id обязателен' });
-          return;
-        }
-        const fallbackOrgId = orgs[0].id;
-        const { data, error } = await supabase
-          .from('skud_sync_department_filter')
-          .select('id, sigur_department_id, sigur_department_name, created_at')
-          .eq('organization_id', fallbackOrgId)
-          .order('sigur_department_name');
-
-        if (error) {
-          res.status(500).json({ success: false, error: error.message });
-          return;
-        }
-        res.json({ success: true, data: data || [] });
-        return;
-      }
-
       const { data, error } = await supabase
         .from('skud_sync_department_filter')
         .select('id, sigur_department_id, sigur_department_name, created_at')
-        .eq('organization_id', orgId as string)
         .order('sigur_department_name');
 
       if (error) {
@@ -54,16 +31,6 @@ export const sigurFilterController = {
    */
   async updateFilter(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
-      let orgId = req.user.organization_id || req.body.organization_id;
-      if (!orgId) {
-        const { data: orgs } = await supabase.from('organizations').select('id').limit(1);
-        orgId = orgs?.[0]?.id || null;
-      }
-      if (!orgId) {
-        res.status(400).json({ success: false, error: 'organization_id обязателен' });
-        return;
-      }
-
       const { departments } = req.body as {
         departments: Array<{ sigur_department_id: number; sigur_department_name: string }>;
       };
@@ -72,11 +39,11 @@ export const sigurFilterController = {
         return;
       }
 
-      // Удаляем все текущие записи для этой организации
+      // Удаляем все текущие записи
       const { error: deleteError } = await supabase
         .from('skud_sync_department_filter')
         .delete()
-        .eq('organization_id', orgId);
+        .neq('id', '00000000-0000-0000-0000-000000000000');
 
       if (deleteError) {
         res.status(500).json({ success: false, error: deleteError.message });
@@ -86,7 +53,6 @@ export const sigurFilterController = {
       // Вставляем новые записи
       if (departments.length > 0) {
         const rows = departments.map(d => ({
-          organization_id: orgId,
           sigur_department_id: d.sigur_department_id,
           sigur_department_name: d.sigur_department_name || null,
         }));

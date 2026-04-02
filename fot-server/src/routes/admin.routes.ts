@@ -14,7 +14,6 @@ router.post('/users/:id/reject', requireMinPosition('admin'), adminController.re
 router.delete('/users/:id', requireSuperAdmin, adminController.deleteUser);
 router.post('/users/:id/confirm-email', requireMinPosition('admin'), adminController.confirmUserEmail);
 router.patch('/users/:id/position', requireMinPosition('admin'), adminController.updateUserPosition);
-router.patch('/users/:id/organization', requireSuperAdmin, adminController.assignOrganization);
 router.patch('/users/:id/name', requireMinPosition('admin'), adminController.updateUserName);
 router.patch('/users/:id/employee', requireMinPosition('admin'), adminController.updateUserEmployee);
 router.patch('/users/:id/department', requireMinPosition('admin'), adminController.updateEmployeeDepartment);
@@ -25,12 +24,6 @@ router.post('/users/:id/disable-2fa', requireSuperAdmin, adminController.disable
 
 // Поиск сотрудников (для привязки при одобрении)
 router.get('/employees/search', requireMinPosition('admin'), adminController.searchUnlinkedEmployees);
-
-// Организации — только super_admin
-router.get('/organizations', requireSuperAdmin, adminController.getOrganizations);
-router.post('/organizations', requireSuperAdmin, adminController.createOrganization);
-router.patch('/organizations/:id', requireSuperAdmin, adminController.updateOrganization);
-router.delete('/organizations/:id', requireSuperAdmin, adminController.deleteOrganization);
 
 // Аудит логи
 router.get('/audit-logs', requireSuperAdmin, adminController.getAuditLogs);

@@ -6,7 +6,6 @@ import type { JWTPayload } from '../types/index.js';
 
 interface IAuthenticatedSocket extends Socket {
   userId?: string;
-  organizationId?: string | null;
 }
 
 export const setupChatSocket = (io: Server) => {
@@ -23,7 +22,6 @@ export const setupChatSocket = (io: Server) => {
         return next(new Error('Account not approved'));
       }
       socket.userId = decoded.sub;
-      socket.organizationId = decoded.organization_id;
       next();
     } catch {
       next(new Error('Invalid token'));

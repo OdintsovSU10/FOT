@@ -4,7 +4,6 @@ import { supabase } from '../config/database.js';
 import { auditService } from '../services/audit.service.js';
 import { loadStructureCache, decryptEmployee, decryptEmployeeList } from '../services/employee-mapper.service.js';
 import { parseFIO } from '../utils/fio.utils.js';
-import { getOrgId } from '../utils/org.utils.js';
 import type { AuthenticatedRequest, EmployeeEncrypted } from '../types/index.js';
 
 // Импорт методов из подконтроллеров
@@ -39,12 +38,11 @@ export const employeesController = {
     try {
       const t0 = Date.now();
       const showArchived = req.query.archived === 'true';
-      const organizationId = req.user.organization_id;
       const departmentId = req.user.position_type === 'header' && req.user.department_id
         ? req.user.department_id
         : req.query.department_id as string | undefined;
       const isListView = req.query.view === 'list';
-      const listColumns = 'id, organization_id, full_name, position_id, email, org_department_id, employment_status, department_locked, is_archived, archived_at, created_at, updated_at';
+      const listColumns = 'id, full_name, position_id, email, org_department_id, employment_status, department_locked, is_archived, archived_at, created_at, updated_at';
 
       // --- Paginated mode ---
       const pageParam = req.query.page as string | undefined;
@@ -63,7 +61,6 @@ export const employeesController = {
           .order('full_name')
           .range(offset, offset + pageSize - 1);
 
-        if (organizationId) q = q.eq('organization_id', organizationId);
         if (departmentId) q = q.eq('org_department_id', departmentId);
         if (search) q = q.ilike('full_name', `%${search}%`);
         if (status === 'fired') q = q.eq('employment_status', 'fired');
@@ -76,7 +73,7 @@ export const employeesController = {
           return;
         }
 
-        const structureCache = await loadStructureCache(organizationId || undefined);
+        const structureCache = await loadStructureCache();
         const employees = (data || []).map(emp => decryptEmployeeList(emp as unknown as EmployeeEncrypted, structureCache));
         const total = count ?? 0;
 
@@ -85,7 +82,6 @@ export const employeesController = {
           .from('employees')
           .select('org_department_id, employment_status')
           .eq('is_archived', showArchived);
-        if (organizationId) countsQuery = countsQuery.eq('organization_id', organizationId);
 
         const { data: countRows } = await countsQuery;
         const byDepartment: Record<string, number> = {};
@@ -117,7 +113,7 @@ export const employeesController = {
       }
 
       // --- Legacy mode (без page) ---
-      console.log(`[getAll] Legacy | archived=${showArchived} org=${organizationId} dept=${departmentId} list=${isListView}`);
+      console.log(`[getAll] Legacy | archived=${showArchived} dept=${departmentId} list=${isListView}`);
       const INTERNAL_PAGE = 1000;
       let allRows: EmployeeEncrypted[] = [];
       let from = 0;
@@ -131,7 +127,6 @@ export const employeesController = {
           .order('id')
           .range(from, from + INTERNAL_PAGE - 1);
 
-        if (organizationId) q = q.eq('organization_id', organizationId);
         if (departmentId) q = q.eq('org_department_id', departmentId);
 
         const { data, error } = await q;
@@ -146,7 +141,7 @@ export const employeesController = {
         from += INTERNAL_PAGE;
       }
 
-      const structureCache = await loadStructureCache(organizationId || undefined);
+      const structureCache = await loadStructureCache();
       const decryptFn = isListView ? decryptEmployeeList : decryptEmployee;
       const employees = allRows.map(emp => decryptFn(emp, structureCache));
 
@@ -168,29 +163,15 @@ export const employeesController = {
   async getById(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
       const { id } = req.params;
-      const organizationId = req.user.organization_id;
 
-      // Worker запрашивает свои данные — не фильтруем по организации
-      const isSelfRequest = req.user.position_type === 'worker' &&
-        req.user.employee_id !== null &&
-        req.user.employee_id === parseInt(id, 10);
-
-      let q = supabase.from('employees').select('*').eq('id', id);
-      if (organizationId && !isSelfRequest) q = q.eq('organization_id', organizationId);
-
-      const employeeResult = await q.single();
+      const employeeResult = await supabase.from('employees').select('*').eq('id', id).single();
 
       if (employeeResult.error || !employeeResult.data) {
         res.status(404).json({ success: false, error: 'Employee not found' });
         return;
       }
 
-      // Для self-request используем фактический organization_id сотрудника для кэша структуры
-      const effectiveOrgId = isSelfRequest
-        ? (employeeResult.data.organization_id || organizationId || undefined)
-        : (organizationId || undefined);
-
-      const structureCache = await loadStructureCache(effectiveOrgId);
+      const structureCache = await loadStructureCache();
       const employee = decryptEmployee(employeeResult.data as EmployeeEncrypted, structureCache);
       res.json({ success: true, data: employee });
     } catch (error) {
@@ -205,17 +186,10 @@ export const employeesController = {
   async create(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
       const validated = createEmployeeSchema.parse(req.body);
-      const organizationId = getOrgId(req);
-
-      if (!organizationId) {
-        res.status(400).json({ success: false, error: 'Organization required. Super admin: передайте ?organization_id=uuid' });
-        return;
-      }
 
       const fio = parseFIO(validated.full_name);
 
       const insertData = {
-        organization_id: organizationId,
         full_name: validated.full_name,
         last_name: fio.lastName,
         first_name: fio.firstName || null,
@@ -249,7 +223,7 @@ export const employeesController = {
         entityId: String(data.id),
       });
 
-      const structureCache = await loadStructureCache(organizationId);
+      const structureCache = await loadStructureCache();
       const employee = decryptEmployee(data as EmployeeEncrypted, structureCache);
       res.status(201).json({ success: true, data: employee });
     } catch (error) {
@@ -269,18 +243,11 @@ export const employeesController = {
     try {
       const { id } = req.params;
       const validated = updateEmployeeSchema.parse(req.body);
-      const organizationId = getOrgId(req);
-
-      if (!organizationId) {
-        res.status(400).json({ success: false, error: 'Organization required. Super admin: передайте ?organization_id=uuid' });
-        return;
-      }
 
       const { data: existing } = await supabase
         .from('employees')
         .select('id')
         .eq('id', id)
-        .eq('organization_id', organizationId)
         .single();
 
       if (!existing) {
@@ -349,7 +316,7 @@ export const employeesController = {
         details: { updated_fields: Object.keys(validated) },
       });
 
-      const structureCache = await loadStructureCache(organizationId);
+      const structureCache = await loadStructureCache();
       const employee = decryptEmployee(data as EmployeeEncrypted, structureCache);
       res.json({ success: true, data: employee });
     } catch (error) {
@@ -368,18 +335,11 @@ export const employeesController = {
   async delete(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
       const { id } = req.params;
-      const organizationId = getOrgId(req);
-
-      if (!organizationId) {
-        res.status(400).json({ success: false, error: 'Organization required. Super admin: передайте ?organization_id=uuid' });
-        return;
-      }
 
       const { error } = await supabase
         .from('employees')
         .delete()
-        .eq('id', id)
-        .eq('organization_id', organizationId);
+        .eq('id', id);
 
       if (error) {
         console.error('Delete employee error:', error);

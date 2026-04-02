@@ -1,7 +1,6 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { Search, X, HardDrive, RefreshCw, AlertCircle } from 'lucide-react';
 import { skudService } from '../../services/skudService';
-import { useAuth } from '../../contexts/AuthContext';
 import type { SkudEvent, SkudDailySummary } from '../../types';
 import '../../styles/SkudSupabasePage.css';
 
@@ -35,9 +34,6 @@ const formatCellValue = (value: unknown): string => {
 };
 
 export const SkudSupabasePage: React.FC = () => {
-  const { hasPosition } = useAuth();
-  const isSuperAdmin = hasPosition('super_admin');
-
   const [activeTab, setActiveTab] = useState<TabId>('events');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -50,19 +46,9 @@ export const SkudSupabasePage: React.FC = () => {
   const [startDate, setStartDate] = useState(monthStart);
   const [endDate, setEndDate] = useState(today);
 
-  // Фильтр по организации (super_admin)
-  const [organizations, setOrganizations] = useState<{ id: string; name: string }[]>([]);
-  const [orgFilter, setOrgFilter] = useState('');
-
   // Данные
   const [events, setEvents] = useState<SkudEvent[]>([]);
   const [summary, setSummary] = useState<SkudDailySummary[]>([]);
-
-  // Загрузка организаций
-  useEffect(() => {
-    if (!isSuperAdmin) return;
-    skudService.getOrganizations().then(setOrganizations).catch(() => {});
-  }, [isSuperAdmin]);
 
   // Debounce поиска (для табa events — серверный поиск)
   const handleSearchChange = useCallback((value: string) => {
@@ -88,7 +74,6 @@ export const SkudSupabasePage: React.FC = () => {
       const data = await skudService.getEvents({
         startDate,
         endDate,
-        organizationId: orgFilter || undefined,
         search: searchQuery || undefined,
       }, controller.signal);
       setEvents(data);
@@ -99,7 +84,7 @@ export const SkudSupabasePage: React.FC = () => {
     } finally {
       if (!controller.signal.aborted) setLoading(false);
     }
-  }, [startDate, endDate, orgFilter, searchQuery, cancelLoading]);
+  }, [startDate, endDate, searchQuery, cancelLoading]);
 
   const loadSummary = useCallback(async () => {
     cancelLoading();
@@ -108,7 +93,7 @@ export const SkudSupabasePage: React.FC = () => {
     setLoading(true);
     setError(null);
     try {
-      const data = await skudService.getDailySummary(startDate, orgFilter || undefined, controller.signal);
+      const data = await skudService.getDailySummary(startDate, controller.signal);
       setSummary(data);
     } catch (err) {
       if (err instanceof DOMException && err.name === 'AbortError') return;
@@ -117,7 +102,7 @@ export const SkudSupabasePage: React.FC = () => {
     } finally {
       if (!controller.signal.aborted) setLoading(false);
     }
-  }, [startDate, orgFilter, cancelLoading]);
+  }, [startDate, cancelLoading]);
 
   const loadData = useCallback(() => {
     if (activeTab === 'events') loadEvents();
@@ -214,20 +199,6 @@ export const SkudSupabasePage: React.FC = () => {
           </label>
         </div>
 
-        {isSuperAdmin && organizations.length > 0 && (
-          <div className="skud-db-org-filter">
-            <select
-              value={orgFilter}
-              onChange={e => setOrgFilter(e.target.value)}
-              className="skud-db-org-select"
-            >
-              <option value="">Все организации</option>
-              {organizations.map(org => (
-                <option key={org.id} value={org.id}>{org.name}</option>
-              ))}
-            </select>
-          </div>
-        )}
       </div>
 
       <div className="skud-db-search-wrap">

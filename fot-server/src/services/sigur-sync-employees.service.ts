@@ -47,7 +47,6 @@ export interface ISyncEmployeesResult {
 // ─── Чистые функции синхронизации ───
 
 export async function syncPositionsFromSigurLogic(
-  organizationId: string,
   connection?: 'external' | 'internal',
   context?: ISyncContext,
 ): Promise<ISyncPositionsFromSigurResult> {
@@ -62,8 +61,7 @@ export async function syncPositionsFromSigurLogic(
 
   const { data: existingPositions } = await supabase
     .from('positions')
-    .select('id, sigur_position_id, name')
-    .eq('organization_id', organizationId);
+    .select('id, sigur_position_id, name');
 
   const sigurIdToDbId = new Map<number, string>();
   for (const p of existingPositions || []) {
@@ -99,7 +97,6 @@ export async function syncPositionsFromSigurLogic(
       const { error: insertError } = await supabase
         .from('positions')
         .insert({
-          organization_id: organizationId,
           name: name.trim(),
           sigur_position_id: sigurId,
           category: 'other',
@@ -117,7 +114,7 @@ export async function syncPositionsFromSigurLogic(
   return { imported, updated, skipped, total: sigurPositions.length, errors };
 }
 
-export async function seedPositionsLogic(organizationId: string): Promise<ISeedPositionsResult> {
+export async function seedPositionsLogic(): Promise<ISeedPositionsResult> {
   const SEED_POSITIONS = [
     { name: 'Руководитель строительства', category: 'manager', grade: 50, sort_order: 1 },
     { name: 'Начальник участка', category: 'manager', grade: 40, sort_order: 2 },
@@ -130,8 +127,7 @@ export async function seedPositionsLogic(organizationId: string): Promise<ISeedP
 
   const { data: existing } = await supabase
     .from('positions')
-    .select('id, name')
-    .eq('organization_id', organizationId);
+    .select('id, name');
 
   const existingNames = new Set<string>();
   for (const pos of existing || []) {
@@ -152,7 +148,6 @@ export async function seedPositionsLogic(organizationId: string): Promise<ISeedP
     const { error } = await supabase
       .from('positions')
       .insert({
-        organization_id: organizationId,
         name: pos.name,
         category: pos.category,
         grade: pos.grade,
@@ -171,7 +166,6 @@ export async function seedPositionsLogic(organizationId: string): Promise<ISeedP
 }
 
 export async function syncEmployeesLogic(
-  organizationId: string,
   connection?: 'external' | 'internal',
   onProgress?: (data: Record<string, unknown>) => void,
   context?: ISyncContext,
@@ -183,10 +177,10 @@ export async function syncEmployeesLogic(
   send({ type: 'employees_progress', phase: 'loading', current: 0, total: 0, percent: 0 });
 
   let sigurEmployeesRaw: Record<string, unknown>[];
-  const whitelist = await getWhitelistedDepartmentIdsCached(organizationId, context);
+  const whitelist = await getWhitelistedDepartmentIdsCached(context);
   if (whitelist) {
     console.log(`[syncEmployees] whitelist active: ${whitelist.size} departments`);
-    sigurEmployeesRaw = await getWhitelistedSigurEmployees(organizationId, connection, context, send);
+    sigurEmployeesRaw = await getWhitelistedSigurEmployees(connection, context, send);
   } else {
     sigurEmployeesRaw = await sigurService.getEmployeesCached(connection);
   }
@@ -205,15 +199,14 @@ export async function syncEmployeesLogic(
   const skippedByWhitelist = 0;
   console.log(`[syncEmployees] employees to process: ${sigurEmployees.length}`);
 
-  // Глобальный поиск по sigur_employee_id (не только в целевой org)
-  // чтобы не создавать дубли при синхронизации в другую организацию
-  const existingEmps: { id: number; sigur_employee_id: number; employment_status: string; department_locked: boolean; organization_id: string }[] = [];
+  // Глобальный поиск по sigur_employee_id
+  const existingEmps: { id: number; sigur_employee_id: number; employment_status: string; department_locked: boolean }[] = [];
   const EMP_PAGE = 1000;
   let empOffset = 0;
   while (true) {
     const { data: existingEmpsPage } = await supabase
       .from('employees')
-      .select('id, sigur_employee_id, employment_status, department_locked, organization_id')
+      .select('id, sigur_employee_id, employment_status, department_locked')
       .not('sigur_employee_id', 'is', null)
       .range(empOffset, empOffset + EMP_PAGE - 1);
     if (!existingEmpsPage || existingEmpsPage.length === 0) break;
@@ -227,8 +220,7 @@ export async function syncEmployeesLogic(
   const lockedDeptSigurIds = new Set<number>();
   for (const e of existingEmps || []) {
     if (e.sigur_employee_id != null) {
-      // Приоритет: сотрудник из целевой организации, иначе первый найденный
-      if (!sigurIdToDbId.has(e.sigur_employee_id) || e.organization_id === organizationId) {
+      if (!sigurIdToDbId.has(e.sigur_employee_id)) {
         sigurIdToDbId.set(e.sigur_employee_id, e.id);
       }
       if (e.employment_status === 'fired') firedSigurIds.add(e.sigur_employee_id);
@@ -239,7 +231,6 @@ export async function syncEmployeesLogic(
   const { data: dbDepartments } = await supabase
     .from('org_departments')
     .select('id, sigur_department_id, name')
-    .eq('organization_id', organizationId)
     .not('sigur_department_id', 'is', null);
 
   const sigurDeptToDbId = new Map<number, string>();
@@ -254,7 +245,6 @@ export async function syncEmployeesLogic(
   const { data: dbPositions } = await supabase
     .from('positions')
     .select('id, sigur_position_id')
-    .eq('organization_id', organizationId)
     .not('sigur_position_id', 'is', null);
 
   const sigurPosToDbId = new Map<number, string>();
@@ -267,8 +257,7 @@ export async function syncEmployeesLogic(
   // Карта имя должности → DB id (для текстового резолва)
   const { data: allDbPositions } = await supabase
     .from('positions')
-    .select('id, name')
-    .eq('organization_id', organizationId);
+    .select('id, name');
 
   const posNameToDbId = new Map<string, string>();
   for (const p of allDbPositions || []) {
@@ -305,14 +294,13 @@ export async function syncEmployeesLogic(
   if (missingPositions.size > 0) {
     send({ type: 'employees_progress', phase: 'positions', current: 0, total: totalEmployees, percent: 0 });
     const posInserts = [...missingPositions].map(name => ({
-      organization_id: organizationId,
       name,
       category: 'other' as const,
     }));
     const POS_BATCH = 100;
     for (let i = 0; i < posInserts.length; i += POS_BATCH) {
       const batch = posInserts.slice(i, i + POS_BATCH);
-      const { data: created } = await supabase.from('positions').upsert(batch, { onConflict: 'organization_id,name', ignoreDuplicates: true }).select('id, name');
+      const { data: created } = await supabase.from('positions').upsert(batch, { onConflict: 'name', ignoreDuplicates: true }).select('id, name');
       for (const p of created || []) {
         if (p.name) posNameToDbId.set(p.name.toLowerCase(), p.id);
       }
@@ -367,7 +355,6 @@ export async function syncEmployeesLogic(
     if (autoInsert) {
       const fio = parseFIO(fullName);
       inserts.push({
-        organization_id: organizationId,
         full_name: fullName.trim(),
         last_name: fio.lastName,
         first_name: fio.firstName || null,

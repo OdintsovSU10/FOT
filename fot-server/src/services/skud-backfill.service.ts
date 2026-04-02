@@ -11,23 +11,23 @@ export async function backfillUnmatchedEvents(): Promise<void> {
   // Загружаем активных сотрудников
   const { data: employees } = await supabase
     .from('employees')
-    .select('id, full_name, organization_id')
+    .select('id, full_name')
     .eq('is_archived', false)
     .eq('employment_status', 'active');
 
   if (!employees || employees.length === 0) return;
 
-  // Карта ФИО|org_id → employee.id
-  const nameOrgToEmpId = new Map<string, number>();
+  // Карта ФИО → employee.id
+  const nameToEmpId = new Map<string, number>();
   for (const emp of employees) {
-    const key = `${(emp.full_name || '').toLowerCase().trim()}|${emp.organization_id}`;
-    nameOrgToEmpId.set(key, emp.id);
+    const key = (emp.full_name || '').toLowerCase().trim();
+    nameToEmpId.set(key, emp.id);
   }
 
   // Загружаем unmatched events за сегодня
   const { data: unmatchedEvents } = await supabase
     .from('skud_events')
-    .select('id, physical_person, organization_id')
+    .select('id, physical_person')
     .eq('event_date', today)
     .is('employee_id', null)
     .limit(5000);
@@ -39,8 +39,8 @@ export async function backfillUnmatchedEvents(): Promise<void> {
   const affectedEmpIdSet = new Set<number>();
 
   for (const evt of unmatchedEvents) {
-    const key = `${(evt.physical_person || '').toLowerCase().trim()}|${evt.organization_id}`;
-    const empId = nameOrgToEmpId.get(key);
+    const key = (evt.physical_person || '').toLowerCase().trim();
+    const empId = nameToEmpId.get(key);
     if (!empId) continue;
 
     backfillEventIds.push(evt.id);
@@ -59,15 +59,12 @@ export async function backfillUnmatchedEvents(): Promise<void> {
   });
 
   // Пересчёт daily summary для затронутых сотрудников
-  const orgIds = new Set(employees.filter(e => affectedEmpIdSet.has(e.id)).map(e => e.organization_id));
-  for (const orgId of orgIds) {
-    const empIdsForOrg = employees
-      .filter(e => e.organization_id === orgId && affectedEmpIdSet.has(e.id))
-      .map(e => ({ org_id: orgId, emp_id: e.id, date: today }));
+  const pairs = employees
+    .filter(e => affectedEmpIdSet.has(e.id))
+    .map(e => ({ emp_id: e.id, date: today }));
 
-    if (empIdsForOrg.length > 0) {
-      await supabase.rpc('batch_recalculate_skud_daily_summary', { p_pairs: empIdsForOrg });
-    }
+  if (pairs.length > 0) {
+    await supabase.rpc('batch_recalculate_skud_daily_summary', { p_pairs: pairs });
   }
 
   console.log(`[backfill] recalculated daily summary for ${affectedEmpIdSet.size} employees`);

@@ -2,15 +2,13 @@ import { useState } from 'react';
 import type { FC } from 'react';
 import { adminService } from '../../services/adminService';
 import { useToast } from '../../contexts/ToastContext';
-import type { EmployeePositionType, Organization } from '../../types';
+import type { EmployeePositionType } from '../../types';
 import styles from '../../pages/super-admin/SuperAdmin.module.css';
 
 export interface IPendingUser {
   id: string;
   email: string;
   full_name: string | null;
-  organization_id: string | null;
-  organization_name: string | null;
   position_type: EmployeePositionType;
   imported_position: string | null;
   created_at: string;
@@ -20,7 +18,6 @@ interface IApprovalModal {
   visible: boolean;
   userId: string;
   userName: string;
-  userOrgId: string | null;
   positionType: EmployeePositionType;
   employeeId: number | null;
   employeeSearch: string;
@@ -30,11 +27,10 @@ interface IApprovalModal {
 
 interface IPendingUsersTabProps {
   pendingUsers: IPendingUser[];
-  organizations: Organization[];
   onReload: () => Promise<void>;
 }
 
-export const PendingUsersTab: FC<IPendingUsersTabProps> = ({ pendingUsers, organizations, onReload }) => {
+export const PendingUsersTab: FC<IPendingUsersTabProps> = ({ pendingUsers, onReload }) => {
   const toast = useToast();
   const [approvalModal, setApprovalModal] = useState<IApprovalModal | null>(null);
 
@@ -43,7 +39,6 @@ export const PendingUsersTab: FC<IPendingUsersTabProps> = ({ pendingUsers, organ
       visible: true,
       userId: user.id,
       userName: user.full_name || user.email || '',
-      userOrgId: user.organization_id,
       positionType: user.position_type || 'worker',
       employeeId: null,
       employeeSearch: '',
@@ -75,7 +70,6 @@ export const PendingUsersTab: FC<IPendingUsersTabProps> = ({ pendingUsers, organ
     try {
       await adminService.approveUser(approvalModal.userId, {
         position_type: approvalModal.positionType,
-        organization_id: approvalModal.userOrgId || undefined,
         employee_id: approvalModal.employeeId || undefined,
       });
       toast.success('Пользователь одобрен. Теперь выдайте ему 2FA.');
@@ -120,11 +114,6 @@ export const PendingUsersTab: FC<IPendingUsersTabProps> = ({ pendingUsers, organ
                 <div className={styles.userName}>{user.full_name || 'Без имени'}</div>
                 <div className={styles.userEmail}>{user.email}</div>
                 <div className={styles.userMeta}>
-                  {user.organization_name && (
-                    <span className={styles.twoFaEnabled}>
-                      {user.organization_name}
-                    </span>
-                  )}
                   <span className={styles.userDate}>
                     Заявка от: {new Date(user.created_at).toLocaleDateString('ru-RU')}
                   </span>
@@ -174,19 +163,6 @@ export const PendingUsersTab: FC<IPendingUsersTabProps> = ({ pendingUsers, organ
                   <option value="worker">Сотрудник</option>
                   <option value="header">Руководитель</option>
                   <option value="admin">Администратор</option>
-                </select>
-              </div>
-
-              <div className={styles.controlGroup}>
-                <label>Организация:</label>
-                <select
-                  value={approvalModal.userOrgId || ''}
-                  onChange={(e) => setApprovalModal(prev => prev ? { ...prev, userOrgId: e.target.value || null } : null)}
-                >
-                  <option value="">Не назначена</option>
-                  {organizations.map(org => (
-                    <option key={org.id} value={org.id}>{org.name}</option>
-                  ))}
                 </select>
               </div>
 

@@ -5,7 +5,6 @@ import { auditService } from '../services/audit.service.js';
 import { structureController } from './structure.controller.js';
 import { parseDate } from '../utils/date.utils.js';
 import { parseFIO } from '../utils/fio.utils.js';
-import { getOrgId } from '../utils/org.utils.js';
 import type { AuthenticatedRequest } from '../types/index.js';
 
 // Интерфейс для запроса с файлом
@@ -31,13 +30,6 @@ function isHeaderRow(row: (string | number | Date | null)[]): boolean {
  */
 export async function importEmployees(req: MulterRequest, res: Response): Promise<void> {
   try {
-    const organizationId = getOrgId(req);
-
-    if (!organizationId) {
-      res.status(400).json({ success: false, error: 'Organization required. Super admin: передайте ?organization_id=uuid' });
-      return;
-    }
-
     if (!req.file) {
       res.status(400).json({ success: false, error: 'File is required' });
       return;
@@ -112,7 +104,7 @@ export async function importEmployees(req: MulterRequest, res: Response): Promis
         if (departmentCache.has(cacheKey)) {
           orgDepartmentId = departmentCache.get(cacheKey)!;
         } else {
-          orgDepartmentId = await structureController.findOrCreateDepartment(organizationId, department, null);
+          orgDepartmentId = await structureController.findOrCreateDepartment(department, null);
           if (orgDepartmentId) departmentCache.set(cacheKey, orgDepartmentId);
         }
       }
@@ -120,7 +112,6 @@ export async function importEmployees(req: MulterRequest, res: Response): Promis
       const fio = parseFIO(fullName);
 
       employeesToInsert.push({
-        organization_id: organizationId,
         full_name: fullName,
         last_name: fio.lastName,
         first_name: fio.firstName || null,
@@ -169,22 +160,14 @@ export async function importEmployees(req: MulterRequest, res: Response): Promis
  */
 export async function deleteAll(req: AuthenticatedRequest, res: Response): Promise<void> {
   try {
-    const organizationId = getOrgId(req);
-
-    if (!organizationId) {
-      res.status(400).json({ success: false, error: 'Organization required. Super admin: передайте ?organization_id=uuid' });
-      return;
-    }
-
     const { count: beforeCount } = await supabase
       .from('employees')
-      .select('*', { count: 'exact', head: true })
-      .eq('organization_id', organizationId);
+      .select('*', { count: 'exact', head: true });
 
     const { error } = await supabase
       .from('employees')
       .delete()
-      .eq('organization_id', organizationId);
+      .neq('id', 0);
 
     if (error) {
       console.error('Delete all employees error:', error);

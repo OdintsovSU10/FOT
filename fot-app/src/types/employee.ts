@@ -3,7 +3,6 @@ import type { AssignmentType, EmployeeAssignmentWithNames } from './organization
 // Employee types
 export interface Employee {
   id: number;
-  organization_id: string;
   full_name: string;
   full_name_encrypted: string;
   last_name: string | null;

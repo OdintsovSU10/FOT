@@ -1,13 +1,11 @@
 import { Response } from 'express';
 import { auditService } from '../services/audit.service.js';
 import { adminUsersController } from './admin-users.controller.js';
-import { adminOrgController } from './admin-org.controller.js';
 import { admin2faController } from './admin-2fa.controller.js';
 import type { AuthenticatedRequest } from '../types/index.js';
 
 export const adminController = {
   ...adminUsersController,
-  ...adminOrgController,
   ...admin2faController,
 
   async getAuditLogs(req: AuthenticatedRequest, res: Response): Promise<void> {

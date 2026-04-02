@@ -4,7 +4,6 @@ export type PaymentType = 'salary' | 'advance' | 'bonus' | 'vacation_pay' | 'sic
 
 export interface IPayment {
   id: number;
-  organization_id: string;
   employee_id: number;
   payment_date: string;
   amount: number;

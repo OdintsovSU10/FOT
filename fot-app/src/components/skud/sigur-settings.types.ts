@@ -24,7 +24,7 @@ export interface IPreviewData {
   mappedCount?: number;
 }
 
-export type SyncStepName = 'organizations' | 'clean-duplicates' | 'departments' | 'positions' | 'employees';
+export type SyncStepName = 'departments' | 'positions' | 'employees';
 
 export interface ISyncAllStep {
   id: number;

@@ -1,6 +1,5 @@
 import { Response } from 'express';
 import { supabase } from '../config/database.js';
-import { getOrgId } from '../utils/org.utils.js';
 import type { AuthenticatedRequest } from '../types/index.js';
 
 // Типы для результатов аудита
@@ -34,50 +33,42 @@ export const auditController = {
    * GET /api/audit/run
    * Запуск полного аудита данных
    */
-  async runFullAudit(req: AuthenticatedRequest, res: Response): Promise<void> {
+  async runFullAudit(_req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
-      const organizationId = getOrgId(req);
-
-      if (!organizationId) {
-        res.status(400).json({ success: false, error: 'Organization required. Super admin: передайте ?organization_id=uuid' });
-        return;
-      }
-
       const checks: AuditCheckResult[] = [];
 
       // Получаем общее количество сотрудников
       const { count: totalEmployees } = await supabase
         .from('employees')
         .select('*', { count: 'exact', head: true })
-        .eq('organization_id', organizationId)
         .eq('is_archived', false);
 
       // 1. Проверка: Сотрудники без назначений
-      const unassignedCheck = await checkUnassignedEmployees(organizationId);
+      const unassignedCheck = await checkUnassignedEmployees();
       checks.push(unassignedCheck);
 
       // 2. Проверка: Потерянные назначения (удалённые подразделения)
-      const orphanedCheck = await checkOrphanedAssignments(organizationId);
+      const orphanedCheck = await checkOrphanedAssignments();
       checks.push(orphanedCheck);
 
       // 3. Проверка: Сотрудники без зарплаты
-      const noSalaryCheck = await checkEmployeesWithoutSalary(organizationId);
+      const noSalaryCheck = await checkEmployeesWithoutSalary();
       checks.push(noSalaryCheck);
 
       // 4. Проверка: Истёкшие патенты
-      const expiredPatentsCheck = await checkExpiredPatents(organizationId);
+      const expiredPatentsCheck = await checkExpiredPatents();
       checks.push(expiredPatentsCheck);
 
       // 5. Проверка: Отсутствует дата рождения
-      const noBirthDateCheck = await checkMissingBirthDate(organizationId);
+      const noBirthDateCheck = await checkMissingBirthDate();
       checks.push(noBirthDateCheck);
 
       // 6. Проверка: Дублирующиеся записи
-      const duplicatesCheck = await checkDuplicateEmployees(organizationId);
+      const duplicatesCheck = await checkDuplicateEmployees();
       checks.push(duplicatesCheck);
 
       // 7. Проверка: Множественные активные назначения
-      const multipleAssignmentsCheck = await checkMultipleAssignments(organizationId);
+      const multipleAssignmentsCheck = await checkMultipleAssignments();
       checks.push(multipleAssignmentsCheck);
 
       // Подсчёт итогов
@@ -118,37 +109,31 @@ export const auditController = {
    */
   async runSingleCheck(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
-      const organizationId = getOrgId(req);
       const { checkType } = req.params;
-
-      if (!organizationId) {
-        res.status(400).json({ success: false, error: 'Organization required. Super admin: передайте ?organization_id=uuid' });
-        return;
-      }
 
       let result: AuditCheckResult;
 
       switch (checkType) {
         case 'unassigned':
-          result = await checkUnassignedEmployees(organizationId);
+          result = await checkUnassignedEmployees();
           break;
         case 'orphaned':
-          result = await checkOrphanedAssignments(organizationId);
+          result = await checkOrphanedAssignments();
           break;
         case 'no-salary':
-          result = await checkEmployeesWithoutSalary(organizationId);
+          result = await checkEmployeesWithoutSalary();
           break;
         case 'expired-patents':
-          result = await checkExpiredPatents(organizationId);
+          result = await checkExpiredPatents();
           break;
         case 'no-birthdate':
-          result = await checkMissingBirthDate(organizationId);
+          result = await checkMissingBirthDate();
           break;
         case 'duplicates':
-          result = await checkDuplicateEmployees(organizationId);
+          result = await checkDuplicateEmployees();
           break;
         case 'multiple-assignments':
-          result = await checkMultipleAssignments(organizationId);
+          result = await checkMultipleAssignments();
           break;
         default:
           res.status(400).json({ success: false, error: 'Unknown check type' });
@@ -166,14 +151,13 @@ export const auditController = {
 /**
  * Проверка 1: Сотрудники без активных назначений
  */
-async function checkUnassignedEmployees(organizationId: string): Promise<AuditCheckResult> {
+async function checkUnassignedEmployees(): Promise<AuditCheckResult> {
   const issues: AuditIssue[] = [];
 
   // Находим сотрудников без активных назначений
   const { data: employees } = await supabase
     .from('employees')
     .select('id, full_name')
-    .eq('organization_id', organizationId)
     .eq('is_archived', false);
 
   if (employees) {
@@ -208,7 +192,7 @@ async function checkUnassignedEmployees(organizationId: string): Promise<AuditCh
 /**
  * Проверка 2: Назначения с удалёнными подразделениями
  */
-async function checkOrphanedAssignments(organizationId: string): Promise<AuditCheckResult> {
+async function checkOrphanedAssignments(): Promise<AuditCheckResult> {
   const issues: AuditIssue[] = [];
 
   // Находим назначения где все структурные ссылки NULL (но назначение активно)
@@ -221,10 +205,9 @@ async function checkOrphanedAssignments(organizationId: string): Promise<AuditCh
       org_department_id,
       org_site_id,
       org_subdivision_id,
-      employees!inner(organization_id, full_name, is_archived)
+      employees!inner(full_name, is_archived)
     `)
     .is('effective_to', null)
-    .eq('employees.organization_id', organizationId)
     .eq('employees.is_archived', false);
 
   if (assignments) {
@@ -260,14 +243,13 @@ async function checkOrphanedAssignments(organizationId: string): Promise<AuditCh
 /**
  * Проверка 3: Сотрудники без установленной зарплаты
  */
-async function checkEmployeesWithoutSalary(organizationId: string): Promise<AuditCheckResult> {
+async function checkEmployeesWithoutSalary(): Promise<AuditCheckResult> {
   const issues: AuditIssue[] = [];
 
   // Находим сотрудников без записей в tender_salary_history
   const { data: employees } = await supabase
     .from('employees')
     .select('id, full_name')
-    .eq('organization_id', organizationId)
     .eq('is_archived', false);
 
   if (employees) {
@@ -300,14 +282,13 @@ async function checkEmployeesWithoutSalary(organizationId: string): Promise<Audi
 /**
  * Проверка 4: Истёкшие патенты
  */
-async function checkExpiredPatents(organizationId: string): Promise<AuditCheckResult> {
+async function checkExpiredPatents(): Promise<AuditCheckResult> {
   const issues: AuditIssue[] = [];
   const today = new Date().toISOString().split('T')[0];
 
   const { data: employees } = await supabase
     .from('employees')
     .select('id, full_name, patent_expiry_date')
-    .eq('organization_id', organizationId)
     .eq('is_archived', false)
     .not('patent_expiry_date', 'is', null);
 
@@ -351,13 +332,12 @@ async function checkExpiredPatents(organizationId: string): Promise<AuditCheckRe
 /**
  * Проверка 5: Отсутствует дата рождения
  */
-async function checkMissingBirthDate(organizationId: string): Promise<AuditCheckResult> {
+async function checkMissingBirthDate(): Promise<AuditCheckResult> {
   const issues: AuditIssue[] = [];
 
   const { data: employees } = await supabase
     .from('employees')
     .select('id, full_name, birth_date')
-    .eq('organization_id', organizationId)
     .eq('is_archived', false);
 
   if (employees) {
@@ -385,13 +365,12 @@ async function checkMissingBirthDate(organizationId: string): Promise<AuditCheck
 /**
  * Проверка 6: Дублирующиеся записи (по ФИО)
  */
-async function checkDuplicateEmployees(organizationId: string): Promise<AuditCheckResult> {
+async function checkDuplicateEmployees(): Promise<AuditCheckResult> {
   const issues: AuditIssue[] = [];
 
   const { data: employees } = await supabase
     .from('employees')
     .select('id, full_name')
-    .eq('organization_id', organizationId)
     .eq('is_archived', false);
 
   if (employees) {
@@ -437,13 +416,12 @@ async function checkDuplicateEmployees(organizationId: string): Promise<AuditChe
 /**
  * Проверка 7: Множественные активные назначения
  */
-async function checkMultipleAssignments(organizationId: string): Promise<AuditCheckResult> {
+async function checkMultipleAssignments(): Promise<AuditCheckResult> {
   const issues: AuditIssue[] = [];
 
   const { data: employees } = await supabase
     .from('employees')
     .select('id, full_name')
-    .eq('organization_id', organizationId)
     .eq('is_archived', false);
 
   if (employees) {

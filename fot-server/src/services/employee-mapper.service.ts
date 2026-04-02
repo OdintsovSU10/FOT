@@ -14,8 +14,8 @@ export interface StructureCache {
 const structureCacheStore = new Map<string, { data: StructureCache; expiresAt: number }>();
 const STRUCTURE_CACHE_TTL_MS = 60_000;
 
-export async function loadStructureCache(organizationId?: string): Promise<StructureCache> {
-  const cacheKey = organizationId || '__global__';
+export async function loadStructureCache(): Promise<StructureCache> {
+  const cacheKey = '__global__';
   const now = Date.now();
   const cached = structureCacheStore.get(cacheKey);
 
@@ -28,12 +28,8 @@ export async function loadStructureCache(organizationId?: string): Promise<Struc
     positions: new Map(),
   };
 
-  let deptQuery = supabase.from('org_departments').select('id, name');
-  let posQuery = supabase.from('positions').select('id, name');
-  if (organizationId) {
-    deptQuery = deptQuery.eq('organization_id', organizationId);
-    posQuery = posQuery.eq('organization_id', organizationId);
-  }
+  const deptQuery = supabase.from('org_departments').select('id, name');
+  const posQuery = supabase.from('positions').select('id, name');
 
   const [departmentsRes, positionsRes] = await Promise.all([deptQuery, posQuery]);
 
@@ -55,7 +51,6 @@ export async function loadStructureCache(organizationId?: string): Promise<Struc
 export function decryptEmployeeList(encrypted: EmployeeEncrypted, structureCache: StructureCache): Employee {
   return {
     id: encrypted.id,
-    organization_id: encrypted.organization_id,
     full_name: encrypted.full_name || '',
     last_name: null,
     first_name: null,
@@ -94,7 +89,6 @@ export function decryptEmployeeList(encrypted: EmployeeEncrypted, structureCache
 export function decryptEmployee(encrypted: EmployeeEncrypted, structureCache: StructureCache): Employee {
   return {
     id: encrypted.id,
-    organization_id: encrypted.organization_id,
     full_name: encrypted.full_name || '',
     last_name: encrypted.last_name || null,
     first_name: encrypted.first_name || null,

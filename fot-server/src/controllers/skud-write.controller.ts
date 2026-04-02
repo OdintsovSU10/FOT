@@ -2,7 +2,6 @@ import { Response } from 'express';
 import { supabase } from '../config/database.js';
 import { auditService } from '../services/audit.service.js';
 import { sigurService } from '../services/sigur.service.js';
-import { getOrgId } from '../utils/org.utils.js';
 import type { AuthenticatedRequest } from '../types/index.js';
 
 import {
@@ -26,12 +25,6 @@ export const skudWriteController = {
    */
   async saveAccessPointSettings(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
-      let organizationId = getOrgId(req);
-      if (!organizationId) {
-        const { data: orgs } = await supabase.from('organizations').select('id').limit(1);
-        organizationId = orgs?.[0]?.id;
-      }
-
       const { department_id, settings } = req.body as {
         department_id?: string;
         settings: { access_point_name: string; is_internal: boolean }[];
@@ -45,14 +38,9 @@ export const skudWriteController = {
       let targetDeptId = department_id || null;
 
       if (!targetDeptId) {
-        if (!organizationId) {
-          res.status(400).json({ success: false, error: 'Organization required' });
-          return;
-        }
         const { data: rootDepts } = await supabase
           .from('org_departments')
           .select('id')
-          .eq('organization_id', organizationId)
           .is('parent_id', null)
           .limit(1);
         if (!rootDepts || rootDepts.length === 0) {
@@ -60,16 +48,6 @@ export const skudWriteController = {
           return;
         }
         targetDeptId = rootDepts[0].id;
-      }
-
-      if (!organizationId) {
-        const { data: dept } = await supabase.from('org_departments').select('organization_id').eq('id', targetDeptId).maybeSingle();
-        organizationId = dept?.organization_id;
-      }
-
-      if (!organizationId) {
-        res.status(400).json({ success: false, error: 'Organization required' });
-        return;
       }
 
       // Дедупликация по trimmed name
@@ -83,7 +61,6 @@ export const skudWriteController = {
       const { error: deleteError } = await supabase
         .from('skud_access_point_settings')
         .delete()
-        .eq('organization_id', organizationId)
         .select('id');
 
       if (deleteError) {
@@ -94,7 +71,6 @@ export const skudWriteController = {
 
       if (uniqueInternalNames.length > 0) {
         const rows = uniqueInternalNames.map(name => ({
-          organization_id: organizationId,
           department_id: targetDeptId,
           access_point_name: name,
           is_internal: true,
@@ -121,15 +97,9 @@ export const skudWriteController = {
   /**
    * POST /api/skud/sync-access-points
    */
-  async syncAccessPoints(req: AuthenticatedRequest, res: Response): Promise<void> {
+  async syncAccessPoints(_req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
-      let organizationId = getOrgId(req);
-      if (!organizationId) {
-        const { data: orgs } = await supabase.from('organizations').select('id').limit(1);
-        organizationId = orgs?.[0]?.id;
-      }
-
-      deleteAccessPointCacheEntry(organizationId || '__all__');
+      deleteAccessPointCacheEntry('__all__');
 
       if (!sigurService.isConfigured()) {
         res.status(400).json({ success: false, error: 'Sigur не настроен' });
@@ -145,8 +115,7 @@ export const skudWriteController = {
 
       const { data: currentSettings } = await supabase
         .from('skud_access_point_settings')
-        .select('id, access_point_name')
-        .eq('organization_id', organizationId);
+        .select('id, access_point_name');
 
       const freshSet = new Set(freshNames);
       const toDelete = (currentSettings || []).filter(s => !freshSet.has(s.access_point_name));
@@ -159,7 +128,7 @@ export const skudWriteController = {
           .in('id', toDelete.map(r => r.id));
       }
 
-      setAccessPointCacheEntry(organizationId || '__all__', freshNames);
+      setAccessPointCacheEntry('__all__', freshNames);
 
       res.json({
         success: true,
@@ -176,18 +145,12 @@ export const skudWriteController = {
    */
   async import(req: MulterRequest, res: Response): Promise<void> {
     try {
-      const organizationId = getOrgId(req);
-      if (!organizationId) {
-        res.status(400).json({ success: false, error: 'Organization required. Super admin: передайте ?organization_id=uuid' });
-        return;
-      }
       if (!req.file) {
         res.status(400).json({ success: false, error: 'File is required' });
         return;
       }
 
       const data = await importFromExcel({
-        organizationId,
         fileBuffer: req.file.buffer,
         userId: req.user.id,
       });
@@ -236,14 +199,12 @@ export const skudWriteController = {
         return;
       }
 
-      const orgId = getOrgId(req);
       const connection = (req.body.connection as 'external' | 'internal') || undefined;
 
       await syncEmployeeService(req, res, {
         employeeId,
         startDate,
         endDate,
-        organizationId: orgId,
         connection,
       });
     } catch (error) {
@@ -283,15 +244,9 @@ export const skudWriteController = {
    */
   async clear(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
-      const organizationId = getOrgId(req);
       const { startDate, endDate } = req.body;
 
-      if (!organizationId) {
-        res.status(400).json({ success: false, error: 'Organization required. Super admin: передайте ?organization_id=uuid' });
-        return;
-      }
-
-      await clearData({ organizationId, startDate, endDate, userId: req.user.id });
+      await clearData({ startDate, endDate, userId: req.user.id });
 
       await auditService.logFromRequest(req, req.user.id, 'CLEAR_SKUD', {
         details: { startDate, endDate },

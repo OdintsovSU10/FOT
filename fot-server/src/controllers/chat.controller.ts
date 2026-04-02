@@ -30,13 +30,7 @@ export const chatController = {
         return;
       }
 
-      const orgId = req.user.organization_id;
-      if (!orgId) {
-        res.status(400).json({ success: false, error: 'Organization required' });
-        return;
-      }
-
-      const conversationId = await chatService.getOrCreateConversation(req.user.id, participantId, orgId);
+      const conversationId = await chatService.getOrCreateConversation(req.user.id, participantId);
       res.json({ success: true, data: { id: conversationId } });
     } catch (error) {
       if (error instanceof z.ZodError) {
@@ -119,13 +113,8 @@ export const chatController = {
   async searchUsers(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
       const q = (req.query.q as string || '').trim();
-      const orgId = req.user.organization_id;
-      if (!orgId) {
-        res.json({ success: true, data: [] });
-        return;
-      }
 
-      const users = await chatService.searchUsers(q, orgId, req.user.id);
+      const users = await chatService.searchUsers(q, req.user.id);
       res.json({ success: true, data: users });
     } catch (error) {
       console.error('Search users error:', error);

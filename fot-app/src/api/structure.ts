@@ -10,12 +10,10 @@ interface ApiResponse<T> {
   error?: string;
 }
 
-const orgQuery = (orgId?: string) => orgId ? `?organization_id=${orgId}` : '';
-
 export const structureApi = {
-  async getTree(organizationId?: string): Promise<ApiResponse<OrgStructureResponse>> {
+  async getTree(): Promise<ApiResponse<OrgStructureResponse>> {
     try {
-      const res = await apiClient.get<ApiResponse<OrgStructureResponse>>(`/structure${orgQuery(organizationId)}`);
+      const res = await apiClient.get<ApiResponse<OrgStructureResponse>>('/structure');
       return { data: res.data, message: res.message || 'ok' };
     } catch (error) {
       return {
@@ -27,11 +25,10 @@ export const structureApi = {
   async createDepartment(
     name: string,
     description?: string,
-    organizationId?: string,
     parentId?: string | null,
   ): Promise<ApiResponse<OrgDepartment>> {
     try {
-      const res = await apiClient.post<ApiResponse<OrgDepartment>>(`/structure/departments${orgQuery(organizationId)}`, {
+      const res = await apiClient.post<ApiResponse<OrgDepartment>>('/structure/departments', {
         name,
         parent_id: parentId || null,
         description,
@@ -44,9 +41,9 @@ export const structureApi = {
     }
   },
 
-  async clearStructure(organizationId?: string): Promise<ApiResponse<{ employeesDeleted: number; departmentsDeleted: number }>> {
+  async clearStructure(): Promise<ApiResponse<{ employeesDeleted: number; departmentsDeleted: number }>> {
     try {
-      const res = await apiClient.delete<ApiResponse<{ employeesDeleted: number; departmentsDeleted: number }>>(`/structure/clear${orgQuery(organizationId)}`);
+      const res = await apiClient.delete<ApiResponse<{ employeesDeleted: number; departmentsDeleted: number }>>('/structure/clear');
       return { data: res.data, message: res.message || 'ok' };
     } catch (error) {
       return {
@@ -55,9 +52,9 @@ export const structureApi = {
     }
   },
 
-  async deleteDepartment(id: string, organizationId?: string): Promise<ApiResponse<void>> {
+  async deleteDepartment(id: string): Promise<ApiResponse<void>> {
     try {
-      await apiClient.delete(`/structure/departments/${id}${orgQuery(organizationId)}`);
+      await apiClient.delete(`/structure/departments/${id}`);
       return { message: 'ok' };
     } catch (error) {
       return {

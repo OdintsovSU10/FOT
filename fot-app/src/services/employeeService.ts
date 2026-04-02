@@ -39,9 +39,8 @@ export interface PaginatedResponse {
 }
 
 export const employeeService = {
-  async getAll(params?: { organizationId?: string; departmentId?: string; archived?: boolean; view?: 'list' }): Promise<Employee[]> {
+  async getAll(params?: { departmentId?: string; archived?: boolean; view?: 'list' }): Promise<Employee[]> {
     const qs = new URLSearchParams();
-    if (params?.organizationId) qs.set('organization_id', params.organizationId);
     if (params?.departmentId) qs.set('department_id', params.departmentId);
     if (params?.archived) qs.set('archived', 'true');
     if (params?.view) qs.set('view', params.view);

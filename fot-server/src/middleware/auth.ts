@@ -34,7 +34,6 @@ export const authenticate = async (
     req.user = {
       id: decoded.sub,
       email: decoded.email,
-      organization_id: decoded.organization_id,
       position_type: decoded.position_type,
       employee_id: decoded.employee_id ?? null,
       department_id: decoded.department_id ?? null,
@@ -169,71 +168,3 @@ export const requireSuperAdmin = (
   next();
 };
 
-/**
- * Middleware для проверки принадлежности к организации
- * Используется для операций с данными организации
- */
-export const requireOrganization = (
-  req: AuthenticatedRequest,
-  res: Response,
-  next: NextFunction
-): void => {
-  if (!req.user) {
-    res.status(401).json({ success: false, error: 'Authentication required' });
-    return;
-  }
-
-  // Super admin может работать без организации
-  if (req.user.position_type === 'super_admin') {
-    next();
-    return;
-  }
-
-  if (!req.user.organization_id) {
-    res.status(403).json({ success: false, error: 'Organization membership required' });
-    return;
-  }
-
-  next();
-};
-
-/**
- * Middleware для инъекции organization_id из query параметра для super_admin.
- * Если super_admin не имеет organization_id, берёт его из ?organization_id=xxx.
- */
-export const injectOrganizationFromQuery = (
-  req: AuthenticatedRequest,
-  res: Response,
-  next: NextFunction
-): void => {
-  if (!req.user) {
-    res.status(401).json({ success: false, error: 'Authentication required' });
-    return;
-  }
-
-  if (req.user.organization_id) {
-    next();
-    return;
-  }
-
-  if (req.user.position_type !== 'super_admin') {
-    res.status(403).json({ success: false, error: 'Organization membership required' });
-    return;
-  }
-
-  const orgId = req.query.organization_id as string | undefined;
-  if (!orgId) {
-    // Super admin может работать без organization_id — видит все организации
-    next();
-    return;
-  }
-
-  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-  if (!uuidRegex.test(orgId)) {
-    res.status(400).json({ success: false, error: 'Неверный формат organization_id' });
-    return;
-  }
-
-  req.user.organization_id = orgId;
-  next();
-};

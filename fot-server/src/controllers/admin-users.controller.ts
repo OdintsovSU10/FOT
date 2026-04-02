@@ -6,7 +6,6 @@ import type { AuthenticatedRequest, UserProfile } from '../types/index.js';
 import { logSupabaseError } from './admin-helpers.js';
 
 const approveUserSchema = z.object({
-  organization_id: z.string().uuid().optional(),
   position_type: z.enum(['worker', 'header', 'hr', 'admin', 'super_admin']).optional(),
   employee_id: z.number().int().positive().optional(),
 });
@@ -23,27 +22,6 @@ export const adminUsersController = {
         logSupabaseError('GetUsers', usersError);
         res.status(500).json({ success: false, error: 'Failed to fetch users' });
         return;
-      }
-
-      const orgIds = users
-        .filter((u: UserProfile) => u.organization_id)
-        .map((u: UserProfile) => u.organization_id);
-
-      let orgMap: Record<string, string> = {};
-      if (orgIds.length > 0) {
-        const { data: orgs, error: orgsError } = await supabase
-          .from('organizations')
-          .select('id, name')
-          .in('id', orgIds);
-
-        if (orgsError) {
-          logSupabaseError('GetUsers-Orgs', orgsError);
-        } else if (orgs) {
-          orgMap = orgs.reduce((acc, org) => {
-            acc[org.id] = org.name || 'Неизвестная организация';
-            return acc;
-          }, {} as Record<string, string>);
-        }
       }
 
       // Подгружаем department_id из employees для пользователей с employee_id
@@ -86,8 +64,6 @@ export const adminUsersController = {
         return {
           id: u.id,
           full_name: u.full_name,
-          organization_id: u.organization_id,
-          organization_name: u.organization_id ? (orgMap[u.organization_id] || null) : null,
           department_id: deptId,
           department_name: deptId ? (deptNameMap[deptId] || null) : null,
           position_type: u.position_type,
@@ -127,27 +103,6 @@ export const adminUsersController = {
         return;
       }
 
-      const orgIds = users
-        .filter((u: UserProfile) => u.organization_id)
-        .map((u: UserProfile) => u.organization_id);
-
-      let orgMap: Record<string, string> = {};
-      if (orgIds.length > 0) {
-        const { data: orgs, error: orgsError } = await supabase
-          .from('organizations')
-          .select('id, name')
-          .in('id', orgIds);
-
-        if (orgsError) {
-          logSupabaseError('GetPendingUsers-Orgs', orgsError);
-        } else if (orgs) {
-          orgMap = orgs.reduce((acc, org) => {
-            acc[org.id] = org.name || 'Неизвестная организация';
-            return acc;
-          }, {} as Record<string, string>);
-        }
-      }
-
       const usersWithEmail = await Promise.all(
         users.map(async (u: UserProfile) => {
           let email = '';
@@ -165,8 +120,6 @@ export const adminUsersController = {
             id: u.id,
             email,
             full_name: u.full_name,
-            organization_id: u.organization_id,
-            organization_name: u.organization_id ? (orgMap[u.organization_id] || null) : null,
             position_type: u.position_type,
             imported_position: u.imported_position,
             created_at: u.created_at,
@@ -184,7 +137,7 @@ export const adminUsersController = {
   async approveUser(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
       const { id } = req.params;
-      const { organization_id, position_type, employee_id } = approveUserSchema.parse(req.body);
+      const { position_type, employee_id } = approveUserSchema.parse(req.body);
 
       const { data: profile, error: fetchError } = await supabase
         .from('user_profiles')
@@ -203,9 +156,6 @@ export const adminUsersController = {
         approved_at: new Date().toISOString(),
       };
 
-      if (organization_id) {
-        updateData.organization_id = organization_id;
-      }
       if (position_type) {
         updateData.position_type = position_type;
       }
@@ -227,7 +177,7 @@ export const adminUsersController = {
       await auditService.logFromRequest(req, req.user.id, 'USER_APPROVED', {
         entityType: 'user',
         entityId: id,
-        details: { position_type, organization_id },
+        details: { position_type },
       });
 
       res.json({ success: true, message: 'User approved successfully' });
@@ -390,39 +340,6 @@ export const adminUsersController = {
     }
   },
 
-  async assignOrganization(req: AuthenticatedRequest, res: Response): Promise<void> {
-    try {
-      const { id } = req.params;
-      const { organization_id } = z.object({ organization_id: z.string().uuid() }).parse(req.body);
-
-      const { error } = await supabase
-        .from('user_profiles')
-        .update({ organization_id })
-        .eq('id', id);
-
-      if (error) {
-        console.error('Assign organization error:', error);
-        res.status(500).json({ success: false, error: 'Failed to assign organization' });
-        return;
-      }
-
-      await auditService.logFromRequest(req, req.user.id, 'ORG_ASSIGNED', {
-        entityType: 'user',
-        entityId: id,
-        details: { organization_id },
-      });
-
-      res.json({ success: true, message: 'Organization assigned successfully' });
-    } catch (error) {
-      if (error instanceof z.ZodError) {
-        res.status(400).json({ success: false, error: error.errors[0].message });
-        return;
-      }
-      console.error('Assign organization error:', error);
-      res.status(500).json({ success: false, error: 'Failed to assign organization' });
-    }
-  },
-
   async updateUserName(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
       const { id } = req.params;
@@ -537,7 +454,6 @@ export const adminUsersController = {
   async searchUnlinkedEmployees(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
       const q = (req.query.q as string || '').trim();
-      const orgId = req.query.organization_id as string | undefined;
 
       if (!q || q.length < 2) {
         res.json({ success: true, data: [] });
@@ -559,10 +475,6 @@ export const adminUsersController = {
         .ilike('full_name', `%${q}%`)
         .eq('employment_status', 'active')
         .limit(20);
-
-      if (orgId) {
-        query = query.eq('organization_id', orgId);
-      }
 
       if (linkedIds.length > 0) {
         query = query.not('id', 'in', `(${linkedIds.join(',')})`);

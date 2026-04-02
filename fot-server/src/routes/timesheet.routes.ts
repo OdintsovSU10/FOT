@@ -1,12 +1,10 @@
 import { Router } from 'express';
 import { timesheetController } from '../controllers/timesheet.controller.js';
-import { authenticate, requirePosition, requireOrganization, injectOrganizationFromQuery } from '../middleware/auth.js';
+import { authenticate, requirePosition } from '../middleware/auth.js';
 
 const router = Router();
 
 router.use(authenticate);
-router.use(injectOrganizationFromQuery);
-router.use(requireOrganization);
 
 // GET /api/timesheet?month=YYYY-MM&department_id=...
 router.get(

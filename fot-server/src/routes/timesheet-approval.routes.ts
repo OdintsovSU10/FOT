@@ -1,12 +1,10 @@
 import { Router } from 'express';
 import { timesheetApprovalController } from '../controllers/timesheet-approval.controller.js';
-import { authenticate, requirePosition, requireOrganization, injectOrganizationFromQuery } from '../middleware/auth.js';
+import { authenticate, requirePosition } from '../middleware/auth.js';
 
 const router = Router();
 
 router.use(authenticate);
-router.use(injectOrganizationFromQuery);
-router.use(requireOrganization);
 
 // POST /api/timesheet-approvals/submit — header подтверждает
 router.post('/submit', requirePosition('header', 'hr', 'admin', 'super_admin'), timesheetApprovalController.submit);

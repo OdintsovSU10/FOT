@@ -22,7 +22,6 @@ const submit = async (req: AuthenticatedRequest, res: Response): Promise<void> =
     const { data, error } = await supabase
       .from('timesheet_approvals')
       .upsert({
-        organization_id: req.user.organization_id,
         department_id: deptId,
         period,
         status: 'submitted',
@@ -153,20 +152,13 @@ const reject = async (req: AuthenticatedRequest, res: Response): Promise<void> =
 };
 
 /** HR: все неутверждённые табели */
-const getPending = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+const getPending = async (_req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
-    const orgId = req.user.organization_id;
-    let query = supabase
+    const { data, error } = await supabase
       .from('timesheet_approvals')
       .select('*')
       .eq('status', 'submitted')
       .order('submitted_at', { ascending: false });
-
-    if (orgId) {
-      query = query.eq('organization_id', orgId);
-    }
-
-    const { data, error } = await query;
     if (error) throw error;
     res.json({ success: true, data: data || [] });
   } catch (err) {

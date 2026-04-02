@@ -2,8 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../../contexts/ToastContext';
 import { apiClient } from '../../api/client';
-import { POSITION_LABELS, type Organization } from '../../types';
-import { ShieldIcon, MailIcon, BuildingIcon, CalendarIcon, UserIcon } from '../../components/ui/Icons';
+import { POSITION_LABELS } from '../../types';
+import { ShieldIcon, MailIcon, CalendarIcon, UserIcon } from '../../components/ui/Icons';
 import styles from './ProfilePage.module.css';
 
 export const ProfilePage: React.FC = () => {
@@ -13,9 +13,6 @@ export const ProfilePage: React.FC = () => {
   const [isEditing, setIsEditing] = useState(false);
   const [fullName, setFullName] = useState(profile?.full_name || '');
   const [isSaving, setIsSaving] = useState(false);
-  const [organization, setOrganization] = useState<Organization | null>(null);
-  const [loadingOrg, setLoadingOrg] = useState(false);
-
   // 2FA setup state
   const [showSetup2FA, setShowSetup2FA] = useState(false);
   const [twoFAData, setTwoFAData] = useState<{ secret: string; qrCode: string; recoveryCodes: string[] } | null>(null);
@@ -25,24 +22,6 @@ export const ProfilePage: React.FC = () => {
   useEffect(() => {
     setFullName(profile?.full_name || '');
   }, [profile?.full_name]);
-
-  useEffect(() => {
-    const fetchOrganization = async () => {
-      if (!profile?.organization_id) return;
-
-      setLoadingOrg(true);
-      try {
-        const org = await apiClient.get<Organization>(`/organizations/${profile.organization_id}`);
-        setOrganization(org);
-      } catch {
-        // Silently fail if organization not found
-      } finally {
-        setLoadingOrg(false);
-      }
-    };
-
-    fetchOrganization();
-  }, [profile?.organization_id]);
 
   const handleSaveName = async () => {
     if (!fullName.trim()) {
@@ -196,18 +175,6 @@ export const ProfilePage: React.FC = () => {
               <span className={styles.infoLabel}>Должность</span>
               <span className={styles.infoValue}>
                 {profile?.position_type ? POSITION_LABELS[profile.position_type] : '—'}
-              </span>
-            </div>
-          </div>
-
-          <div className={styles.infoItem}>
-            <div className={styles.infoIcon}>
-              <BuildingIcon />
-            </div>
-            <div className={styles.infoContent}>
-              <span className={styles.infoLabel}>Организация</span>
-              <span className={styles.infoValue}>
-                {loadingOrg ? 'Загрузка...' : (organization?.name || 'Не указана')}
               </span>
             </div>
           </div>

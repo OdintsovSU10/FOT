@@ -11,12 +11,10 @@ import {
 } from '../services/presence-polling.service.js';
 import {
   SYNC_ALL_STEP_ORDER,
-  cleanDuplicateOrganizationsLogic,
   seedPositionsLogic,
   syncDepartmentsLogic,
   syncEmployeesLogic,
   syncEventsLogic,
-  syncOrganizationsLogic,
   syncPositionsFromSigurLogic,
   type ISyncContext,
   type SyncAllStepName,
@@ -24,16 +22,6 @@ import {
 import type { AuthenticatedRequest } from '../types/index.js';
 
 type ConnectionType = 'external' | 'internal';
-
-async function resolveOrganizationId(req: AuthenticatedRequest): Promise<string | null> {
-  const requestedOrgId = req.body.organization_id || req.query.organization_id || req.user.organization_id;
-  if (requestedOrgId) {
-    return requestedOrgId;
-  }
-
-  const { data: orgs } = await supabase.from('organizations').select('id').limit(1);
-  return orgs?.[0]?.id || null;
-}
 
 function createSseSender(res: Response) {
   let msgCount = 0;
@@ -86,12 +74,6 @@ export const sigurSyncController = {
         return;
       }
 
-      const organizationId = await resolveOrganizationId(req);
-      if (!organizationId) {
-        res.status(400).json({ success: false, error: 'organization_id обязателен' });
-        return;
-      }
-
       await acquirePresencePollingLock();
       lockAcquired = true;
 
@@ -105,7 +87,6 @@ export const sigurSyncController = {
       const context: ISyncContext = {};
 
       const result = await syncEventsLogic(
-        organizationId,
         startDate,
         endDate,
         connection,
@@ -115,7 +96,6 @@ export const sigurSyncController = {
 
       await auditService.logFromRequest(req, req.user.id, 'SYNC_SIGUR', {
         details: {
-          organizationId,
           dateRange: { startDate, endDate },
           ...result,
         },
@@ -151,18 +131,12 @@ export const sigurSyncController = {
     let lockAcquired = false;
 
     try {
-      const organizationId = await resolveOrganizationId(req);
-      if (!organizationId) {
-        res.status(400).json({ success: false, error: 'organization_id обязателен' });
-        return;
-      }
-
       const connection = (req.body.connection as ConnectionType) || undefined;
 
       await acquirePresencePollingLock();
       lockAcquired = true;
 
-      const result = await syncEmployeesLogic(organizationId, connection, undefined, {});
+      const result = await syncEmployeesLogic(connection, undefined, {});
       res.json({ success: true, data: result });
     } catch (error) {
       if (isManualSyncConflict(error)) {
@@ -183,18 +157,12 @@ export const sigurSyncController = {
     let lockAcquired = false;
 
     try {
-      const organizationId = await resolveOrganizationId(req);
-      if (!organizationId) {
-        res.status(400).json({ success: false, error: 'organization_id обязателен' });
-        return;
-      }
-
       const connection = (req.body.connection as ConnectionType) || undefined;
 
       await acquirePresencePollingLock();
       lockAcquired = true;
 
-      const result = await syncDepartmentsLogic(organizationId, connection, {});
+      const result = await syncDepartmentsLogic(connection, {});
       res.json({ success: true, data: result });
     } catch (error) {
       if (isManualSyncConflict(error)) {
@@ -215,18 +183,12 @@ export const sigurSyncController = {
     let lockAcquired = false;
 
     try {
-      const organizationId = await resolveOrganizationId(req);
-      if (!organizationId) {
-        res.status(400).json({ success: false, error: 'organization_id обязателен' });
-        return;
-      }
-
       const connection = (req.body.connection as ConnectionType) || undefined;
 
       await acquirePresencePollingLock();
       lockAcquired = true;
 
-      const result = await syncPositionsFromSigurLogic(organizationId, connection, {});
+      const result = await syncPositionsFromSigurLogic(connection, {});
       res.json({ success: true, data: result });
     } catch (error) {
       if (isManualSyncConflict(error)) {
@@ -308,12 +270,6 @@ export const sigurSyncController = {
         return;
       }
 
-      const organizationId = await resolveOrganizationId(req);
-      if (!organizationId) {
-        res.status(400).json({ success: false, error: 'organization_id обязателен' });
-        return;
-      }
-
       const steps = normalizeSelectedSteps(req.body.steps);
       if (steps.length === 0) {
         res.status(400).json({ success: false, error: 'Не выбраны шаги синхронизации' });
@@ -332,8 +288,6 @@ export const sigurSyncController = {
       const connection = (req.body.connection as ConnectionType) || undefined;
       const context: ISyncContext = {};
 
-      console.log(`[syncAll] resolved organizationId: ${organizationId}, user.organization_id: ${req.user.organization_id}`);
-
       const stepDefinitions: Array<{
         id: number;
         name: SyncAllStepName;
@@ -342,37 +296,25 @@ export const sigurSyncController = {
       }> = [
         {
           id: 1,
-          name: 'organizations' as SyncAllStepName,
-          label: 'Импорт организаций',
-          fn: async () => syncOrganizationsLogic(connection, context) as unknown as Record<string, unknown>,
+          name: 'departments' as SyncAllStepName,
+          label: 'Импорт отделов (иерархия)',
+          fn: async () => syncDepartmentsLogic(connection, context) as unknown as Record<string, unknown>,
         },
         {
           id: 2,
-          name: 'clean-duplicates' as SyncAllStepName,
-          label: 'Очистка дублей',
-          fn: async () => cleanDuplicateOrganizationsLogic() as unknown as Record<string, unknown>,
-        },
-        {
-          id: 3,
-          name: 'departments' as SyncAllStepName,
-          label: 'Импорт отделов (иерархия)',
-          fn: async () => syncDepartmentsLogic(organizationId, connection, context) as unknown as Record<string, unknown>,
-        },
-        {
-          id: 4,
           name: 'positions' as SyncAllStepName,
           label: 'Импорт должностей',
           fn: async () => {
-            const fromSigur = await syncPositionsFromSigurLogic(organizationId, connection, context);
-            const seeded = await seedPositionsLogic(organizationId);
+            const fromSigur = await syncPositionsFromSigurLogic(connection, context);
+            const seeded = await seedPositionsLogic();
             return { ...fromSigur, seeded: seeded.created };
           },
         },
         {
-          id: 5,
+          id: 3,
           name: 'employees' as SyncAllStepName,
           label: 'Импорт сотрудников',
-          fn: async () => syncEmployeesLogic(organizationId, connection, sendProgress, context, false) as unknown as Record<string, unknown>,
+          fn: async () => syncEmployeesLogic(connection, sendProgress, context, false) as unknown as Record<string, unknown>,
         },
       ].filter(step => steps.includes(step.name));
 
@@ -405,7 +347,6 @@ export const sigurSyncController = {
 
       await auditService.logFromRequest(req, req.user.id, 'SYNC_SIGUR', {
         details: {
-          organizationId,
           steps,
           hasErrors,
           failedSteps,
@@ -448,12 +389,6 @@ export const sigurSyncController = {
 
   async matchEmployees(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
-      const organizationId = await resolveOrganizationId(req);
-      if (!organizationId) {
-        res.status(400).json({ success: false, error: 'organization_id обязателен' });
-        return;
-      }
-
       const { matches, createNew } = req.body as {
         matches?: Array<{ sigurId: number; employeeId: number }>;
         createNew?: Array<{ sigurId?: number; name: string; orgDepartmentId?: string; positionId?: string }>;
@@ -469,8 +404,7 @@ export const sigurSyncController = {
           const { error } = await supabase
             .from('employees')
             .update({ sigur_employee_id: m.sigurId })
-            .eq('id', m.employeeId)
-            .eq('organization_id', organizationId);
+            .eq('id', m.employeeId);
 
           if (error) {
             errors.push(`Привязка #${m.employeeId}: ${error.message}`);
@@ -485,7 +419,6 @@ export const sigurSyncController = {
         for (const emp of createNew) {
           const fio = parseFIO(emp.name);
           const { error } = await supabase.from('employees').insert({
-            organization_id: organizationId,
             full_name: emp.name.trim(),
             last_name: fio.lastName,
             first_name: fio.firstName || null,
@@ -505,7 +438,7 @@ export const sigurSyncController = {
       }
 
       await auditService.logFromRequest(req, req.user.id, 'MATCH_EMPLOYEES', {
-        details: { organizationId, linked, created, errors },
+        details: { linked, created, errors },
       });
 
       res.json({ success: true, data: { linked, created, errors } });

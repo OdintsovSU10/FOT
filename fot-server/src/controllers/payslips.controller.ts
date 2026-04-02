@@ -56,7 +56,6 @@ const create = async (req: AuthenticatedRequest, res: Response): Promise<void> =
     const { data, error } = await supabase
       .from('payslips')
       .upsert({
-        organization_id: req.user.organization_id,
         employee_id,
         period,
         gross_amount: gross_amount || null,
@@ -87,7 +86,6 @@ const importBatch = async (req: AuthenticatedRequest, res: Response): Promise<vo
     }
 
     const records = items.map((item: { employee_id: number; period: string; gross_amount?: number; net_amount?: number; deductions?: number }) => ({
-      organization_id: req.user.organization_id,
       employee_id: item.employee_id,
       period: item.period,
       gross_amount: item.gross_amount || null,

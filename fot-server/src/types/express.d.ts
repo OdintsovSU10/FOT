@@ -6,7 +6,6 @@ declare global {
       user: {
         id: string;
         email: string;
-        organization_id: string | null;
         position_type: EmployeePositionType;
         employee_id: number | null;
         department_id: string | null;

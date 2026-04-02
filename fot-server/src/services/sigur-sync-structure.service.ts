@@ -11,19 +11,6 @@ import {
 
 // ─── Типы результатов ───
 
-export interface ISyncOrganizationsResult {
-  imported: number;
-  skipped: number;
-  total: number;
-}
-
-export interface ICleanDuplicatesResult {
-  totalBefore: number;
-  totalAfter: number;
-  duplicatesRemoved: number;
-  errors: string[];
-}
-
 export interface ISyncDepartmentsResult {
   imported: number;
   updated: number;
@@ -36,145 +23,7 @@ export interface ISyncDepartmentsResult {
 
 // ─── Чистые функции синхронизации ───
 
-export async function syncOrganizationsLogic(
-  connection?: 'external' | 'internal',
-  context?: ISyncContext,
-): Promise<ISyncOrganizationsResult> {
-  if (!sigurService.isConfigured()) throw new Error('Sigur не настроен');
-
-  const departments = await getDepartmentsRaw(connection, context);
-  if (!departments || departments.length === 0) {
-    return { imported: 0, skipped: 0, total: 0 };
-  }
-
-  if (departments.length > 0) {
-    logSampleAndWarn('syncOrganizations', departments[0], ['id', 'name', 'parentId']);
-  }
-
-  const { data: existingOrgs } = await supabase
-    .from('organizations')
-    .select('id, name');
-
-  const existingNames = new Set<string>();
-  for (const org of existingOrgs || []) {
-    if (org.name) {
-      existingNames.add(org.name.toLowerCase().trim());
-    }
-  }
-
-  let imported = 0;
-  let skipped = 0;
-
-  for (const dept of departments) {
-    const normalized = normalizeDepartment(dept);
-    const name = normalized.name;
-    if (!name) { skipped++; continue; }
-
-    if (existingNames.has(name.toLowerCase().trim())) {
-      skipped++;
-      continue;
-    }
-
-    const { error: insertError } = await supabase
-      .from('organizations')
-      .insert({ name: name.trim() });
-
-    if (insertError) {
-      console.error('[syncOrganizations] insert error:', insertError.message);
-      skipped++;
-    } else {
-      existingNames.add(name.toLowerCase().trim());
-      imported++;
-    }
-  }
-
-  console.log(`[syncOrganizations] done: ${imported} imported, ${skipped} skipped`);
-  return { imported, skipped, total: departments.length };
-}
-
-export async function cleanDuplicateOrganizationsLogic(): Promise<ICleanDuplicatesResult> {
-  const { data: allOrgs } = await supabase
-    .from('organizations')
-    .select('id, name, created_at')
-    .order('created_at', { ascending: true });
-
-  if (!allOrgs || allOrgs.length === 0) {
-    return { duplicatesRemoved: 0, totalBefore: 0, totalAfter: 0, errors: [] };
-  }
-
-  const groups = new Map<string, typeof allOrgs>();
-  for (const org of allOrgs) {
-    const name = (org.name || '').toLowerCase().trim();
-    if (!name) continue;
-    const existing = groups.get(name) || [];
-    existing.push(org);
-    groups.set(name, existing);
-  }
-
-  const remapEntries: { dupId: string; keepId: string }[] = [];
-  const allDuplicateIds: string[] = [];
-
-  for (const [, orgs] of groups) {
-    if (orgs.length <= 1) continue;
-    const keepId = orgs[0].id;
-    for (let i = 1; i < orgs.length; i++) {
-      remapEntries.push({ dupId: orgs[i].id, keepId });
-      allDuplicateIds.push(orgs[i].id);
-    }
-  }
-
-  if (allDuplicateIds.length === 0) {
-    return { duplicatesRemoved: 0, totalBefore: allOrgs.length, totalAfter: allOrgs.length, errors: [] };
-  }
-
-  const TABLES_WITH_ORG_ID = [
-    'employees', 'org_departments', 'org_sites',
-    'positions', 'skud_daily_summary', 'skud_events', 'user_profiles',
-  ];
-
-  const errors: string[] = [];
-  const keepGroups = new Map<string, string[]>();
-  for (const { dupId, keepId } of remapEntries) {
-    const list = keepGroups.get(keepId) || [];
-    list.push(dupId);
-    keepGroups.set(keepId, list);
-  }
-
-  for (const table of TABLES_WITH_ORG_ID) {
-    for (const [keepId, dupIds] of keepGroups) {
-      const { error: updateError } = await supabase
-        .from(table)
-        .update({ organization_id: keepId })
-        .in('organization_id', dupIds);
-
-      if (updateError) {
-        errors.push(`${table}: ${updateError.message}`);
-      }
-    }
-  }
-
-  const { error: deleteError } = await supabase
-    .from('organizations')
-    .delete()
-    .in('id', allDuplicateIds);
-
-  let duplicatesRemoved = allDuplicateIds.length;
-  if (deleteError) {
-    errors.push(`delete batch: ${deleteError.message}`);
-    duplicatesRemoved = 0;
-  }
-
-  console.log(`[cleanDuplicateOrgs] removed ${duplicatesRemoved} duplicates`);
-  return {
-    totalBefore: allOrgs.length,
-    totalAfter: allOrgs.length - duplicatesRemoved,
-    duplicatesRemoved,
-    errors,
-  };
-}
-
 export async function syncDepartmentsLogic(
-  organizationId: string,
   connection?: 'external' | 'internal',
   context?: ISyncContext,
 ): Promise<ISyncDepartmentsResult> {
@@ -194,8 +43,7 @@ export async function syncDepartmentsLogic(
 
   const { data: existingDepts } = await supabase
     .from('org_departments')
-    .select('id, sigur_department_id, name')
-    .eq('organization_id', organizationId);
+    .select('id, sigur_department_id, name');
 
   const sigurIdToDbId = new Map<number, string>();
   for (const d of existingDepts || []) {
@@ -224,7 +72,6 @@ export async function syncDepartmentsLogic(
     const { data: createdRoot, error: rootError } = await supabase
       .from('org_departments')
       .insert({
-        organization_id: organizationId,
         name: ROOT_DEPT_NAME,
         parent_id: null,
       })
@@ -262,7 +109,7 @@ export async function syncDepartmentsLogic(
   }
 
   // Whitelist: если задан фильтр, пропускаем отделы вне whitelist
-  const whitelist = await getWhitelistedDepartmentIdsCached(organizationId, context);
+  const whitelist = await getWhitelistedDepartmentIdsCached(context);
   if (whitelist) {
     // Расширяем whitelist родительскими отделами для сохранения иерархии
     const parentMap = new Map<number, number>();
@@ -316,7 +163,6 @@ export async function syncDepartmentsLogic(
       const { data: created, error: insertError } = await supabase
         .from('org_departments')
         .insert({
-          organization_id: organizationId,
           name: dept.name,
           sigur_department_id: dept.id,
         })

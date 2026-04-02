@@ -17,7 +17,6 @@ interface SkudFilters {
   endDate?: string;
   accessPoint?: string;
   employeeId?: string;
-  organizationId?: string;
   search?: string;
 }
 
@@ -28,7 +27,6 @@ export const skudService = {
     if (filters?.endDate) params.append('endDate', filters.endDate);
     if (filters?.accessPoint) params.append('accessPoint', filters.accessPoint);
     if (filters?.employeeId) params.append('employeeId', filters.employeeId);
-    if (filters?.organizationId) params.append('organization_id', filters.organizationId);
     if (filters?.search) params.append('search', filters.search);
 
     const query = params.toString();
@@ -47,9 +45,8 @@ export const skudService = {
     return response.data || [];
   },
 
-  async getDailySummary(date: string, organizationId?: string, signal?: AbortSignal): Promise<SkudDailySummary[]> {
+  async getDailySummary(date: string, signal?: AbortSignal): Promise<SkudDailySummary[]> {
     const params = new URLSearchParams({ date });
-    if (organizationId) params.append('organization_id', organizationId);
     const response = await apiClient.get<ApiResponse<SkudDailySummary[]>>(`/skud/daily-summary?${params.toString()}`, { signal });
     return response.data || [];
   },
@@ -62,9 +59,8 @@ export const skudService = {
     return response.data;
   },
 
-  async getAccessPoints(organizationId?: string): Promise<string[]> {
-    const query = organizationId ? `?organization_id=${organizationId}` : '';
-    const response = await apiClient.get<ApiResponse<string[]>>(`/skud/access-points${query}`);
+  async getAccessPoints(): Promise<string[]> {
+    const response = await apiClient.get<ApiResponse<string[]>>('/skud/access-points');
     return response.data || [];
   },
 
@@ -170,11 +166,6 @@ export const skudService = {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any -- response shape validated by return type
     const response = await apiClient.get<ApiResponse<any>>(`/skud/discipline?${params.toString()}`, { signal });
     return response.data;
-  },
-
-  async getOrganizations(): Promise<{ id: string; name: string }[]> {
-    const response = await apiClient.get<ApiResponse<{ id: string; name: string }[]>>('/skud/organizations');
-    return response.data || [];
   },
 
   async exportEvents(filters?: SkudFilters): Promise<Blob> {

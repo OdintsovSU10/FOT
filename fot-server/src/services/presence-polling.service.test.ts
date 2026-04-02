@@ -149,13 +149,11 @@ describe('presence-polling.service', () => {
       }
       if (query.table === 'employees') {
         return {
-          data: [{ id: 1, organization_id: 'org-1', full_name: 'Иван Иванов', sigur_employee_id: 101 }],
+          data: [{ id: 1, full_name: 'Иван Иванов', sigur_employee_id: 101 }],
           error: null,
         };
       }
-      if (query.table === 'organizations') {
-        return { data: [{ id: 'org-1' }], error: null };
-      }
+
       if (query.table === 'skud_events' && findOperation(query, 'select', 'dedup_hash')) {
         return { data: [], error: null };
       }
@@ -188,13 +186,11 @@ describe('presence-polling.service', () => {
       }
       if (query.table === 'employees') {
         return {
-          data: [{ id: 1, organization_id: 'org-1', full_name: 'Иван Иванов', sigur_employee_id: 101 }],
+          data: [{ id: 1, full_name: 'Иван Иванов', sigur_employee_id: 101 }],
           error: null,
         };
       }
-      if (query.table === 'organizations') {
-        return { data: [{ id: 'org-1' }], error: null };
-      }
+
       if (query.table === 'skud_events' && findOperation(query, 'select', 'dedup_hash')) {
         return { data: [], error: null };
       }
@@ -224,13 +220,11 @@ describe('presence-polling.service', () => {
       }
       if (query.table === 'employees') {
         return {
-          data: [{ id: 1, organization_id: 'org-1', full_name: 'Иван Иванов', sigur_employee_id: 101 }],
+          data: [{ id: 1, full_name: 'Иван Иванов', sigur_employee_id: 101 }],
           error: null,
         };
       }
-      if (query.table === 'organizations') {
-        return { data: [{ id: 'org-1' }], error: null };
-      }
+
       if (query.table === 'skud_events' && findOperation(query, 'select', 'dedup_hash')) {
         return { data: [], error: null };
       }
@@ -266,9 +260,7 @@ describe('presence-polling.service', () => {
       if (query.table === 'employees') {
         return { data: [], error: null };
       }
-      if (query.table === 'organizations') {
-        return { data: [], error: null };
-      }
+
       if (query.table === 'skud_events' && findOperation(query, 'select', 'dedup_hash')) {
         return { data: [], error: null };
       }
@@ -285,7 +277,7 @@ describe('presence-polling.service', () => {
     );
   });
 
-  it('stores unmatched events instead of dropping them when a single organization is available', async () => {
+  it('stores unmatched events instead of dropping them', async () => {
     const now = new Date(2026, 2, 27, 10, 0, 0);
 
     mockedState.queryResolver = (query) => {
@@ -295,9 +287,7 @@ describe('presence-polling.service', () => {
       if (query.table === 'employees') {
         return { data: [], error: null };
       }
-      if (query.table === 'organizations') {
-        return { data: [{ id: 'org-1' }], error: null };
-      }
+
       if (query.table === 'skud_events' && findOperation(query, 'select', 'dedup_hash')) {
         return { data: [], error: null };
       }
@@ -315,13 +305,11 @@ describe('presence-polling.service', () => {
 
     const upsertQuery = mockedState.queryLog.find(query => query.table === 'skud_events' && findOperation(query, 'upsert'));
     const payload = upsertQuery?.operations.find(op => op.method === 'upsert')?.args[0] as Array<{
-      organization_id: string;
       employee_id: number | null;
       physical_person: string;
     }>;
 
     expect(payload).toHaveLength(1);
-    expect(payload[0]?.organization_id).toBe('org-1');
     expect(payload[0]?.employee_id).toBeNull();
     expect(payload[0]?.physical_person).toBe('Неизвестный Сотрудник');
     expect(mockedState.supabaseMock.rpc).not.toHaveBeenCalled();
@@ -337,13 +325,11 @@ describe('presence-polling.service', () => {
       }
       if (query.table === 'employees') {
         return {
-          data: [{ id: 1, organization_id: 'org-1', full_name: 'Иван Иванов', sigur_employee_id: 101 }],
+          data: [{ id: 1, full_name: 'Иван Иванов', sigur_employee_id: 101 }],
           error: null,
         };
       }
-      if (query.table === 'organizations') {
-        return { data: [{ id: 'org-1' }], error: null };
-      }
+
       if (query.table === 'skud_events' && findOperation(query, 'select', 'dedup_hash')) {
         return { data: [{ dedup_hash: duplicateHash }], error: null };
       }

@@ -78,19 +78,16 @@ export function isSystemDepartment(name: string): boolean {
 }
 
 /** Загружает whitelist отделов из skud_sync_department_filter. null = фильтр не задан (синхронизировать все) */
-export async function getWhitelistedDepartmentIds(organizationId: string): Promise<Set<number> | null> {
+export async function getWhitelistedDepartmentIds(): Promise<Set<number> | null> {
   const { data } = await supabase
     .from('skud_sync_department_filter')
-    .select('sigur_department_id')
-    .eq('organization_id', organizationId);
+    .select('sigur_department_id');
 
   if (!data || data.length === 0) return null;
   return new Set(data.map(d => d.sigur_department_id));
 }
 
 export const SYNC_ALL_STEP_ORDER = [
-  'organizations',
-  'clean-duplicates',
   'departments',
   'positions',
   'employees',
@@ -142,14 +139,13 @@ export async function getPositionsRaw(
 }
 
 export async function getWhitelistedDepartmentIdsCached(
-  organizationId: string,
   context?: ISyncContext,
 ): Promise<Set<number> | null> {
   if (context && context.whitelistDepartmentIds !== undefined) {
     return context.whitelistDepartmentIds;
   }
 
-  const whitelist = await getWhitelistedDepartmentIds(organizationId);
+  const whitelist = await getWhitelistedDepartmentIds();
   if (context) {
     context.whitelistDepartmentIds = whitelist;
   }
@@ -174,13 +170,11 @@ export function buildWhitelistedEmployeesCache(data: Record<string, unknown>[]):
 }
 
 export async function getWhitelistedDbEmployeeSets(
-  organizationId: string,
   whitelist: Set<number>,
 ): Promise<{ allowedNames: Set<string>; allowedSigurIds: Set<number> } | null> {
   const { data: dbDepartments } = await supabase
     .from('org_departments')
     .select('id, sigur_department_id')
-    .eq('organization_id', organizationId)
     .in('sigur_department_id', [...whitelist]);
 
   const allowedDepartmentIds = (dbDepartments || []).map(dept => dept.id);
@@ -198,7 +192,6 @@ export async function getWhitelistedDbEmployeeSets(
     const { data } = await supabase
       .from('employees')
       .select('full_name, sigur_employee_id')
-      .eq('organization_id', organizationId)
       .eq('is_archived', false)
       .in('org_department_id', allowedDepartmentIds)
       .range(from, from + PAGE - 1);
@@ -214,7 +207,6 @@ export async function getWhitelistedDbEmployeeSets(
     const { data } = await supabase
       .from('employees')
       .select('full_name, sigur_employee_id')
-      .eq('organization_id', organizationId)
       .eq('is_archived', false)
       .is('org_department_id', null)
       .range(from, from + PAGE - 1);
@@ -241,13 +233,12 @@ export async function getWhitelistedDbEmployeeSets(
 }
 
 export async function getWhitelistedSigurEmployees(
-  organizationId: string,
   connection: 'external' | 'internal' | undefined,
   context?: ISyncContext,
   onProgress?: (data: Record<string, unknown>) => void,
 ): Promise<Record<string, unknown>[]> {
   const send = onProgress || (() => {});
-  const whitelist = await getWhitelistedDepartmentIdsCached(organizationId, context);
+  const whitelist = await getWhitelistedDepartmentIdsCached(context);
 
   if (!whitelist || whitelist.size === 0) {
     return sigurService.getEmployeesCached(connection);

@@ -4,7 +4,6 @@
 import { supabase } from '../config/database.js';
 import { formatDateToISO } from '../utils/date.utils.js';
 import type { IDisciplineParams, IDisciplineResult, IDisciplineViolation, IDailySummaryRow } from '../types/skud.types.js';
-import type { IResolvedSchedule } from '../types/index.js';
 import { resolveSchedulesBulk, getEffectiveLateThreshold, needsSkudCheck } from './schedule.service.js';
 
 const LATE_THRESHOLD_DEFAULT = '09:00:00';
@@ -28,7 +27,7 @@ function fmtMinutes(min: number, sign = '+'): string {
 export async function getDisciplineViolations(
   params: IDisciplineParams,
 ): Promise<IDisciplineResult> {
-  const { organizationId, startMonth, endMonth } = params;
+  const { startMonth, endMonth } = params;
 
   const normalizedStartMonth = startMonth <= endMonth ? startMonth : endMonth;
   const normalizedEndMonth = startMonth <= endMonth ? endMonth : startMonth;
@@ -56,7 +55,6 @@ export async function getDisciplineViolations(
           .or('first_entry.gt.09:00:00,total_hours.lt.8')
           .order('date', { ascending: true })
           .range(off, off + PAGE_SIZE - 1);
-        if (organizationId) q = q.eq('organization_id', organizationId);
         const { data: page, error } = await q;
         if (error) throw error;
         if (!page || page.length === 0) break;
@@ -71,15 +69,13 @@ export async function getDisciplineViolations(
     return rows;
   };
 
-  let empQuery = supabase
+  const empQuery = supabase
     .from('employees')
     .select('id, full_name, position_id, org_department_id')
     .eq('is_archived', false)
     .eq('employment_status', 'active');
-  if (organizationId) empQuery = empQuery.eq('organization_id', organizationId);
 
-  let deptQuery = supabase.from('org_departments').select('id, name');
-  if (organizationId) deptQuery = deptQuery.eq('organization_id', organizationId);
+  const deptQuery = supabase.from('org_departments').select('id, name');
 
   const [empResult, deptResult, allSummaryRows] = await Promise.all([
     empQuery,
@@ -122,9 +118,7 @@ export async function getDisciplineViolations(
 
   // Resolve графики для всех сотрудников
   const empListForSched = employees.map(e => ({ id: e.id as number, org_department_id: (e.org_department_id as string | null) }));
-  const schedulesMap = organizationId
-    ? await resolveSchedulesBulk(empListForSched, organizationId, normalizedStartMonth + '-01')
-    : new Map<number, IResolvedSchedule>();
+  const schedulesMap = await resolveSchedulesBulk(empListForSched, normalizedStartMonth + '-01');
 
   const violations: IDisciplineViolation[] = [];
   const todayISO = formatDateToISO(new Date());

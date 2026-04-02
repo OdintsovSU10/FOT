@@ -5,7 +5,6 @@ export type LeaveRequestStatus = 'pending' | 'approved' | 'rejected' | 'cancelle
 
 export interface ILeaveRequest {
   id: number;
-  organization_id: string;
   employee_id: number;
   request_type: LeaveRequestType;
   status: LeaveRequestStatus;

@@ -2,7 +2,7 @@ import { Router } from 'express';
 import multer from 'multer';
 import { employeesController } from '../controllers/employees.controller.js';
 import { employeeEnrichController } from '../controllers/employee-enrich.controller.js';
-import { authenticate, requirePosition, requireOrganization, requireCritical2FA, injectOrganizationFromQuery } from '../middleware/auth.js';
+import { authenticate, requirePosition, requireCritical2FA } from '../middleware/auth.js';
 import { importLimiter } from '../middleware/rateLimit.js';
 
 const router = Router();
@@ -26,10 +26,8 @@ const upload = multer({
   },
 });
 
-// Все роуты требуют аутентификации и организации
+// Все роуты требуют аутентификации
 router.use(authenticate);
-router.use(injectOrganizationFromQuery);
-router.use(requireOrganization);
 
 // GET /api/employees - получение списка (worker+)
 router.get(

@@ -9,9 +9,9 @@ const URL_EXPIRY = 3600; // 1 час
 export const r2Service = {
   isEnabled: () => r2Enabled,
 
-  generateKey: (orgId: string, employeeId: number, fileName: string): string => {
+  generateKey: (employeeId: number, fileName: string): string => {
     const ext = path.extname(fileName) || '.bin';
-    return `${orgId}/documents/${employeeId}/${randomUUID()}${ext}`;
+    return `documents/${employeeId}/${randomUUID()}${ext}`;
   },
 
   generateUploadUrl: async (key: string, contentType: string): Promise<string> => {

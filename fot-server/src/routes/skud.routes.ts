@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import multer from 'multer';
 import { skudController } from '../controllers/skud.controller.js';
-import { authenticate, requireMinPosition, requireOrganization, requireCritical2FA, injectOrganizationFromQuery } from '../middleware/auth.js';
+import { authenticate, requireMinPosition, requireCritical2FA } from '../middleware/auth.js';
 import { importLimiter } from '../middleware/rateLimit.js';
 
 const router = Router();
@@ -25,10 +25,8 @@ const upload = multer({
   },
 });
 
-// Все роуты требуют аутентификации и организации
+// Все роуты требуют аутентификации
 router.use(authenticate);
-router.use(injectOrganizationFromQuery);
-router.use(requireOrganization);
 
 // GET /api/skud/organizations - организации с событиями СКУД (super_admin)
 router.get(

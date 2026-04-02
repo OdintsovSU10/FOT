@@ -6,11 +6,10 @@ import { formatDateToISO } from '../utils/date.utils.js';
 import type { IPresenceParams, IPresenceItem } from '../types/skud.types.js';
 
 export async function getPresence(params: IPresenceParams): Promise<IPresenceItem[]> {
-  const { organizationId, departmentId } = params;
+  const { departmentId } = params;
 
   // Загружаем все отделы
-  let allDeptsQuery = supabase.from('org_departments').select('id, parent_id');
-  if (organizationId) allDeptsQuery = allDeptsQuery.eq('organization_id', organizationId);
+  const allDeptsQuery = supabase.from('org_departments').select('id, parent_id');
   const { data: allDeptsData } = await allDeptsQuery;
   const allDepts = allDeptsData || [];
 
@@ -37,11 +36,9 @@ export async function getPresence(params: IPresenceParams): Promise<IPresenceIte
     .eq('is_archived', false)
     .eq('employment_status', 'active');
 
-  // Если есть departmentId — фильтруем по отделам (org_department_id), иначе по организации
+  // Если есть departmentId — фильтруем по отделам (org_department_id)
   if (deptIds) {
     empQuery = empQuery.in('org_department_id', deptIds);
-  } else if (organizationId) {
-    empQuery = empQuery.eq('organization_id', organizationId);
   }
 
   const { data: employees } = await empQuery;
@@ -73,13 +70,11 @@ export async function getPresence(params: IPresenceParams): Promise<IPresenceIte
     posMap.set(p.id, p.name || '');
   }
 
-  // Загружаем все внутренние точки доступа организации
-  let settingsQuery = supabase
+  // Загружаем все внутренние точки доступа
+  const settingsQuery = supabase
     .from('skud_access_point_settings')
     .select('access_point_name')
     .eq('is_internal', true);
-
-  if (organizationId) settingsQuery = settingsQuery.eq('organization_id', organizationId);
 
   const { data: apSettings } = await settingsQuery;
   const orgInternalPoints = new Set<string>(

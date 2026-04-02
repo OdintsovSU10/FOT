@@ -33,7 +33,6 @@ const create = async (req: AuthenticatedRequest, res: Response): Promise<void> =
     const { data, error } = await supabase
       .from('leave_requests')
       .insert({
-        organization_id: req.user.organization_id,
         employee_id: employeeId,
         request_type,
         start_date,
@@ -120,15 +119,10 @@ const getDepartment = async (req: AuthenticatedRequest, res: Response): Promise<
 /** Все заявления организации (hr/admin) */
 const getAll = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
-    const orgId = req.user.organization_id;
     let query = supabase
       .from('leave_requests')
       .select('*')
       .order('created_at', { ascending: false });
-
-    if (orgId) {
-      query = query.eq('organization_id', orgId);
-    }
 
     const status = req.query.status as string | undefined;
     if (status) {

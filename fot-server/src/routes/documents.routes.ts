@@ -1,12 +1,10 @@
 import { Router } from 'express';
 import { documentsController } from '../controllers/documents.controller.js';
-import { authenticate, requirePosition, requireOrganization, injectOrganizationFromQuery } from '../middleware/auth.js';
+import { authenticate, requirePosition } from '../middleware/auth.js';
 
 const router = Router();
 
 router.use(authenticate);
-router.use(injectOrganizationFromQuery);
-router.use(requireOrganization);
 
 // POST /api/documents/upload-url — получить presigned URL
 router.post(

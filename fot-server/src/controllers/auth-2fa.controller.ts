@@ -55,7 +55,6 @@ export const verify2FA = async (req: AuthenticatedRequest, res: Response): Promi
         full_name: profile.full_name,
         position_type: profile.position_type,
         imported_position: profile.imported_position,
-        organization_id: profile.organization_id,
         two_factor_enabled: profile.two_factor_enabled,
       },
     });
@@ -121,7 +120,6 @@ export const useRecoveryCode = async (req: AuthenticatedRequest, res: Response):
         email: req.user.email,
         full_name: profile.full_name,
         position_type: profile.position_type,
-        organization_id: profile.organization_id,
         two_factor_enabled: profile.two_factor_enabled,
       },
     });

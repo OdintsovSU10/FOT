@@ -1,7 +1,6 @@
 import { Response } from 'express';
 import { supabase } from '../config/database.js';
 import { auditService } from '../services/audit.service.js';
-import { getOrgId } from '../utils/org.utils.js';
 import { loadStructureCache, decryptEmployee } from '../services/employee-mapper.service.js';
 import type { AuthenticatedRequest, EmployeeEncrypted } from '../types/index.js';
 
@@ -11,18 +10,11 @@ import type { AuthenticatedRequest, EmployeeEncrypted } from '../types/index.js'
 export async function archive(req: AuthenticatedRequest, res: Response): Promise<void> {
   try {
     const { id } = req.params;
-    const organizationId = getOrgId(req);
-
-    if (!organizationId) {
-      res.status(400).json({ success: false, error: 'Organization required. Super admin: передайте ?organization_id=uuid' });
-      return;
-    }
 
     const { data, error } = await supabase
       .from('employees')
       .update({ is_archived: true, archived_at: new Date().toISOString() })
       .eq('id', id)
-      .eq('organization_id', organizationId)
       .select()
       .single();
 
@@ -36,7 +28,7 @@ export async function archive(req: AuthenticatedRequest, res: Response): Promise
       entityId: id,
     });
 
-    const structureCache = await loadStructureCache(organizationId);
+    const structureCache = await loadStructureCache();
     const employee = decryptEmployee(data as EmployeeEncrypted, structureCache);
     res.json({ success: true, data: employee });
   } catch (error) {
@@ -51,18 +43,11 @@ export async function archive(req: AuthenticatedRequest, res: Response): Promise
 export async function restore(req: AuthenticatedRequest, res: Response): Promise<void> {
   try {
     const { id } = req.params;
-    const organizationId = getOrgId(req);
-
-    if (!organizationId) {
-      res.status(400).json({ success: false, error: 'Organization required. Super admin: передайте ?organization_id=uuid' });
-      return;
-    }
 
     const { data, error } = await supabase
       .from('employees')
       .update({ is_archived: false, archived_at: null })
       .eq('id', id)
-      .eq('organization_id', organizationId)
       .select()
       .single();
 
@@ -71,7 +56,7 @@ export async function restore(req: AuthenticatedRequest, res: Response): Promise
       return;
     }
 
-    const structureCache = await loadStructureCache(organizationId);
+    const structureCache = await loadStructureCache();
     const employee = decryptEmployee(data as EmployeeEncrypted, structureCache);
 
     await auditService.logFromRequest(req, req.user.id, 'RESTORE_EMPLOYEE', {
@@ -118,7 +103,7 @@ export async function fire(req: AuthenticatedRequest, res: Response): Promise<vo
       entityId: id,
     });
 
-    const structureCache = await loadStructureCache(data.organization_id);
+    const structureCache = await loadStructureCache();
     const employee = decryptEmployee(data as EmployeeEncrypted, structureCache);
     res.json({ success: true, data: employee });
   } catch (error) {
@@ -167,7 +152,7 @@ export async function rehire(req: AuthenticatedRequest, res: Response): Promise<
       entityId: id,
     });
 
-    const structureCache = await loadStructureCache(data.organization_id);
+    const structureCache = await loadStructureCache();
     const employee = decryptEmployee(data as EmployeeEncrypted, structureCache);
     res.json({ success: true, data: employee });
   } catch (error) {
@@ -238,7 +223,7 @@ export async function moveDepartment(req: AuthenticatedRequest, res: Response): 
       details: { org_department_id },
     });
 
-    const structureCache = await loadStructureCache(data.organization_id);
+    const structureCache = await loadStructureCache();
     const employee = decryptEmployee(data as EmployeeEncrypted, structureCache);
     res.json({ success: true, data: employee });
   } catch (error) {
@@ -253,13 +238,8 @@ export async function moveDepartment(req: AuthenticatedRequest, res: Response): 
 export async function getHistory(req: AuthenticatedRequest, res: Response): Promise<void> {
   try {
     const { id } = req.params;
-    const organizationId = req.user.organization_id;
 
-    // Проверяем что сотрудник принадлежит организации
-    let empQ = supabase.from('employees').select('id').eq('id', id);
-    if (organizationId) empQ = empQ.eq('organization_id', organizationId);
-
-    const { data: emp } = await empQ.single();
+    const { data: emp } = await supabase.from('employees').select('id').eq('id', id).single();
 
     if (!emp) {
       res.status(404).json({ success: false, error: 'Employee not found' });
@@ -278,7 +258,7 @@ export async function getHistory(req: AuthenticatedRequest, res: Response): Prom
       return;
     }
 
-    const structureCache = await loadStructureCache(organizationId || undefined);
+    const structureCache = await loadStructureCache();
 
     const events = (data || []).map((row: Record<string, unknown>) => {
       const eventData = row.event_data as Record<string, unknown> || {};

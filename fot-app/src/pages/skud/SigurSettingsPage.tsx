@@ -9,7 +9,7 @@ import type { SettingsTab } from '../../components/skud/sigur-settings.types';
 import '../../styles/SigurSettingsPage.css';
 
 export const SigurSettingsPage = () => {
-  const { hasPosition, profile } = useAuth();
+  const { hasPosition } = useAuth();
   const canEdit = hasPosition(['header', 'admin', 'super_admin']);
 
   const [activeTab, setActiveTab] = useState<SettingsTab>('settings');
@@ -111,7 +111,6 @@ export const SigurSettingsPage = () => {
           selectedConnection={selectedConnection}
           availableConnections={availableConnections}
           canEdit={canEdit}
-          organizationId={profile?.organization_id || undefined}
           error={error}
           setError={setError}
           setSelectedConnection={setSelectedConnection}

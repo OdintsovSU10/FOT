@@ -24,7 +24,6 @@ import { SigurMatchModal } from './SigurMatchModal';
 interface IStructureSyncSectionProps {
   connected: boolean | null;
   canEdit: boolean;
-  organizationId: string | undefined;
   setError: (error: string) => void;
   setActiveTab: (tab: SettingsTab) => void;
   syncFilterSummary: string;
@@ -34,7 +33,6 @@ interface IStructureSyncSectionProps {
 export const StructureSyncSection: FC<IStructureSyncSectionProps> = ({
   connected,
   canEdit,
-  organizationId,
   setError,
   setActiveTab,
   syncFilterSummary,
@@ -164,12 +162,12 @@ export const StructureSyncSection: FC<IStructureSyncSectionProps> = ({
   }, [selectedSyncAllSteps, setError]);
 
   const handleClearStructure = async () => {
-    if (!confirm('Удалить ВСЕ отделы и сотрудников организации? Это действие необратимо!')) return;
+    if (!confirm('Удалить ВСЕ отделы и сотрудников? Это действие необратимо!')) return;
     setClearingStructure(true);
     setClearStructureResult(null);
     setError('');
     try {
-      const result = await structureApi.clearStructure(organizationId);
+      const result = await structureApi.clearStructure();
       if (result.data) {
         setClearStructureResult(result.data);
       } else {

@@ -81,7 +81,6 @@ export const needsSkudCheck = (schedule: IResolvedSchedule, date: Date): boolean
 export const resolveSchedule = async (
   employeeId: number,
   departmentId: string | null,
-  organizationId: string,
   date: string,
 ): Promise<IResolvedSchedule> => {
   // 1. Проверить employee_schedules
@@ -118,11 +117,10 @@ export const resolveSchedule = async (
     }
   }
 
-  // 3. Дефолт организации
+  // 3. Дефолт
   const { data: defaultSched } = await supabase
     .from('work_schedules')
     .select('*')
-    .eq('organization_id', organizationId)
     .eq('is_default', true)
     .limit(1)
     .single();
@@ -137,7 +135,6 @@ export const resolveSchedule = async (
 /** Bulk resolve для массива сотрудников — оптимизировано через 3 запроса */
 export const resolveSchedulesBulk = async (
   employees: { id: number; org_department_id: string | null }[],
-  organizationId: string,
   date: string,
 ): Promise<Map<number, IResolvedSchedule>> => {
   const result = new Map<number, IResolvedSchedule>();
@@ -169,7 +166,6 @@ export const resolveSchedulesBulk = async (
     supabase
       .from('work_schedules')
       .select('*')
-      .eq('organization_id', organizationId)
       .eq('is_default', true)
       .limit(1)
       .single(),

@@ -4,7 +4,6 @@
 import { Response } from 'express';
 import { z } from 'zod';
 import { supabase } from '../config/database.js';
-import { getOrgId } from '../utils/org.utils.js';
 import { resolveSchedule, resolveSchedulesBulk } from '../services/schedule.service.js';
 import type { AuthenticatedRequest } from '../types/index.js';
 
@@ -38,16 +37,12 @@ const canManageDept = (req: AuthenticatedRequest, deptId: string): boolean => {
 };
 
 export const scheduleController = {
-  /** GET /api/schedules — шаблоны организации */
-  async list(req: AuthenticatedRequest, res: Response) {
+  /** GET /api/schedules — шаблоны */
+  async list(_req: AuthenticatedRequest, res: Response) {
     try {
-      const orgId = getOrgId(req);
-      if (!orgId) return res.status(400).json({ success: false, error: 'organization_id не определён' });
-
       const { data, error } = await supabase
         .from('work_schedules')
         .select('*')
-        .eq('organization_id', orgId)
         .order('is_default', { ascending: false })
         .order('name');
 
@@ -62,15 +57,12 @@ export const scheduleController = {
   /** POST /api/schedules — создать шаблон */
   async create(req: AuthenticatedRequest, res: Response) {
     try {
-      const orgId = getOrgId(req);
-      if (!orgId) return res.status(400).json({ success: false, error: 'organization_id не определён' });
-
       const parsed = createScheduleSchema.safeParse(req.body);
       if (!parsed.success) return res.status(400).json({ success: false, error: parsed.error.issues });
 
       const { data, error } = await supabase
         .from('work_schedules')
-        .insert({ ...parsed.data, organization_id: orgId })
+        .insert({ ...parsed.data })
         .select()
         .single();
 
@@ -85,7 +77,6 @@ export const scheduleController = {
   /** PUT /api/schedules/:id — обновить шаблон */
   async update(req: AuthenticatedRequest, res: Response) {
     try {
-      const orgId = getOrgId(req);
       const { id } = req.params;
 
       const parsed = createScheduleSchema.partial().safeParse(req.body);
@@ -95,7 +86,6 @@ export const scheduleController = {
         .from('work_schedules')
         .update({ ...parsed.data, updated_at: new Date().toISOString() })
         .eq('id', id)
-        .eq('organization_id', orgId!)
         .select()
         .single();
 
@@ -110,7 +100,6 @@ export const scheduleController = {
   /** DELETE /api/schedules/:id — удалить шаблон (если не используется) */
   async remove(req: AuthenticatedRequest, res: Response) {
     try {
-      const orgId = getOrgId(req);
       const { id } = req.params;
 
       // Проверяем что не используется
@@ -127,7 +116,6 @@ export const scheduleController = {
         .from('work_schedules')
         .delete()
         .eq('id', id)
-        .eq('organization_id', orgId!)
         .eq('is_default', false);
 
       if (error) throw error;
@@ -272,9 +260,6 @@ export const scheduleController = {
   /** GET /api/schedules/resolve/:empId?date=YYYY-MM-DD — resolve для сотрудника */
   async resolve(req: AuthenticatedRequest, res: Response) {
     try {
-      const orgId = getOrgId(req);
-      if (!orgId) return res.status(400).json({ success: false, error: 'organization_id не определён' });
-
       const empId = parseInt(req.params.empId);
       const date = (req.query.date as string) || new Date().toISOString().slice(0, 10);
 
@@ -285,7 +270,7 @@ export const scheduleController = {
         .eq('id', empId)
         .single();
 
-      const schedule = await resolveSchedule(empId, emp?.org_department_id || null, orgId, date);
+      const schedule = await resolveSchedule(empId, emp?.org_department_id || null, date);
       res.json({ success: true, data: schedule });
     } catch (err) {
       console.error('[schedules] resolve error:', err);
@@ -296,9 +281,6 @@ export const scheduleController = {
   /** GET /api/schedules/resolve-bulk?employee_ids=1,2,3&date=YYYY-MM-DD */
   async resolveBulk(req: AuthenticatedRequest, res: Response) {
     try {
-      const orgId = getOrgId(req);
-      if (!orgId) return res.status(400).json({ success: false, error: 'organization_id не определён' });
-
       const idsParam = req.query.employee_ids as string;
       if (!idsParam) return res.status(400).json({ success: false, error: 'employee_ids обязателен' });
 
@@ -312,7 +294,7 @@ export const scheduleController = {
         .in('id', employeeIds);
 
       const employees = (emps || []).map(e => ({ id: e.id as number, org_department_id: e.org_department_id as string | null }));
-      const schedules = await resolveSchedulesBulk(employees, orgId, date);
+      const schedules = await resolveSchedulesBulk(employees, date);
 
       const result: Record<number, unknown> = {};
       for (const [id, sched] of schedules) {

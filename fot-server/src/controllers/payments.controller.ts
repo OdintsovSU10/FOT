@@ -62,7 +62,6 @@ const create = async (req: AuthenticatedRequest, res: Response): Promise<void> =
     const { data, error } = await supabase
       .from('payments')
       .insert({
-        organization_id: req.user.organization_id,
         employee_id,
         payment_date,
         amount,
@@ -92,7 +91,6 @@ const importBatch = async (req: AuthenticatedRequest, res: Response): Promise<vo
     }
 
     const records = items.map((item: { employee_id: number; payment_date: string; amount: number; payment_type: string; description?: string; period?: string }) => ({
-      organization_id: req.user.organization_id,
       employee_id: item.employee_id,
       payment_date: item.payment_date,
       amount: item.amount,

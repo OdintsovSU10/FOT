@@ -1,7 +1,6 @@
 import { Response } from 'express';
 import { supabase } from '../config/database.js';
 import { auditService } from '../services/audit.service.js';
-import { getOrgId } from '../utils/org.utils.js';
 import type {
   AuthenticatedRequest,
   OrgDepartment,
@@ -15,7 +14,6 @@ import type {
 function decryptDepartment(encrypted: OrgDepartmentEncrypted): OrgDepartment {
   return {
     id: encrypted.id,
-    organization_id: encrypted.organization_id,
     parent_id: encrypted.parent_id,
     sigur_department_id: encrypted.sigur_department_id,
     name: encrypted.name || '',
@@ -48,21 +46,13 @@ export const structureController = {
    * GET /api/structure
    * Получение полного дерева структуры организации
    */
-  async getTree(req: AuthenticatedRequest, res: Response): Promise<void> {
+  async getTree(_req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
-      const organizationId = req.user.organization_id;
-
-      let query = supabase
+      const { data: departmentsData, error } = await supabase
         .from('org_departments')
         .select('*')
         .eq('is_active', true)
         .order('sort_order');
-
-      if (organizationId) {
-        query = query.eq('organization_id', organizationId);
-      }
-
-      const { data: departmentsData, error } = await query;
 
       if (error) {
         console.error('Get structure error:', error);
@@ -96,13 +86,7 @@ export const structureController = {
    */
   async createDepartment(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
-      const organizationId = getOrgId(req);
       const { name, description, parent_id } = req.body;
-
-      if (!organizationId) {
-        res.status(400).json({ success: false, error: 'Организация не указана. Super admin: передайте ?organization_id=uuid' });
-        return;
-      }
 
       if (!name || name.trim().length < 1) {
         res.status(400).json({ success: false, error: 'Название обязательно' });
@@ -112,7 +96,6 @@ export const structureController = {
       const { data, error } = await supabase
         .from('org_departments')
         .insert({
-          organization_id: organizationId,
           parent_id: parent_id || null,
           name: name.trim(),
           description: description ? description.trim() : null,
@@ -143,19 +126,12 @@ export const structureController = {
    */
   async deleteDepartment(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
-      const organizationId = getOrgId(req);
       const { id } = req.params;
-
-      if (!organizationId) {
-        res.status(400).json({ success: false, error: 'Организация не указана. Super admin: передайте ?organization_id=uuid' });
-        return;
-      }
 
       const { error } = await supabase
         .from('org_departments')
         .delete()
-        .eq('id', id)
-        .eq('organization_id', organizationId);
+        .eq('id', id);
 
       if (error) {
         console.error('Delete department error:', error);
@@ -181,23 +157,11 @@ export const structureController = {
    */
   async clearStructure(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
-      let organizationId = getOrgId(req);
-
-      if (!organizationId) {
-        const { data: orgs } = await supabase.from('organizations').select('id').limit(1);
-        organizationId = orgs?.[0]?.id;
-      }
-
-      if (!organizationId) {
-        res.status(400).json({ success: false, error: 'Организация не указана' });
-        return;
-      }
-
-      // 1. Удаляем сотрудников организации
+      // 1. Удаляем всех сотрудников
       const { count: employeesDeleted, error: empError } = await supabase
         .from('employees')
         .delete({ count: 'exact' })
-        .eq('organization_id', organizationId);
+        .neq('id', 0);
 
       if (empError) {
         console.error('Clear employees error:', empError);
@@ -205,11 +169,11 @@ export const structureController = {
         return;
       }
 
-      // 2. Удаляем отделы организации
+      // 2. Удаляем все отделы
       const { count: departmentsDeleted, error: deptError } = await supabase
         .from('org_departments')
         .delete({ count: 'exact' })
-        .eq('organization_id', organizationId);
+        .neq('id', '00000000-0000-0000-0000-000000000000');
 
       if (deptError) {
         console.error('Clear departments error:', deptError);
@@ -218,8 +182,6 @@ export const structureController = {
       }
 
       await auditService.logFromRequest(req, req.user.id, 'CLEAR_STRUCTURE', {
-        entityType: 'organization',
-        entityId: organizationId,
         details: { employeesDeleted, departmentsDeleted },
       });
 
@@ -240,7 +202,6 @@ export const structureController = {
    * Внутренний метод: найти или создать отдел по имени
    */
   async findOrCreateDepartment(
-    organizationId: string,
     name: string,
     parentId: string | null
   ): Promise<string | null> {
@@ -251,7 +212,6 @@ export const structureController = {
     let query = supabase
       .from('org_departments')
       .select('id, name')
-      .eq('organization_id', organizationId)
       .eq('is_active', true);
 
     if (parentId) {
@@ -273,7 +233,6 @@ export const structureController = {
     const { data: created, error } = await supabase
       .from('org_departments')
       .insert({
-        organization_id: organizationId,
         parent_id: parentId,
         name: trimmedName,
       })

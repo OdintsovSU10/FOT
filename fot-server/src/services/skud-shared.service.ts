@@ -8,10 +8,8 @@ import { supabase } from '../config/database.js';
 /** Собирает ID отдела + все дочерние */
 export async function collectDeptIds(
   departmentId: string,
-  organizationId: string | undefined,
 ): Promise<string[]> {
-  let deptQuery = supabase.from('org_departments').select('id, parent_id');
-  if (organizationId) deptQuery = deptQuery.eq('organization_id', organizationId);
+  const deptQuery = supabase.from('org_departments').select('id, parent_id');
   const { data: allDepts } = await deptQuery;
 
   const ids = [departmentId];
@@ -55,19 +53,14 @@ export function getAncestorDeptIds(
  * Загружает ID и имена сотрудников, относящихся к отделам из sync filter.
  * Возвращает null если фильтр не настроен (показывать всё).
  */
-export async function getSyncFilteredEmployees(
-  organizationId: string | undefined,
-): Promise<{ empIds: Set<number>; empNames: Set<string> } | null> {
-  if (!organizationId) return null;
-
+export async function getSyncFilteredEmployees(): Promise<{ empIds: Set<number>; empNames: Set<string> } | null> {
   // 1. Загружаем whitelist sigur_department_id
   const { data: filterRows } = await supabase
     .from('skud_sync_department_filter')
-    .select('sigur_department_id')
-    .eq('organization_id', organizationId);
+    .select('sigur_department_id');
 
   if (!filterRows || filterRows.length === 0) {
-    console.log('[sync-filter] Нет фильтра для org', organizationId, '→ показываем всё');
+    console.log('[sync-filter] Нет фильтра → показываем всё');
     return null;
   }
 
@@ -78,7 +71,6 @@ export async function getSyncFilteredEmployees(
   const { data: depts } = await supabase
     .from('org_departments')
     .select('id, parent_id, name, sigur_department_id')
-    .eq('organization_id', organizationId)
     .in('sigur_department_id', sigurDeptIds);
 
   console.log('[sync-filter] Найдено отделов по sigur_id:', depts?.length || 0,
@@ -89,8 +81,7 @@ export async function getSyncFilteredEmployees(
   // 3. Собираем дочерние отделы
   const { data: allDepts } = await supabase
     .from('org_departments')
-    .select('id, parent_id')
-    .eq('organization_id', organizationId);
+    .select('id, parent_id');
 
   const deptIds = new Set(depts.map(d => d.id));
   let changed = true;
@@ -109,7 +100,6 @@ export async function getSyncFilteredEmployees(
   const { data: employees } = await supabase
     .from('employees')
     .select('id, full_name')
-    .eq('organization_id', organizationId)
     .eq('is_archived', false)
     .in('org_department_id', [...deptIds]);
 
@@ -177,7 +167,6 @@ export function countWorkingDays(startStr: string, endStr: string): number {
 /** Запрос событий по employee_id */
 export async function queryEventsByEmployeeId(
   employeeId: number,
-  orgId: string | undefined,
   startDate: unknown,
   endDate: unknown,
 ): Promise<Record<string, unknown>[]> {
@@ -188,8 +177,6 @@ export async function queryEventsByEmployeeId(
     .order('event_date', { ascending: false })
     .order('event_time', { ascending: false })
     .limit(5000);
-
-  if (orgId) query = query.eq('organization_id', orgId);
   if (startDate && typeof startDate === 'string') query = query.gte('event_date', startDate);
   if (endDate && typeof endDate === 'string') query = query.lte('event_date', endDate);
 
@@ -201,7 +188,6 @@ export async function queryEventsByEmployeeId(
 export async function searchAndBackfillByName(
   employeeId: number,
   employeeName: string,
-  orgId: string,
   startDate: unknown,
   endDate: unknown,
 ): Promise<Record<string, unknown>[]> {
@@ -209,7 +195,6 @@ export async function searchAndBackfillByName(
   let countQuery = supabase
     .from('skud_events')
     .select('id', { count: 'exact', head: true })
-    .eq('organization_id', orgId)
     .is('employee_id', null);
 
   if (startDate && typeof startDate === 'string') countQuery = countQuery.gte('event_date', startDate);
@@ -228,7 +213,6 @@ export async function searchAndBackfillByName(
     let query = supabase
       .from('skud_events')
       .select('*')
-      .eq('organization_id', orgId)
       .is('employee_id', null)
       .order('event_date')
       .range(offset, offset + PAGE_SIZE - 1);

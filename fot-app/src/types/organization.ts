@@ -1,15 +1,6 @@
-// Organization types
-export interface Organization {
-  id: string;
-  name: string;
-  parent_organization_id: string | null;
-  created_at: string;
-}
-
 // Структура организации - Отдел
 export interface OrgDepartment {
   id: string;
-  organization_id: string;
   parent_id: string | null;
   sigur_department_id: number | null;
   name: string;
@@ -41,7 +32,6 @@ export interface OrgStructureResponse {
 // Строительный участок
 export interface OrgSite {
   id: string;
-  organization_id: string;
   department_id: string | null;
   name: string;
   code: string | null;
@@ -60,7 +50,6 @@ export interface OrgSite {
 // Справочник должностей
 export interface Position {
   id: string;
-  organization_id: string;
   name: string;
   category: 'worker' | 'engineer' | 'manager' | 'admin' | 'other' | null;
   grade: number | null;
@@ -121,7 +110,6 @@ export type OrgUnitType = 'department' | 'site';
 
 export interface OrgStructureUnit {
   id: string;
-  organization_id: string;
   unit_type: OrgUnitType;
   name: string;
   description: string | null;

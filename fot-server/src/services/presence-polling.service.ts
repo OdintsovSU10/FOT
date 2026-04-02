@@ -27,16 +27,16 @@ export class ManualSyncInProgressError extends Error {
 }
 
 let employeeCache: {
-  byNameOrg: Map<string, { id: number; organization_id: string }>;
-  bySigurId: Map<number, { id: number; organization_id: string }>;
-  byUniqueName: Map<string, { id: number; organization_id: string }>;
+  byName: Map<string, { id: number }>;
+  bySigurId: Map<number, { id: number }>;
+  byUniqueName: Map<string, { id: number }>;
   fetchedAt: number;
 } | null = null;
 
 interface EmployeeMaps {
-  byNameOrg: Map<string, { id: number; organization_id: string }>;
-  bySigurId: Map<number, { id: number; organization_id: string }>;
-  byUniqueName: Map<string, { id: number; organization_id: string }>;
+  byName: Map<string, { id: number }>;
+  bySigurId: Map<number, { id: number }>;
+  byUniqueName: Map<string, { id: number }>;
 }
 
 type PollCheckpointSource = 'memory' | 'db' | 'fallback';
@@ -77,19 +77,18 @@ async function getEmployeeMaps(): Promise<EmployeeMaps> {
 
   const { data } = await supabase
     .from('employees')
-    .select('id, organization_id, full_name, sigur_employee_id')
+    .select('id, full_name, sigur_employee_id')
     .eq('is_archived', false);
 
-  const byNameOrg = new Map<string, { id: number; organization_id: string }>();
-  const bySigurId = new Map<number, { id: number; organization_id: string }>();
-  const byUniqueName = new Map<string, { id: number; organization_id: string }>();
+  const byName = new Map<string, { id: number }>();
+  const bySigurId = new Map<number, { id: number }>();
+  const byUniqueName = new Map<string, { id: number }>();
   const nameCounts = new Map<string, number>();
 
   for (const emp of data || []) {
     const name = normalizePersonName(emp.full_name || '');
-    const ref = { id: emp.id, organization_id: emp.organization_id };
-    const key = `${name}|${emp.organization_id}`;
-    if (!byNameOrg.has(key)) byNameOrg.set(key, ref);
+    const ref = { id: emp.id };
+    if (!byName.has(name)) byName.set(name, ref);
     if (emp.sigur_employee_id != null) bySigurId.set(emp.sigur_employee_id, ref);
     nameCounts.set(name, (nameCounts.get(name) || 0) + 1);
     byUniqueName.set(name, ref);
@@ -101,22 +100,9 @@ async function getEmployeeMaps(): Promise<EmployeeMaps> {
     }
   }
 
-  employeeCache = { byNameOrg, bySigurId, byUniqueName, fetchedAt: Date.now() };
-  console.log(`[presence-polling] cached ${byNameOrg.size} employees`);
+  employeeCache = { byName, bySigurId, byUniqueName, fetchedAt: Date.now() };
+  console.log(`[presence-polling] cached ${byName.size} employees`);
   return employeeCache;
-}
-
-async function getDefaultOrgId(): Promise<string | null> {
-  const { data, error } = await supabase.from('organizations').select('id').limit(2);
-  if (error) {
-    throw new Error(`[presence-polling] failed to resolve organization fallback: ${error.message}`);
-  }
-
-  if (!data || data.length !== 1) {
-    return null;
-  }
-
-  return data[0]?.id || null;
 }
 
 async function getLatestStoredEventTimestamp(): Promise<Date | null> {
@@ -197,8 +183,7 @@ export async function pollEventsOnce(now = new Date()): Promise<void> {
       `[presence-polling] fetched=${rawEvents.length} source=${window.checkpointSource} start=${window.startTime} end=${window.endTime}`,
     );
 
-    const { byNameOrg, bySigurId, byUniqueName } = await getEmployeeMaps();
-    const defaultOrgId = await getDefaultOrgId();
+    const { byName, bySigurId, byUniqueName } = await getEmployeeMaps();
 
     const { data: existingEvents } = await supabase
       .from('skud_events')
@@ -213,7 +198,6 @@ export async function pollEventsOnce(now = new Date()): Promise<void> {
     }
 
     const inserts: Array<{
-      organization_id: string;
       physical_person: string;
       card_number: string | null;
       event_date: string;
@@ -225,7 +209,6 @@ export async function pollEventsOnce(now = new Date()): Promise<void> {
     }> = [];
     const summariesToUpdate = new Set<string>();
     let storedUnmatched = 0;
-    let droppedWithoutOrg = 0;
 
     for (const raw of rawEvents) {
       const mapped = mapSigurEvent(raw as Record<string, unknown>);
@@ -242,25 +225,18 @@ export async function pollEventsOnce(now = new Date()): Promise<void> {
       existingSet.add(dedupHash);
 
       const nameKey = normalizePersonName(mapped.physicalPerson);
-      let emp: { id: number; organization_id: string } | undefined;
+      let emp: { id: number } | undefined;
       if (mapped.employeeId != null) {
         emp = bySigurId.get(mapped.employeeId);
       }
       if (!emp) {
         emp = byUniqueName.get(nameKey);
       }
-      if (!emp && defaultOrgId) {
-        emp = byNameOrg.get(`${nameKey}|${defaultOrgId}`);
-      }
-
-      const organizationId = emp?.organization_id || defaultOrgId;
-      if (!organizationId) {
-        droppedWithoutOrg++;
-        continue;
+      if (!emp) {
+        emp = byName.get(nameKey);
       }
 
       inserts.push({
-        organization_id: organizationId,
         physical_person: mapped.physicalPerson,
         card_number: mapped.cardNumber || null,
         event_date: mapped.eventDate,
@@ -272,7 +248,7 @@ export async function pollEventsOnce(now = new Date()): Promise<void> {
       });
 
       if (emp) {
-        summariesToUpdate.add(`${emp.id}:${organizationId}:${mapped.eventDate}`);
+        summariesToUpdate.add(`${emp.id}:${mapped.eventDate}`);
       } else {
         storedUnmatched++;
       }
@@ -293,15 +269,15 @@ export async function pollEventsOnce(now = new Date()): Promise<void> {
 
     if (summariesToUpdate.size > 0) {
       const pairs = [...summariesToUpdate].map(key => {
-        const [empId, orgId, date] = key.split(':');
-        return { org_id: orgId, emp_id: parseInt(empId, 10), date };
+        const [empId, date] = key.split(':');
+        return { emp_id: parseInt(empId, 10), date };
       });
       await supabase.rpc('batch_recalculate_skud_daily_summary', { p_pairs: pairs });
     }
 
     lastSuccessfulPollAt = now;
     console.log(
-      `[presence-polling] cycle done source=${window.checkpointSource} start=${window.startTime} end=${window.endTime} fetched=${rawEvents.length} inserted=${totalInserted} unmatched=${storedUnmatched} droppedNoOrg=${droppedWithoutOrg} summaries=${summariesToUpdate.size}`,
+      `[presence-polling] cycle done source=${window.checkpointSource} start=${window.startTime} end=${window.endTime} fetched=${rawEvents.length} inserted=${totalInserted} unmatched=${storedUnmatched} summaries=${summariesToUpdate.size}`,
     );
   } catch (error) {
     console.error('[presence-polling] error:', (error as Error).message);

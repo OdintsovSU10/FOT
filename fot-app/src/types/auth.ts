@@ -23,7 +23,6 @@ export interface User {
 export interface UserProfile {
   id: string;
   full_name: string | null;
-  organization_id: string | null;
   position_type: EmployeePositionType;    // Заменяет role
   employee_id: number | null;              // Связь с employees
   department_id: string | null;            // org_department_id сотрудника
@@ -55,7 +54,6 @@ export interface RegisterData {
   email: string;
   password: string;
   full_name: string;
-  organization_id?: string;
 }
 
 export interface TwoFactorData {
@@ -71,8 +69,6 @@ export interface PendingUser {
   full_name: string | null;
   created_at: string;
   position_type: EmployeePositionType;
-  organization_id: string | null;
-  organization_name: string | null;
 }
 
 // Системная роль (права доступа) - заменяет ENUM position_type

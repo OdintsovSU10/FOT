@@ -7,7 +7,6 @@ interface ApiResponse<T> {
 
 export interface IChatConversation {
   id: string;
-  organization_id: string;
   created_at: string;
   updated_at: string;
   participants: { user_id: string; full_name: string | null }[];

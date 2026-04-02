@@ -23,13 +23,12 @@ import type {
 // ─── Import from Excel ───
 
 export async function importFromExcel(params: IImportParams): Promise<IImportResult> {
-  const { organizationId, fileBuffer } = params;
+  const { fileBuffer } = params;
 
   // Загружаем сотрудников для сопоставления по ФИО
   const { data: employeesData } = await supabase
     .from('employees')
     .select('id, full_name')
-    .eq('organization_id', organizationId)
     .eq('is_archived', false);
 
   const employeeMap = new Map<string, number>();
@@ -101,7 +100,6 @@ export async function importFromExcel(params: IImportParams): Promise<IImportRes
     const employeeId = employeeMap.get(physicalPerson.toLowerCase()) || null;
 
     eventsToInsert.push({
-      organization_id: organizationId,
       physical_person: physicalPerson,
       card_number: cardNumber,
       event_date: eventDate,
@@ -135,7 +133,7 @@ export async function importFromExcel(params: IImportParams): Promise<IImportRes
   if (summariesToUpdate.size > 0) {
     const pairs = [...summariesToUpdate].map(key => {
       const [empId, date] = key.split(':');
-      return { org_id: organizationId, emp_id: parseInt(empId, 10), date };
+      return { emp_id: parseInt(empId, 10), date };
     });
     await supabase.rpc('batch_recalculate_skud_daily_summary', { p_pairs: pairs });
   }
@@ -240,17 +238,15 @@ export async function syncEmployeeRange(params: {
   employeeId: number;
   startDate: string;
   endDate: string;
-  organizationId: string | undefined;
   connection?: 'external' | 'internal';
 }): Promise<{ inserted: number; skipped: number; total: number; rawFetched: number }> {
-  const { employeeId, startDate, endDate, organizationId } = params;
+  const { employeeId, startDate, endDate } = params;
 
-  let empQuery = supabase
+  const empQuery = supabase
     .from('employees')
-    .select('id, organization_id, full_name, sigur_employee_id')
+    .select('id, full_name, sigur_employee_id')
     .eq('id', employeeId)
     .eq('is_archived', false);
-  if (organizationId) empQuery = empQuery.eq('organization_id', organizationId);
 
   const { data: empData, error: empError } = await empQuery.single();
   if (empError || !empData) {
@@ -258,7 +254,6 @@ export async function syncEmployeeRange(params: {
   }
 
   const sigurEmpId: number | null = empData.sigur_employee_id;
-  const employeeOrgId: string = empData.organization_id;
   const employeeName = normalizePersonName(empData.full_name || '');
   const employeeFullName = empData.full_name || '';
   const days = buildInclusiveDateRange(startDate, endDate);
@@ -287,7 +282,6 @@ export async function syncEmployeeRange(params: {
       .from('skud_events')
       .select('dedup_hash')
       .eq('event_date', day)
-      .eq('organization_id', employeeOrgId)
       .not('dedup_hash', 'is', null);
 
     const existingSet = new Set<string>();
@@ -307,7 +301,6 @@ export async function syncEmployeeRange(params: {
       }
       existingSet.add(dedupHash);
       toInsert.push({
-        organization_id: employeeOrgId,
         physical_person: m.physicalPerson,
         card_number: m.cardNumber || null,
         event_date: m.eventDate,
@@ -334,9 +327,7 @@ export async function syncEmployeeRange(params: {
 
   if (summariesToUpdate.size > 0) {
     const pairs = [...summariesToUpdate].map(date => ({
-      org_id: employeeOrgId,
-      emp_id: employeeId,
-      date,
+      emp_id: employeeId, date,
     }));
     await supabase.rpc('batch_recalculate_skud_daily_summary', { p_pairs: pairs });
   }
@@ -356,19 +347,17 @@ export async function syncEmployee(
     employeeId: number;
     startDate: string;
     endDate: string;
-    organizationId: string | undefined;
     connection?: 'external' | 'internal';
   },
 ): Promise<void> {
-  const { employeeId, startDate, endDate, organizationId } = params;
+  const { employeeId, startDate, endDate } = params;
 
   // 1. Загрузка сотрудника
-  let empQuery = supabase
+  const empQuery = supabase
     .from('employees')
-    .select('id, organization_id, full_name, sigur_employee_id')
+    .select('id, full_name, sigur_employee_id')
     .eq('id', employeeId)
     .eq('is_archived', false);
-  if (organizationId) empQuery = empQuery.eq('organization_id', organizationId);
 
   const { data: empData, error: empError } = await empQuery.single();
   if (empError || !empData) {
@@ -376,7 +365,6 @@ export async function syncEmployee(
   }
 
   const sigurEmpId: number | null = empData.sigur_employee_id;
-  const employeeOrgId: string = empData.organization_id;
   const employeeName = normalizePersonName(empData.full_name || '');
 
   console.log(`[sync-employee] id=${employeeId}, sigurId=${sigurEmpId}, name="${employeeName}"`);
@@ -458,7 +446,6 @@ export async function syncEmployee(
       .from('skud_events')
       .select('dedup_hash')
       .eq('event_date', day)
-      .eq('organization_id', employeeOrgId)
       .not('dedup_hash', 'is', null);
 
     const existingSet = new Set<string>();
@@ -478,7 +465,6 @@ export async function syncEmployee(
       }
       existingSet.add(dedupHash);
       toInsert.push({
-        organization_id: employeeOrgId,
         physical_person: m.physicalPerson,
         card_number: m.cardNumber || null,
         event_date: m.eventDate,
@@ -508,7 +494,7 @@ export async function syncEmployee(
   // 5. Пересчёт daily summary
   if (summariesToUpdate.size > 0) {
     const pairs = [...summariesToUpdate].map(date => ({
-      org_id: employeeOrgId, emp_id: employeeId, date,
+      emp_id: employeeId, date,
     }));
     await supabase.rpc('batch_recalculate_skud_daily_summary', { p_pairs: pairs });
   }
@@ -570,17 +556,17 @@ export async function cleanDuplicates(): Promise<ICleanDuplicatesResult> {
 // ─── Clear data ───
 
 export async function clearData(params: IClearParams): Promise<void> {
-  const { organizationId, startDate, endDate } = params;
+  const { startDate, endDate } = params;
 
   let eventsQuery = supabase
     .from('skud_events')
     .delete()
-    .eq('organization_id', organizationId);
+    .gte('id', 0);
 
   let summaryQuery = supabase
     .from('skud_daily_summary')
     .delete()
-    .eq('organization_id', organizationId);
+    .gte('id', 0);
 
   if (startDate) {
     eventsQuery = eventsQuery.gte('event_date', startDate);

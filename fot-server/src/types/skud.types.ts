@@ -1,7 +1,6 @@
 /** Типы для СКУД-модуля */
 
 export interface ISkudEventRow {
-  organization_id: string;
   physical_person: string;
   card_number: string | null;
   event_date: string;
@@ -23,7 +22,6 @@ export interface IDailySummaryRow {
 }
 
 export interface IDashboardStatsParams {
-  organizationId: string | undefined;
   departmentId: string;
   period: string;
 }
@@ -82,7 +80,6 @@ export interface IDashboardStatsResult {
 }
 
 export interface IPresenceParams {
-  organizationId: string | undefined;
   departmentId: string | null;
 }
 
@@ -102,7 +99,6 @@ export interface IPresenceItem {
 }
 
 export interface IDisciplineParams {
-  organizationId: string | undefined;
   startMonth: string;
   endMonth: string;
 }
@@ -124,7 +120,6 @@ export interface IDisciplineResult {
 }
 
 export interface IImportParams {
-  organizationId: string;
   fileBuffer: Buffer;
   userId: string;
 }
@@ -139,7 +134,6 @@ export interface ISyncEmployeeParams {
   employeeId: number;
   startDate: string;
   endDate: string;
-  organizationId: string | undefined;
   connection?: 'external' | 'internal';
   userId: string;
 }
@@ -150,7 +144,6 @@ export interface ICleanDuplicatesResult {
 }
 
 export interface IClearParams {
-  organizationId: string;
   startDate?: string;
   endDate?: string;
   userId: string;
@@ -162,7 +155,6 @@ export interface IAccessPointSettingsRow {
 }
 
 export interface ISaveAccessPointSettingsParams {
-  organizationId: string | undefined;
   departmentId: string | null;
   settings: { access_point_name: string; is_internal: boolean }[];
 }
@@ -175,14 +167,12 @@ export interface ISyncAccessPointsResult {
 
 export interface IEmployeeEventsParams {
   employeeId: number;
-  organizationId: string | undefined;
   startDate: unknown;
   endDate: unknown;
   isSelfRequest: boolean;
 }
 
 export interface IEventsParams {
-  organizationId: string | undefined;
   startDate: unknown;
   endDate: unknown;
   accessPoint: unknown;

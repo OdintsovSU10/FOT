@@ -23,13 +23,7 @@ const getUploadUrl = async (req: AuthenticatedRequest, res: Response): Promise<v
       return;
     }
 
-    const orgId = req.user.organization_id;
-    if (!orgId) {
-      res.status(400).json({ success: false, error: 'Организация не определена' });
-      return;
-    }
-
-    const r2Key = r2Service.generateKey(orgId, employee_id, file_name);
+    const r2Key = r2Service.generateKey(employee_id, file_name);
     const uploadUrl = await r2Service.generateUploadUrl(r2Key, content_type);
 
     res.json({
@@ -62,7 +56,6 @@ const confirmUpload = async (req: AuthenticatedRequest, res: Response): Promise<
     const { data, error } = await supabase
       .from('documents')
       .insert({
-        organization_id: req.user.organization_id,
         employee_id,
         leave_request_id: leave_request_id || null,
         category,

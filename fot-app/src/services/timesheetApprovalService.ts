@@ -4,7 +4,6 @@ export type TimesheetApprovalStatus = 'draft' | 'submitted' | 'approved' | 'reje
 
 export interface ITimesheetApproval {
   id: number;
-  organization_id: string;
   department_id: string;
   period: string;
   status: TimesheetApprovalStatus;

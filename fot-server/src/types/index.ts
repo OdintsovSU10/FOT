@@ -10,7 +10,6 @@ export type UserRole = EmployeePositionType;
 export interface UserProfile {
   id: string;
   full_name: string | null;
-  organization_id: string | null;
   position_type: EmployeePositionType;    // Заменяет role
   employee_id: number | null;              // Связь с employees (заполняется админом)
   supervisor_id: string | null;            // ID руководителя
@@ -30,7 +29,6 @@ export interface AuthenticatedRequest extends Request {
   user: {
     id: string;
     email: string;
-    organization_id: string | null;
     position_type: EmployeePositionType;  // Заменяет role
     employee_id: number | null;
     department_id: string | null;         // org_department_id сотрудника
@@ -40,28 +38,9 @@ export interface AuthenticatedRequest extends Request {
   };
 }
 
-// Организация в БД
-export interface OrganizationEncrypted {
-  id: string;
-  name: string;
-  parent_organization_id: string | null;
-  created_at: string;
-  updated_at: string;
-}
-
-// Организация для API
-export interface Organization {
-  id: string;
-  name: string;
-  parent_organization_id: string | null;
-  created_at: string;
-  updated_at: string;
-}
-
 // Сотрудник в БД
 export interface EmployeeEncrypted {
   id: number;
-  organization_id: string;
   full_name: string;
   last_name: string | null;
   first_name: string | null;
@@ -95,7 +74,6 @@ export interface EmployeeEncrypted {
 // Сотрудник для API
 export interface Employee {
   id: number;
-  organization_id: string;
   full_name: string;
   last_name: string | null;
   first_name: string | null;
@@ -235,7 +213,6 @@ export interface ApiResponse<T = unknown> {
 export interface JWTPayload {
   sub: string; // user id
   email: string;
-  organization_id: string | null;
   position_type: EmployeePositionType;  // Заменяет role
   employee_id: number | null;
   department_id: string | null;          // org_department_id сотрудника
@@ -246,10 +223,9 @@ export interface JWTPayload {
   exp: number;
 }
 
-// Структура организации - Отдел в БД
+// Структура - Отдел в БД
 export interface OrgDepartmentEncrypted {
   id: string;
-  organization_id: string;
   parent_id: string | null;
   sigur_department_id: number | null;
   name: string;
@@ -260,10 +236,9 @@ export interface OrgDepartmentEncrypted {
   updated_at: string;
 }
 
-// Структура организации - Отдел для API
+// Структура - Отдел для API
 export interface OrgDepartment {
   id: string;
-  organization_id: string;
   parent_id: string | null;
   sigur_department_id: number | null;
   name: string;
@@ -290,7 +265,6 @@ export type LeaveRequestStatus = 'pending' | 'approved' | 'rejected' | 'cancelle
 
 export interface LeaveRequest {
   id: number;
-  organization_id: string;
   employee_id: number;
   request_type: LeaveRequestType;
   status: LeaveRequestStatus;
@@ -309,7 +283,6 @@ export type DocumentCategory = 'certificate' | 'scan' | 'approval' | 'payslip' |
 
 export interface Document {
   id: number;
-  organization_id: string;
   employee_id: number;
   leave_request_id: number | null;
   category: DocumentCategory;
@@ -324,7 +297,6 @@ export interface Document {
 // Расчётные листки
 export interface Payslip {
   id: number;
-  organization_id: string;
   employee_id: number;
   period: string;
   gross_amount: number | null;
@@ -341,7 +313,6 @@ export type PaymentType = 'salary' | 'advance' | 'bonus' | 'vacation_pay' | 'sic
 
 export interface Payment {
   id: number;
-  organization_id: string;
   employee_id: number;
   payment_date: string;
   amount: number;
@@ -357,7 +328,6 @@ export type ScheduleType = 'office' | 'remote' | 'hybrid' | 'shift';
 
 export interface WorkSchedule {
   id: string;
-  organization_id: string;
   name: string;
   schedule_type: ScheduleType;
   work_start: string;
@@ -409,7 +379,6 @@ export type TimesheetApprovalStatus = 'draft' | 'submitted' | 'approved' | 'reje
 
 export interface TimesheetApproval {
   id: number;
-  organization_id: string;
   department_id: string;
   period: string;
   status: TimesheetApprovalStatus;

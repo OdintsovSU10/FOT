@@ -13,7 +13,6 @@ interface IConnectionSettingsTabProps {
   selectedConnection: 'internal' | 'external';
   availableConnections: { internal: boolean; external: boolean };
   canEdit: boolean;
-  organizationId: string | undefined;
   error: string;
   setError: (error: string) => void;
   setSelectedConnection: (conn: 'internal' | 'external') => void;
@@ -28,7 +27,6 @@ export const ConnectionSettingsTab: FC<IConnectionSettingsTabProps> = ({
   selectedConnection,
   availableConnections,
   canEdit,
-  organizationId,
   setError,
   setSelectedConnection,
   checkConnection,
@@ -172,7 +170,6 @@ export const ConnectionSettingsTab: FC<IConnectionSettingsTabProps> = ({
       <StructureSyncSection
         connected={connected}
         canEdit={canEdit}
-        organizationId={organizationId}
         setError={setError}
         setActiveTab={setActiveTab}
         syncFilterSummary={syncFilterSummary}

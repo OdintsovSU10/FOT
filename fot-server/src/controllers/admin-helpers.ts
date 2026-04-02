@@ -1,18 +1,3 @@
-import type { OrganizationEncrypted, Organization } from '../types/index.js';
-
-/**
- * Расшифровывает организацию
- */
-export function decryptOrganization(encrypted: OrganizationEncrypted): Organization {
-  return {
-    id: encrypted.id,
-    name: encrypted.name || 'Неизвестная организация',
-    parent_organization_id: encrypted.parent_organization_id ?? null,
-    created_at: encrypted.created_at,
-    updated_at: encrypted.updated_at,
-  };
-}
-
 /**
  * Логирует ошибки Supabase с деталями
  */

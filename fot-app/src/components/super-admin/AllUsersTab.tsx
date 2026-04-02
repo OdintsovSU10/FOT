@@ -3,7 +3,7 @@ import type { FC } from 'react';
 import { adminService } from '../../services/adminService';
 import { structureApi } from '../../api/structure';
 import { useToast } from '../../contexts/ToastContext';
-import type { EmployeePositionType, TwoFactorData, Organization, OrgDepartmentNode } from '../../types';
+import type { EmployeePositionType, TwoFactorData, OrgDepartmentNode } from '../../types';
 import { POSITION_LABELS } from '../../types';
 import styles from '../../pages/super-admin/SuperAdmin.module.css';
 
@@ -11,8 +11,6 @@ export interface IUserFromApi {
   id: string;
   email?: string;
   full_name: string | null;
-  organization_id: string | null;
-  organization_name: string | null;
   department_id: string | null;
   department_name: string | null;
   position_type: EmployeePositionType;
@@ -42,7 +40,6 @@ interface ITwoFactorModal {
 
 interface IAllUsersTabProps {
   allUsers: IUserFromApi[];
-  organizations: Organization[];
   onReload: () => Promise<void>;
 }
 
@@ -99,14 +96,14 @@ export const AllUsersTab: FC<IAllUsersTabProps> = ({ allUsers, onReload }) => {
     return POSITION_LABELS[positionType] || positionType;
   };
 
-  const handleEmpSearchQuery = async (userId: string, orgId: string | null, query: string) => {
+  const handleEmpSearchQuery = async (userId: string, query: string) => {
     if (query.length < 2) {
       setEmpSearch({ userId, query, loading: false, results: [] });
       return;
     }
     setEmpSearch({ userId, query, loading: true, results: [] });
     try {
-      const results = await adminService.searchUnlinkedEmployees(query, orgId || undefined);
+      const results = await adminService.searchUnlinkedEmployees(query);
       setEmpSearch({ userId, query, loading: false, results });
     } catch (err) {
       console.error('Employee search error:', err);
@@ -337,7 +334,7 @@ export const AllUsersTab: FC<IAllUsersTabProps> = ({ allUsers, onReload }) => {
                           type="text"
                           placeholder="Поиск по ФИО..."
                           value={empSearch?.userId === user.id ? empSearch.query : ''}
-                          onChange={(e) => handleEmpSearchQuery(user.id, null, e.target.value)}
+                          onChange={(e) => handleEmpSearchQuery(user.id, e.target.value)}
                           className={styles.nameInput}
                           style={{ marginTop: 6 }}
                         />

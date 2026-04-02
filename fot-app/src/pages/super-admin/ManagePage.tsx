@@ -131,8 +131,7 @@ export const ManagePage: FC = () => {
     if (!newDeptName.trim() || creating) return;
     setCreating(true);
     const parentId = addingTo === 'root' ? null : addingTo;
-    const orgId = profile?.organization_id || structure?.departments[0]?.organization_id;
-    const res = await structureApi.createDepartment(newDeptName.trim(), undefined, orgId || undefined, parentId);
+    const res = await structureApi.createDepartment(newDeptName.trim(), undefined, parentId);
     setCreating(false);
     if (!res.error) {
       cancelAdding();
@@ -145,8 +144,7 @@ export const ManagePage: FC = () => {
   const handleDeleteDept = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
     if (!confirm('Удалить этот отдел?')) return;
-    const orgId = profile?.organization_id || structure?.departments[0]?.organization_id;
-    const res = await structureApi.deleteDepartment(id, orgId || undefined);
+    const res = await structureApi.deleteDepartment(id);
     if (!res.error) {
       if (selectedDeptId === id) {
         setSelectedDeptId(null);

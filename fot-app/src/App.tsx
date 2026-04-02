@@ -303,7 +303,7 @@ const AppRoutes = () => {
               </Layout>
             }
           />
-          <Route path="/admin/organizations" element={<Navigate to="/admin/manage" replace />} />
+
           <Route
             path="/admin/audit"
             element={

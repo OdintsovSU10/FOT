@@ -5,7 +5,6 @@ import { supabase } from '../config/database.js';
 import { formatDateToISO } from '../utils/date.utils.js';
 import { collectDeptIds, getMonday, DAY_NAMES, countWorkingDays } from './skud-shared.service.js';
 import { resolveSchedulesBulk, getEffectiveLateThreshold, needsSkudCheck } from './schedule.service.js';
-import type { IResolvedSchedule } from '../types/index.js';
 import type {
   IDashboardStatsParams,
   IDashboardStatsResult,
@@ -19,18 +18,17 @@ const SLIGHTLY_LATE_THRESHOLD_DEFAULT = '09:15:00';
 export async function getDashboardStats(
   params: IDashboardStatsParams,
 ): Promise<IDashboardStatsResult> {
-  const { organizationId, departmentId, period } = params;
+  const { departmentId, period } = params;
 
-  const deptIds = await collectDeptIds(departmentId, organizationId);
+  const deptIds = await collectDeptIds(departmentId);
 
   // Загрузить сотрудников отдела
-  let empQuery = supabase
+  const empQuery = supabase
     .from('employees')
     .select('id, full_name')
     .eq('is_archived', false)
     .eq('employment_status', 'active')
     .in('org_department_id', deptIds);
-  if (organizationId) empQuery = empQuery.eq('organization_id', organizationId);
 
   const { data: employees } = await empQuery;
   if (!employees || employees.length === 0) {
@@ -52,15 +50,13 @@ export async function getDashboardStats(
 
   // Resolve графики — нужны для пороговых значений и исключения remote
   // Загрузка org_department_id из employees
-  let empDeptQuery = supabase
+  const empDeptQuery = supabase
     .from('employees')
     .select('id, org_department_id')
     .in('id', empIds);
   const { data: empDepts } = await empDeptQuery;
   const empListForSched = (empDepts || []).map(e => ({ id: e.id as number, org_department_id: (e.org_department_id as string | null) }));
-  const schedulesMap = organizationId
-    ? await resolveSchedulesBulk(empListForSched, organizationId, formatDateToISO(new Date()))
-    : new Map<number, IResolvedSchedule>();
+  const schedulesMap = await resolveSchedulesBulk(empListForSched, formatDateToISO(new Date()));
 
   // Множество сотрудников, которым не нужен СКУД-контроль сегодня
   const remoteEmpIds = new Set<number>();
@@ -138,43 +134,39 @@ export async function getDashboardStats(
     .lte('date', todayStr);
 
   // Запрос entry-событий за сегодня
-  let eventsQuery = supabase
+  const eventsQuery = supabase
     .from('skud_events')
     .select('event_time, employee_id')
     .eq('event_date', todayStr)
     .eq('direction', 'entry')
     .in('employee_id', empIds);
-  if (organizationId) eventsQuery = eventsQuery.eq('organization_id', organizationId);
   const { data: todayEvents } = await eventsQuery;
 
   // Запрос exit-событий за сегодня
-  let exitEventsQuery = supabase
+  const exitEventsQuery = supabase
     .from('skud_events')
     .select('event_time, employee_id')
     .eq('event_date', todayStr)
     .eq('direction', 'exit')
     .in('employee_id', empIds);
-  if (organizationId) exitEventsQuery = exitEventsQuery.eq('organization_id', organizationId);
   const { data: todayExitEvents } = await exitEventsQuery;
 
   // Запрос последних событий
-  let recentEvQuery = supabase
+  const recentEvQuery = supabase
     .from('skud_events')
     .select('event_time, employee_id, physical_person, access_point, direction')
     .eq('event_date', todayStr)
     .in('employee_id', empIds)
     .order('event_time', { ascending: false })
     .limit(50);
-  if (organizationId) recentEvQuery = recentEvQuery.eq('organization_id', organizationId);
   const { data: recentEventsRaw } = await recentEvQuery;
 
   // Запрос аномалий
-  let anomalyQuery = supabase
+  const anomalyQuery = supabase
     .from('skud_events')
     .select('id, employee_id, physical_person, direction')
     .eq('event_date', todayStr)
     .is('employee_id', null);
-  if (organizationId) anomalyQuery = anomalyQuery.eq('organization_id', organizationId);
   const { data: unknownEvents } = await anomalyQuery;
 
   // --- Агрегация ---
@@ -234,7 +226,7 @@ export async function getDashboardStats(
   // Average arrival by weekday
   const arrivalRangeStart = period === 'today' ? mondayStr : period === 'month' ? monthStartStr : fourWeeksAgoStr;
   const arrivalRangeEnd = todayStr;
-  let arrivalEventsQuery = supabase
+  const arrivalEventsQuery = supabase
     .from('skud_events')
     .select('event_date, event_time, employee_id')
     .eq('direction', 'entry')
@@ -242,7 +234,6 @@ export async function getDashboardStats(
     .gte('event_date', arrivalRangeStart)
     .lte('event_date', arrivalRangeEnd)
     .order('event_time', { ascending: true });
-  if (organizationId) arrivalEventsQuery = arrivalEventsQuery.eq('organization_id', organizationId);
   const { data: arrivalEvents } = await arrivalEventsQuery;
 
   const firstEntryMap = new Map<string, string>();
@@ -317,14 +308,13 @@ export async function getDashboardStats(
       }
     }
   } else {
-    let periodEventsQuery = supabase
+    const periodEventsQuery = supabase
       .from('skud_events')
       .select('event_time, event_date')
       .eq('direction', 'entry')
       .in('employee_id', empIds)
       .gte('event_date', periodStartStr)
       .lte('event_date', periodEndStr);
-    if (organizationId) periodEventsQuery = periodEventsQuery.eq('organization_id', organizationId);
     const { data: periodEvents } = await periodEventsQuery;
 
     for (const evt of periodEvents || []) {

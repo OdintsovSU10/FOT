@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { adminService } from '../../services/adminService';
 import { useToast } from '../../contexts/ToastContext';
-import type { Organization } from '../../types';
 import { PendingUsersTab } from '../../components/super-admin/PendingUsersTab';
 import type { IPendingUser } from '../../components/super-admin/PendingUsersTab';
 import { AllUsersTab } from '../../components/super-admin/AllUsersTab';
@@ -13,22 +12,19 @@ export const UserManagementPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'pending' | 'all'>('pending');
   const [pendingUsers, setPendingUsers] = useState<IPendingUser[]>([]);
   const [allUsers, setAllUsers] = useState<IUserFromApi[]>([]);
-  const [organizations, setOrganizations] = useState<Organization[]>([]);
   const [loading, setLoading] = useState(true);
 
   const loadData = useCallback(async () => {
     setLoading(true);
 
     try {
-      const [pending, users, orgs] = await Promise.all([
+      const [pending, users] = await Promise.all([
         adminService.getPendingUsers(),
         adminService.getAllUsers(),
-        adminService.getOrganizations(),
       ]);
 
       setPendingUsers(pending);
       setAllUsers(users);
-      setOrganizations(orgs);
     } catch {
       toast.error('Ошибка загрузки данных');
     } finally {
@@ -73,7 +69,6 @@ export const UserManagementPage: React.FC = () => {
       {activeTab === 'pending' && (
         <PendingUsersTab
           pendingUsers={pendingUsers}
-          organizations={organizations}
           onReload={loadData}
         />
       )}
@@ -81,7 +76,6 @@ export const UserManagementPage: React.FC = () => {
       {activeTab === 'all' && (
         <AllUsersTab
           allUsers={allUsers}
-          organizations={organizations}
           onReload={loadData}
         />
       )}

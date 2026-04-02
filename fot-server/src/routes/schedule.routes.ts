@@ -1,12 +1,10 @@
 import { Router } from 'express';
 import { scheduleController } from '../controllers/schedule.controller.js';
-import { authenticate, requirePosition, requireOrganization, injectOrganizationFromQuery } from '../middleware/auth.js';
+import { authenticate, requirePosition } from '../middleware/auth.js';
 
 const router = Router();
 
 router.use(authenticate);
-router.use(injectOrganizationFromQuery);
-router.use(requireOrganization);
 
 // Шаблоны графиков
 router.get('/', requirePosition('header', 'hr', 'admin', 'super_admin'), scheduleController.list);

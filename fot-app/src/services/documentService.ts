@@ -4,7 +4,6 @@ export type DocumentCategory = 'certificate' | 'scan' | 'approval' | 'payslip' |
 
 export interface IDocument {
   id: number;
-  organization_id: string;
   employee_id: number;
   leave_request_id: number | null;
   category: DocumentCategory;

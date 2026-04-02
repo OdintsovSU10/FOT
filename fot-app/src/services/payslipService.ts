@@ -2,7 +2,6 @@ import { apiClient } from '../api/client';
 
 export interface IPayslip {
   id: number;
-  organization_id: string;
   employee_id: number;
   period: string;
   gross_amount: number | null;

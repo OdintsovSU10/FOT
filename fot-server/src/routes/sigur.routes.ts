@@ -82,13 +82,7 @@ router.put('/sync-filter', sigurFilterController.updateFilter);
 
 // === Admin эндпоинты ===
 
-// POST /api/sigur/sync-organizations — импорт отделов Sigur как организаций
-router.post('/sync-organizations', sigurAdminController.syncOrganizations);
-
 // POST /api/sigur/seed-positions — предзаполнение справочника должностей
 router.post('/seed-positions', sigurAdminController.seedPositions);
-
-// POST /api/sigur/clean-duplicate-organizations — удаление дублей организаций
-router.post('/clean-duplicate-organizations', sigurAdminController.cleanDuplicateOrganizations);
 
 export default router;

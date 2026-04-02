@@ -2,7 +2,6 @@ import { Response } from 'express';
 import { z } from 'zod';
 import { supabase } from '../config/database.js';
 import { auditService } from '../services/audit.service.js';
-import { getOrgId } from '../utils/org.utils.js';
 import type { AuthenticatedRequest, TimeStatus, IResolvedSchedule } from '../types/index.js';
 import { exportTimesheet } from './timesheet-export.controller.js';
 import { resolveSchedulesBulk, isWorkingDay, needsSkudCheck, countWorkingDaysUpToToday as schedWorkingDaysUpToToday, getEffectiveLateThreshold } from '../services/schedule.service.js';
@@ -57,7 +56,6 @@ export const timesheetController = {
   /** GET /api/timesheet?month=YYYY-MM&department_id=... */
   async getAll(req: AuthenticatedRequest, res: Response) {
     try {
-      const organizationId = getOrgId(req);
       const { month } = req.query;
       // Для header: принудительно фильтруем по его отделу
       const department_id = req.user.position_type === 'header' && req.user.department_id
@@ -95,10 +93,6 @@ export const timesheetController = {
         .eq('is_archived', false)
         .order('full_name');
 
-      if (organizationId) {
-        empQuery = empQuery.eq('organization_id', organizationId);
-      }
-
       if (hasDeptFilter) {
         empQuery = empQuery.eq('org_department_id', department_id as string);
       }
@@ -110,9 +104,7 @@ export const timesheetController = {
 
       // Resolve графики для всех сотрудников
       const empList = (employees || []).map(e => ({ id: e.id as number, org_department_id: (e.org_department_id as string | null) }));
-      const schedulesMap = organizationId
-        ? await resolveSchedulesBulk(empList, organizationId, startDate)
-        : new Map<number, IResolvedSchedule>();
+      const schedulesMap = await resolveSchedulesBulk(empList, startDate);
 
       // Fetch position names
       const positionIds = [...new Set((employees || []).map(e => e.position_id).filter(Boolean))];
@@ -128,13 +120,10 @@ export const timesheetController = {
       const BATCH_SIZE = 200;
 
       // Load internal access points for filtering
-      let internalPointsQuery = supabase
+      const internalPointsQuery = supabase
         .from('skud_access_point_settings')
         .select('access_point_name')
         .eq('is_internal', true);
-      if (organizationId) {
-        internalPointsQuery = internalPointsQuery.eq('organization_id', organizationId);
-      }
       const { data: apSettings } = await internalPointsQuery;
       const internalPoints = new Set<string>(
         (apSettings || []).map((s: { access_point_name: string }) => s.access_point_name.trim()),
@@ -169,11 +158,10 @@ export const timesheetController = {
       }
       const seenEventIds = new Set(rawEvents.map(e => `${e.employee_id}_${e.event_date}_${e.event_time}`));
 
-      if (empNameMap.size > 0 && organizationId) {
+      if (empNameMap.size > 0) {
         const unmatchedQuery = supabase
           .from('skud_events')
           .select('id, physical_person, employee_id, event_date, event_time, direction, access_point')
-          .eq('organization_id', organizationId)
           .is('employee_id', null)
           .gte('event_date', startDate)
           .lte('event_date', endDate)

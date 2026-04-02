@@ -1,14 +1,12 @@
 import { Response } from 'express';
 import XLSX from 'xlsx';
 import { supabase } from '../config/database.js';
-import { getOrgId } from '../utils/org.utils.js';
-import type { AuthenticatedRequest, IResolvedSchedule } from '../types/index.js';
+import type { AuthenticatedRequest } from '../types/index.js';
 import { resolveSchedulesBulk, isWorkingDay, needsSkudCheck, countWorkingDaysForSchedule } from '../services/schedule.service.js';
 
 /** GET /api/timesheet/export?month=YYYY-MM&department_id=... */
 export async function exportTimesheet(req: AuthenticatedRequest, res: Response) {
   try {
-    const organizationId = getOrgId(req);
     const { month, department_id } = req.query;
 
     if (!month || typeof month !== 'string') {
@@ -29,10 +27,6 @@ export async function exportTimesheet(req: AuthenticatedRequest, res: Response) 
       .eq('is_archived', false)
       .order('full_name');
 
-    if (organizationId) {
-      empQuery = empQuery.eq('organization_id', organizationId);
-    }
-
     if (department_id && typeof department_id === 'string') {
       empQuery = empQuery.eq('org_department_id', department_id);
     }
@@ -42,20 +36,14 @@ export async function exportTimesheet(req: AuthenticatedRequest, res: Response) 
 
     // Resolve графики
     const empList = (employees || []).map(e => ({ id: e.id as number, org_department_id: (e.org_department_id as string | null) }));
-    const schedulesMap = organizationId
-      ? await resolveSchedulesBulk(empList, organizationId, startDate)
-      : new Map<number, IResolvedSchedule>();
+    const schedulesMap = await resolveSchedulesBulk(empList, startDate);
 
     // Fetch internal access points
     const BATCH = 200;
-    let expInternalQuery = supabase
+    const { data: expApSettings } = await supabase
       .from('skud_access_point_settings')
       .select('access_point_name')
       .eq('is_internal', true);
-    if (organizationId) {
-      expInternalQuery = expInternalQuery.eq('organization_id', organizationId);
-    }
-    const { data: expApSettings } = await expInternalQuery;
     const expInternalPoints = new Set<string>(
       (expApSettings || []).map((s: { access_point_name: string }) => s.access_point_name.trim()),
     );
@@ -88,11 +76,10 @@ export async function exportTimesheet(req: AuthenticatedRequest, res: Response) 
     }
     const expSeenKeys = new Set(expRawEvents.map(e => `${e.employee_id}_${e.event_date}_${e.event_time}`));
 
-    if (expNameMap.size > 0 && organizationId) {
+    if (expNameMap.size > 0) {
       const { data: unmatchedExp } = await supabase
         .from('skud_events')
         .select('id, physical_person, employee_id, event_date, event_time, direction, access_point')
-        .eq('organization_id', organizationId)
         .is('employee_id', null)
         .gte('event_date', startDate)
         .lte('event_date', endDate)

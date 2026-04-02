@@ -24,11 +24,9 @@ export const PHASE_LABELS: Record<string, string> = {
 };
 
 export const ALL_SYNC_STEPS: ISyncAllStep[] = [
-  { id: 1, name: 'organizations', label: 'Организации', status: 'pending' },
-  { id: 2, name: 'clean-duplicates', label: 'Очистка дублей', status: 'pending' },
-  { id: 3, name: 'departments', label: 'Отделы (иерархия)', status: 'pending' },
-  { id: 4, name: 'positions', label: 'Должности', status: 'pending' },
-  { id: 5, name: 'employees', label: 'Сотрудники', status: 'pending' },
+  { id: 1, name: 'departments', label: 'Отделы (иерархия)', status: 'pending' },
+  { id: 2, name: 'positions', label: 'Должности', status: 'pending' },
+  { id: 3, name: 'employees', label: 'Сотрудники', status: 'pending' },
 ];
 
 export const DEFAULT_SYNC_ALL_STEPS: SyncStepName[] = ['departments', 'positions', 'employees'];
@@ -53,12 +51,6 @@ export const formatDuration = (durationMs?: unknown) => {
 export const renderStepResult = (name: string, result: Record<string, unknown>) => {
   let text = '';
   switch (name) {
-    case 'organizations':
-      text = `Импорт: ${result.imported}, пропущено: ${result.skipped}`;
-      break;
-    case 'clean-duplicates':
-      text = `Удалено дублей: ${result.duplicatesRemoved}`;
-      break;
     case 'departments':
       text = `Новых: ${result.imported}, обновлено: ${result.updated}, связей: ${result.parentLinksSet}`;
       if (result.filtered) text += `, отфильтровано: ${result.filtered}`;

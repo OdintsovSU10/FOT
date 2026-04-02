@@ -2,7 +2,6 @@ export type ScheduleType = 'office' | 'remote' | 'hybrid' | 'shift';
 
 export interface IWorkSchedule {
   id: string;
-  organization_id: string;
   name: string;
   schedule_type: ScheduleType;
   work_start: string;

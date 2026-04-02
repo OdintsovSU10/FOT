@@ -40,12 +40,11 @@ export const sigurService = {
     return result;
   },
 
-  async sync(startDate: string, endDate: string, organizationId?: string): Promise<ISigurSyncResult> {
+  async sync(startDate: string, endDate: string): Promise<ISigurSyncResult> {
     // Go API creates a sync command and returns its ID
     const response = await apiClient.post<ApiResponse<{ id: number }>>('/sigur/sync', {
       startDate,
       endDate,
-      organization_id: organizationId,
     });
     const commandId = response.data.id;
     // Poll progress until done
@@ -114,23 +113,9 @@ export const sigurService = {
     return apiClient.get('/sigur/events/types');
   },
 
-  async syncOrganizations(): Promise<{ imported: number; skipped: number; total: number }> {
-    const response = await apiClient.post<ApiResponse<{ imported: number; skipped: number; total: number }>>(
-      '/sigur/sync-organizations'
-    );
-    return response.data;
-  },
-
   async syncEmployees(): Promise<{ imported: number; skipped: number; total: number; errors: string[] }> {
     const response = await apiClient.post<ApiResponse<{ imported: number; skipped: number; total: number; errors: string[] }>>(
       '/sigur/sync-employees'
-    );
-    return response.data;
-  },
-
-  async cleanDuplicateOrganizations(): Promise<{ totalBefore: number; totalAfter: number; duplicatesRemoved: number; errors: string[] }> {
-    const response = await apiClient.post<ApiResponse<{ totalBefore: number; totalAfter: number; duplicatesRemoved: number; errors: string[] }>>(
-      '/sigur/clean-duplicate-organizations'
     );
     return response.data;
   },
@@ -140,18 +125,16 @@ export const sigurService = {
     return response.data;
   },
 
-  async syncDepartments(organizationId: string): Promise<{ imported: number; updated: number; skipped: number; filtered: number; total: number; parentLinksSet: number; errors: string[] }> {
+  async syncDepartments(): Promise<{ imported: number; updated: number; skipped: number; filtered: number; total: number; parentLinksSet: number; errors: string[] }> {
     const response = await apiClient.post<ApiResponse<{ imported: number; updated: number; skipped: number; filtered: number; total: number; parentLinksSet: number; errors: string[] }>>(
-      '/sigur/sync-departments',
-      { organization_id: organizationId }
+      '/sigur/sync-departments'
     );
     return response.data;
   },
 
-  async seedPositions(organizationId: string): Promise<{ created: number; skipped: number; total: number }> {
+  async seedPositions(): Promise<{ created: number; skipped: number; total: number }> {
     const response = await apiClient.post<ApiResponse<{ created: number; skipped: number; total: number }>>(
-      '/sigur/seed-positions',
-      { organization_id: organizationId }
+      '/sigur/seed-positions'
     );
     return response.data;
   },
