@@ -130,7 +130,6 @@
   background: var(--bg-secondary);
   border: 1px solid var(--border);
   border-radius: 14px;
-  overflow: hidden;
 }
 
 .cardHeader {
@@ -649,7 +648,7 @@
   flex-direction: column;
   gap: 6px;
   padding: 10px;
-  max-height: 480px;
+  max-height: 600px;
   overflow-y: auto;
 }
 
@@ -657,7 +656,6 @@
   background: var(--surface, var(--bg-secondary));
   border: 1px solid var(--border);
   border-radius: 10px;
-  overflow: hidden;
 }
 
 .skudDayCard.skudDayToday {
@@ -679,10 +677,12 @@
   border: none;
   cursor: pointer;
   font-size: 13px;
+  line-height: 1.4;
   color: var(--text-primary);
   font-family: inherit;
   transition: background 0.12s;
   text-align: left;
+  min-height: 38px;
 }
 
 .skudDayHeader:hover:not(:disabled) {
