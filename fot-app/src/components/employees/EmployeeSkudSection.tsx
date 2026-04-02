@@ -205,20 +205,29 @@ export const EmployeeSkudSection: FC<IEmployeeSkudSectionProps> = ({
   const [groups, setGroups] = useState<IDayGroup[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedDays, setExpandedDays] = useState<Set<string>>(new Set());
-  const [viewMode, setViewMode] = useState<ViewMode>(focusDate ? 'day' : 'day');
-  const [viewDate, setViewDate] = useState(() => {
-    if (focusDate) {
-      const [y, m, d] = focusDate.split('-').map(Number);
-      return new Date(y, m - 1, d);
-    }
-    return new Date();
-  });
+  const [viewMode, setViewMode] = useState<ViewMode>('day');
+  const [viewDateStr, setViewDateStr] = useState(() => focusDate || toLocalISO(new Date()));
   const [rangeStart, setRangeStart] = useState(() => toLocalISO(new Date()));
   const [rangeEnd, setRangeEnd] = useState(() => toLocalISO(new Date()));
   const [syncing, setSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState<string | null>(null);
   const [internalPoints, setInternalPoints] = useState<Set<string>>(new Set());
   const prevFocusKey = useRef<number>(0);
+  const requestIdRef = useRef(0);
+  const internalPointsRef = useRef(internalPoints);
+  internalPointsRef.current = internalPoints;
+
+  // Helper: строку в Date
+  const viewDate = (() => {
+    const [y, m, d] = viewDateStr.split('-').map(Number);
+    return new Date(y, m - 1, d);
+  })();
+
+  // Helper: вычислить диапазон (чистая функция, без хуков)
+  const getEffectiveRange = (): { startDate: string; endDate: string } => {
+    if (viewMode === 'range') return { startDate: rangeStart, endDate: rangeEnd };
+    return getDateRange(viewMode, viewDate);
+  };
 
   // Load internal point settings (org-level, без department_id)
   useEffect(() => {
@@ -232,34 +241,52 @@ export const EmployeeSkudSection: FC<IEmployeeSkudSectionProps> = ({
     if (focusDate && focusKey !== undefined && focusKey !== prevFocusKey.current) {
       prevFocusKey.current = focusKey;
       setViewMode('day');
-      const [fy, fm, fd] = focusDate.split('-').map(Number);
-      setViewDate(new Date(fy, fm - 1, fd));
+      setViewDateStr(focusDate);
     }
   }, [focusDate, focusKey]);
 
-  const getEffectiveRange = useCallback((): { startDate: string; endDate: string } => {
-    if (viewMode === 'range') return { startDate: rangeStart, endDate: rangeEnd };
-    return getDateRange(viewMode, viewDate);
-  }, [viewMode, viewDate, rangeStart, rangeEnd]);
+  // Стабильные строковые deps для загрузки
+  const { startDate: effStart, endDate: effEnd } = getEffectiveRange();
 
-  const loadEvents = useCallback(async () => {
+  useEffect(() => {
+    const currentReqId = ++requestIdRef.current;
     setLoading(true);
-    try {
-      const { startDate, endDate } = getEffectiveRange();
-      const events = await skudService.getEmployeeEvents(employeeId, startDate, endDate);
-      const grouped = groupByDay(events, internalPoints);
-      setGroups(grouped);
-      if (viewMode === 'day' && grouped.length > 0) {
-        setExpandedDays(new Set([grouped[0].date]));
-      }
-    } catch {
-      setGroups([]);
-    } finally {
-      setLoading(false);
-    }
-  }, [employeeId, viewMode, viewDate, rangeStart, rangeEnd, internalPoints, getEffectiveRange]);
 
-  useEffect(() => { loadEvents(); }, [loadEvents]);
+    skudService.getEmployeeEvents(employeeId, effStart, effEnd)
+      .then(events => {
+        if (requestIdRef.current !== currentReqId) return; // stale — игнорируем
+        const grouped = groupByDay(events, internalPointsRef.current);
+        setGroups(grouped);
+        if (viewMode === 'day' && grouped.length > 0) {
+          setExpandedDays(new Set([grouped[0].date]));
+        }
+      })
+      .catch(() => {
+        if (requestIdRef.current !== currentReqId) return;
+        setGroups([]);
+      })
+      .finally(() => {
+        if (requestIdRef.current !== currentReqId) return;
+        setLoading(false);
+      });
+  }, [employeeId, effStart, effEnd, viewMode]);
+
+  // Перезагрузка при смене internalPoints (не сбрасывая диапазон)
+  const internalPointsLoaded = useRef(false);
+  useEffect(() => {
+    if (!internalPointsLoaded.current) {
+      internalPointsLoaded.current = true;
+      return; // skip initial
+    }
+    const currentReqId = ++requestIdRef.current;
+    skudService.getEmployeeEvents(employeeId, effStart, effEnd)
+      .then(events => {
+        if (requestIdRef.current !== currentReqId) return;
+        setGroups(groupByDay(events, internalPointsRef.current));
+      })
+      .catch(() => {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [internalPoints]);
 
   const handleSync = async () => {
     setSyncing(true);
@@ -271,7 +298,12 @@ export const EmployeeSkudSection: FC<IEmployeeSkudSectionProps> = ({
         (msg) => setSyncResult(msg),
       );
       setSyncResult(`Загружено ${result.inserted} новых событий (пропущено ${result.skipped})`);
-      await loadEvents();
+      // Перезагрузить данные
+      const currentReqId = ++requestIdRef.current;
+      const events = await skudService.getEmployeeEvents(employeeId, startDate, endDate);
+      if (requestIdRef.current === currentReqId) {
+        setGroups(groupByDay(events, internalPointsRef.current));
+      }
       if (result.inserted > 0) {
         onSync?.();
       }
@@ -291,8 +323,14 @@ export const EmployeeSkudSection: FC<IEmployeeSkudSectionProps> = ({
     });
   };
 
-  const goBack = () => setViewDate(d => navigateDate(viewMode, d, -1));
-  const goForward = () => setViewDate(d => navigateDate(viewMode, d, 1));
+  const goBack = () => setViewDateStr(s => {
+    const [y, m, d] = s.split('-').map(Number);
+    return toLocalISO(navigateDate(viewMode, new Date(y, m - 1, d), -1));
+  });
+  const goForward = () => setViewDateStr(s => {
+    const [y, m, d] = s.split('-').map(Number);
+    return toLocalISO(navigateDate(viewMode, new Date(y, m - 1, d), 1));
+  });
 
   const allEvents = groups.flatMap(g => g.events).sort((a, b) => a.event_time.localeCompare(b.event_time));
 
@@ -305,7 +343,11 @@ export const EmployeeSkudSection: FC<IEmployeeSkudSectionProps> = ({
             <button
               key={m}
               className={`skud-view-btn ${viewMode === m ? 'active' : ''}`}
-              onClick={() => { setViewMode(m); if (m !== 'range') setViewDate(new Date()); }}
+              onClick={() => {
+                if (m === viewMode) return;
+                setViewMode(m);
+                if (m !== 'range') setViewDateStr(toLocalISO(new Date()));
+              }}
             >
               {VIEW_LABELS[m]}
             </button>
