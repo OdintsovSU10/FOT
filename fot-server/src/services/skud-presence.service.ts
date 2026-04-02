@@ -191,15 +191,32 @@ export async function getPresence(params: IPresenceParams): Promise<IPresenceIte
     const firstEntryEvent = empEvents.find(e => e.direction === 'entry');
     const firstEntry = firstEntryEvent?.event_time || summary?.first_entry || null;
 
-    // Если сотрудник на месте (online) — считаем total_hours от first_entry до сейчас
+    // Считаем total_hours из пар entry/exit событий
     let totalHours = summary?.total_hours || null;
-    if (status === 'online' && firstEntry && (!totalHours || totalHours === 0)) {
-      const [fh, fm, fs] = firstEntry.split(':').map(Number);
-      const entryMs = (fh * 3600 + fm * 60 + (fs || 0)) * 1000;
-      const msk = new Date(new Date().toLocaleString('en-US', { timeZone: 'Europe/Moscow' }));
-      const nowMs = (msk.getHours() * 3600 + msk.getMinutes() * 60 + msk.getSeconds()) * 1000;
-      if (nowMs > entryMs) {
-        totalHours = (nowMs - entryMs) / 3_600_000;
+    if (!totalHours || totalHours === 0) {
+      let pairMs = 0;
+      let entryTime: number | null = null;
+      for (const evt of empEvents) {
+        if (evt.direction === 'entry') {
+          if (entryTime === null) {
+            const [eh, em, es] = evt.event_time.split(':').map(Number);
+            entryTime = (eh * 3600 + em * 60 + (es || 0)) * 1000;
+          }
+        } else if (evt.direction === 'exit' && entryTime !== null) {
+          const [xh, xm, xs] = evt.event_time.split(':').map(Number);
+          const exitMs = (xh * 3600 + xm * 60 + (xs || 0)) * 1000;
+          pairMs += exitMs - entryTime;
+          entryTime = null;
+        }
+      }
+      // Если сотрудник на месте — открытая пара до сейчас
+      if (entryTime !== null && status === 'online') {
+        const msk = new Date(new Date().toLocaleString('en-US', { timeZone: 'Europe/Moscow' }));
+        const nowMs = (msk.getHours() * 3600 + msk.getMinutes() * 60 + msk.getSeconds()) * 1000;
+        if (nowMs > entryTime) pairMs += nowMs - entryTime;
+      }
+      if (pairMs > 0) {
+        totalHours = pairMs / 3_600_000;
       }
     }
 
