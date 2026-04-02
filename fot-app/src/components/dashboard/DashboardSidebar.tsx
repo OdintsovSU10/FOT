@@ -17,7 +17,7 @@ const getInitials = (name: string): string => {
 const getPeriodLabel = (period: DashboardPeriod): string =>
   period === 'today' ? 'сегодня' : period === 'week' ? 'неделю' : 'месяц';
 
-const HourlyActivityCard: FC<{ data: IDashboardStats['hourlyActivity']; period: DashboardPeriod }> = ({ data, period }) => {
+export const HourlyActivityCard: FC<{ data: IDashboardStats['hourlyActivity']; period: DashboardPeriod }> = ({ data, period }) => {
   const maxCount = Math.max(...data.map(d => d.count), 1);
 
   return (
@@ -56,7 +56,7 @@ interface IComparisonItem {
   formatDelta?: boolean;
 }
 
-const ComparisonCard: FC<{ comparison: IDashboardStats['weekComparison']; period: DashboardPeriod }> = ({ comparison, period }) => {
+export const ComparisonCard: FC<{ comparison: IDashboardStats['weekComparison']; period: DashboardPeriod }> = ({ comparison, period }) => {
   if (!comparison) return null;
 
   const { thisWeek, lastWeek } = comparison;
@@ -117,7 +117,7 @@ const ComparisonCard: FC<{ comparison: IDashboardStats['weekComparison']; period
   );
 };
 
-const TopLateCard: FC<{ data: IDashboardStats['topLate']; period: DashboardPeriod }> = ({ data, period }) => (
+export const TopLateCard: FC<{ data: IDashboardStats['topLate']; period: DashboardPeriod }> = ({ data, period }) => (
   <div className={styles.card}>
     <div className={styles.cardTitle}>Топ опаздывающих</div>
     {data.length === 0 ? (
