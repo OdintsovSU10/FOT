@@ -3,6 +3,7 @@ import { EmployeeSidebar } from './EmployeeSidebar';
 import styles from './EmployeeLayout.module.css';
 import { useMobileMenu } from '../../hooks/useMobileMenu';
 import { useTheme } from '../../hooks/useTheme';
+import { useMyPresence } from '../../hooks/useMyPresence';
 
 interface IEmployeeLayoutProps {
   children: ReactNode;
@@ -12,6 +13,7 @@ interface IEmployeeLayoutProps {
 export const EmployeeLayout: FC<IEmployeeLayoutProps> = ({ children, title }) => {
   const { isOpen, open, close } = useMobileMenu();
   const { theme, toggleTheme } = useTheme();
+  const { status: presenceStatus } = useMyPresence();
 
   return (
     <div className={styles.app}>
@@ -28,6 +30,12 @@ export const EmployeeLayout: FC<IEmployeeLayoutProps> = ({ children, title }) =>
               </svg>
             </button>
             <h1 className={styles.pageTitle}>{title}</h1>
+            {presenceStatus !== 'unknown' && (
+              <span className={`${styles.presenceBadge} ${presenceStatus === 'online' ? styles.presenceOnline : styles.presenceOffline}`}>
+                <span className={styles.presenceDot} />
+                {presenceStatus === 'online' ? 'На месте' : 'Не на месте'}
+              </span>
+            )}
           </div>
           <div className={styles.headerRight}>
             <button className={styles.headerBtn} onClick={toggleTheme} title="Переключить тему">

@@ -1,6 +1,7 @@
 import type { FC, ReactNode } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
+import { useMyPresence } from '../../hooks/useMyPresence';
 import styles from './EmployeeSidebar.module.css';
 
 interface INavItem {
@@ -158,6 +159,7 @@ export const EmployeeSidebar: FC<IEmployeeSidebarProps> = ({ isOpen, onClose, th
   const navigate = useNavigate();
   const location = useLocation();
   const { profile, logout, canAccess } = useAuth();
+  const { status: presenceStatus } = useMyPresence();
 
   const logoSrc = theme === 'dark' ? '/fot-logo-dark.svg' : '/fot-logo-light.svg';
 
@@ -206,7 +208,12 @@ export const EmployeeSidebar: FC<IEmployeeSidebarProps> = ({ isOpen, onClose, th
 
       <div className={styles.profileCard}>
         <div className={styles.profileHeader}>
-          <div className={styles.profileAvatar}>{getInitials(profile?.full_name || null)}</div>
+          <div className={styles.profileAvatarWrap}>
+            <div className={styles.profileAvatar}>{getInitials(profile?.full_name || null)}</div>
+            {presenceStatus !== 'unknown' && (
+              <span className={`${styles.presenceIndicator} ${presenceStatus === 'online' ? styles.presenceOn : styles.presenceOff}`} />
+            )}
+          </div>
           <div className={styles.profileInfo}>
             <h3>{profile?.full_name || 'Сотрудник'}</h3>
             {profile?.imported_position && <p>{profile.imported_position}</p>}

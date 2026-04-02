@@ -34,6 +34,11 @@
   margin-bottom: 16px;
 }
 
+.profileAvatarWrap {
+  position: relative;
+  flex-shrink: 0;
+}
+
 .profileAvatar {
   width: 52px;
   height: 52px;
@@ -45,7 +50,26 @@
   font-size: 18px;
   font-weight: 700;
   color: white;
-  flex-shrink: 0;
+}
+
+.presenceIndicator {
+  position: absolute;
+  bottom: -2px;
+  right: -2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid var(--bg-secondary);
+}
+
+.presenceOn {
+  background: #22c55e;
+  box-shadow: 0 0 6px rgba(34, 197, 94, 0.5);
+}
+
+.presenceOff {
+  background: #f59e0b;
+  box-shadow: 0 0 6px rgba(245, 158, 11, 0.4);
 }
 
 .profileInfo h3 {
