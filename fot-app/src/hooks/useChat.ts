@@ -136,6 +136,11 @@ export const useChat = (ws: typeof wsService | null) => {
     return () => clearInterval(interval);
   }, []);
 
+  const resetActiveChat = useCallback(() => {
+    setActiveConversationId(null);
+    setMessages([]);
+  }, []);
+
   return {
     conversations,
     activeConversationId,
@@ -146,5 +151,6 @@ export const useChat = (ws: typeof wsService | null) => {
     sendMessage,
     startConversation,
     loadConversations,
+    resetActiveChat,
   };
 };

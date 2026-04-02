@@ -59,6 +59,7 @@ export const ChatProvider: FC<{ children: ReactNode }> = ({ children }) => {
     sendMessage,
     startConversation,
     loadConversations,
+    resetActiveChat,
   } = useChat(ws);
 
   // Toast notifications for new messages
@@ -94,8 +95,8 @@ export const ChatProvider: FC<{ children: ReactNode }> = ({ children }) => {
   const openChat = useCallback(() => setIsOpen(true), []);
   const closeChat = useCallback(() => {
     setIsOpen(false);
-    setActiveConversationId(null);
-  }, []);
+    resetActiveChat();
+  }, [resetActiveChat]);
   const toggleChat = useCallback(() => setIsOpen(prev => !prev), []);
 
   return (
