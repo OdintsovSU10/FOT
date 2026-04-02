@@ -194,18 +194,17 @@ export const AttendanceCard: FC<IAttendanceCardProps> = ({
                 key={group.date}
                 className={`${styles.skudDayCard} ${group.isToday ? styles.skudDayToday : ''} ${group.isWeekend ? styles.skudDayWeekend : ''}`}
               >
-                <button
-                  className={styles.skudDayHeader}
+                <div
+                  className={`${styles.skudDayHeader} ${hasEvents ? styles.skudDayHeaderClickable : ''}`}
                   onClick={() => hasEvents && toggleDay(group.date)}
-                  disabled={!hasEvents}
                 >
                   <span className={styles.skudDayChevron}>
-                    {hasEvents ? (expanded ? <ChevronDown /> : <ChevronRight />) : <span style={{ width: 16 }} />}
+                    {hasEvents ? (expanded ? <ChevronDown /> : <ChevronRight />) : <span style={{ width: 16, display: 'inline-block' }} />}
                   </span>
                   <span className={styles.skudDayDate}>{formatDateLong(group.date)}</span>
                   {hasEvents && <DaySummaryBadges group={group} />}
                   {!hasEvents && <span className={styles.skudAbsentLabel}>—</span>}
-                </button>
+                </div>
                 {expanded && hasEvents && <DayEvents group={group} />}
               </div>
             );

@@ -648,8 +648,6 @@
   flex-direction: column;
   gap: 6px;
   padding: 10px;
-  max-height: 600px;
-  overflow-y: auto;
 }
 
 .skudDayCard {
@@ -673,24 +671,19 @@
   gap: 8px;
   width: 100%;
   padding: 10px 14px;
-  background: none;
-  border: none;
-  cursor: pointer;
   font-size: 13px;
   line-height: 1.4;
   color: var(--text-primary);
-  font-family: inherit;
   transition: background 0.12s;
-  text-align: left;
-  min-height: 38px;
+  user-select: none;
 }
 
-.skudDayHeader:hover:not(:disabled) {
+.skudDayHeaderClickable {
+  cursor: pointer;
+}
+
+.skudDayHeaderClickable:hover {
   background: var(--bg-tertiary);
-}
-
-.skudDayHeader:disabled {
-  cursor: default;
 }
 
 .skudDayChevron {
