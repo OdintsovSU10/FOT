@@ -131,7 +131,8 @@ export async function getDashboardStats(
     .select('employee_id, date, first_entry, last_exit, total_hours, is_present')
     .in('employee_id', empIds)
     .gte('date', summaryStartDate)
-    .lte('date', todayStr);
+    .lte('date', todayStr)
+    .limit(10000);
 
   // Запрос entry-событий за сегодня
   const eventsQuery = supabase
@@ -139,7 +140,8 @@ export async function getDashboardStats(
     .select('event_time, employee_id')
     .eq('event_date', todayStr)
     .eq('direction', 'entry')
-    .in('employee_id', empIds);
+    .in('employee_id', empIds)
+    .limit(5000);
   const { data: todayEvents } = await eventsQuery;
 
   // Запрос exit-событий за сегодня
@@ -148,7 +150,8 @@ export async function getDashboardStats(
     .select('event_time, employee_id')
     .eq('event_date', todayStr)
     .eq('direction', 'exit')
-    .in('employee_id', empIds);
+    .in('employee_id', empIds)
+    .limit(5000);
   const { data: todayExitEvents } = await exitEventsQuery;
 
   // Запрос последних событий
@@ -226,7 +229,8 @@ export async function getDashboardStats(
     .in('employee_id', empIds)
     .gte('event_date', arrivalRangeStart)
     .lte('event_date', arrivalRangeEnd)
-    .order('event_time', { ascending: true });
+    .order('event_time', { ascending: true })
+    .limit(10000);
   const { data: arrivalEvents } = await arrivalEventsQuery;
 
   const firstEntryMap = new Map<string, string>();
@@ -307,7 +311,8 @@ export async function getDashboardStats(
       .eq('direction', 'entry')
       .in('employee_id', empIds)
       .gte('event_date', periodStartStr)
-      .lte('event_date', periodEndStr);
+      .lte('event_date', periodEndStr)
+      .limit(10000);
     const { data: periodEvents } = await periodEventsQuery;
 
     for (const evt of periodEvents || []) {

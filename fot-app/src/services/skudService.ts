@@ -1,5 +1,6 @@
 import { apiClient } from '../api/client';
 import type { SkudEvent, SkudDailySummary, IEmployeePresence, IAccessPointSetting, IDashboardStats } from '../types';
+import { readSseResponse } from '../components/skud/sigur-settings.utils';
 
 interface ApiResponse<T> {
   data: T;
@@ -76,45 +77,38 @@ export const skudService = {
     endDate: string,
     onProgress?: (msg: string) => void,
   ): Promise<{ inserted: number; skipped: number; total: number }> {
-    // Go API: POST creates a sync command, returns ID for polling
-    const response = await apiClient.post<ApiResponse<{ id: number }>>('/skud/sync-employee', {
-      employeeId,
-      startDate,
-      endDate,
+    const token = localStorage.getItem('access_token');
+    const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
+
+    const response = await fetch(`${apiUrl}/skud/sync-employee`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({ employeeId, startDate, endDate }),
     });
-    const commandId = response.data.id;
 
-    // Poll progress
-    const MAX_POLLS = 300;
-    const POLL_INTERVAL = 1000;
     let result = { inserted: 0, skipped: 0, total: 0 };
+    let sseError: string | null = null;
 
-    for (let i = 0; i < MAX_POLLS; i++) {
-      const res = await apiClient.get<ApiResponse<{
-        status: string;
-        progress?: string;
-        result?: { inserted: number; skipped: number; total: number };
-        error?: string;
-      }>>(`/skud/sync-employee-progress/${commandId}`);
-
-      const data = res.data;
-
-      if (data.progress && onProgress) {
-        onProgress(data.progress);
+    await readSseResponse(response, (data) => {
+      if (data.type === 'day_start' && onProgress) {
+        onProgress(`День ${data.day} (${data.percent}%)...`);
       }
-
-      if (data.status === 'done' && data.result) {
-        result = data.result;
-        break;
+      if (data.type === 'done') {
+        result = {
+          inserted: Number(data.inserted || 0),
+          skipped: Number(data.skipped || 0),
+          total: Number(data.total || 0),
+        };
       }
-
-      if (data.status === 'error') {
-        throw new Error(data.error || 'Ошибка синхронизации');
+      if (data.type === 'error') {
+        sseError = String(data.error || 'Ошибка синхронизации');
       }
+    });
 
-      await new Promise((r) => setTimeout(r, POLL_INTERVAL));
-    }
-
+    if (sseError) throw new Error(sseError);
     return result;
   },
 
