@@ -9,7 +9,7 @@ interface ILiveEventsCardProps {
 }
 
 export const LiveEventsCard: FC<ILiveEventsCardProps> = ({ events, totalCount }) => (
-  <div className={`${styles.card} ${styles.cardWide}`}>
+  <div className={`${styles.card} ${styles.cardWide} ${styles.cardFull}`}>
     <div className={styles.title}>
       <div className={`${styles.titleIcon} ${styles.purple}`}>
         <Radio />

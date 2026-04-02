@@ -1,7 +1,7 @@
 import dotenv from 'dotenv';
 import { z } from 'zod';
 
-dotenv.config();
+dotenv.config({ override: true });
 
 // Преобразует пустые строки и undefined в undefined (для optional полей)
 const optionalString = z.preprocess(v => (v === '' || v === undefined) ? undefined : v, z.string().optional());

@@ -516,6 +516,7 @@ export const EmployeeCardPage: FC = () => {
       {activeTab === 'skud' && (
         <EmployeeSkudSection
           employeeId={employee.id}
+          employeeName={employee.full_name}
           departmentId={employee.org_department_id || undefined}
           onSync={reloadSkudEvents}
           focusDate={skudFocusDate}

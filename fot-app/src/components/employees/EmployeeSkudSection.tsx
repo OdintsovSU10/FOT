@@ -1,13 +1,15 @@
 import { useState, useEffect, useCallback, useRef, type FC } from 'react';
 import {
   LogIn, LogOut, ChevronDown, ChevronRight, ChevronLeft,
-  Clock, RefreshCw, Timer,
+  Clock, RefreshCw, Timer, Download,
 } from 'lucide-react';
 import { skudService } from '../../services/skudService';
+import { exportEmployeeSkudExcel } from './exportEmployeeSkudExcel';
 import type { SkudEvent } from '../../types';
 
 interface IEmployeeSkudSectionProps {
   employeeId: number;
+  employeeName: string;
   departmentId?: string;
   onSync?: () => void;
   focusDate?: string | null;
@@ -197,7 +199,7 @@ const getNavLabel = (mode: ViewMode, viewDate: Date): string => {
 
 
 export const EmployeeSkudSection: FC<IEmployeeSkudSectionProps> = ({
-  employeeId, onSync, focusDate, focusKey,
+  employeeId, employeeName, onSync, focusDate, focusKey,
 }) => {
   const [groups, setGroups] = useState<IDayGroup[]>([]);
   const [loading, setLoading] = useState(true);
@@ -318,6 +320,18 @@ export const EmployeeSkudSection: FC<IEmployeeSkudSectionProps> = ({
         >
           <RefreshCw size={14} className={syncing ? 'spinning' : ''} />
           {syncing ? 'Синхронизация...' : 'Из Сигур'}
+        </button>
+        <button
+          className="skud-period-btn skud-sync-btn"
+          onClick={() => {
+            const { startDate, endDate } = getDateRange(viewMode, viewDate);
+            exportEmployeeSkudExcel(employeeName, groups, startDate, endDate);
+          }}
+          disabled={loading || groups.length === 0}
+          title="Экспорт в Excel"
+        >
+          <Download size={14} />
+          Экспорт
         </button>
       </div>
       {syncResult && <div className="skud-sync-result">{syncResult}</div>}

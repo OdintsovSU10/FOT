@@ -1164,7 +1164,84 @@
   }
 
   .quickActionsGrid {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 8px;
+    margin-bottom: 16px;
+  }
+
+  .quickActionCard {
+    padding: 8px 4px;
+    gap: 4px;
+    border-radius: 8px;
+  }
+
+  .quickActionIcon {
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+  }
+
+  .quickActionIcon svg {
+    width: 14px;
+    height: 14px;
+  }
+
+  .quickActionTitle {
+    font-size: 10px;
+    font-weight: 500;
+  }
+
+  .quickActionDesc {
+    display: none;
+  }
+
+  .modal {
+    max-height: 65vh;
+  }
+
+  .modalHeader {
+    padding: 14px 16px;
+  }
+
+  .modalTitle {
+    font-size: 14px;
+  }
+
+  .modalBody {
+    padding: 14px 16px;
+  }
+
+  .formGroup {
+    margin-bottom: 10px;
+  }
+
+  .formInput,
+  .formSelect,
+  .formTextarea {
+    padding: 8px 10px;
+    font-size: 13px;
+    border-radius: 8px;
+  }
+
+  .formTextarea {
+    min-height: 60px;
+  }
+
+  .formLabel {
+    font-size: 11px;
+    margin-bottom: 3px;
+  }
+
+  .modalFooter {
+    padding: 10px 16px;
+    gap: 8px;
+  }
+
+  .btnSecondary,
+  .btnPrimary {
+    height: 36px;
+    font-size: 13px;
+    border-radius: 8px;
   }
 
   .formRow {
@@ -1178,22 +1255,30 @@
   }
 
   .quickActionsGrid {
-    gap: 10px;
-    margin-bottom: 20px;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 6px;
+    margin-bottom: 16px;
   }
 
   .quickActionCard {
-    padding: 14px;
+    padding: 10px 4px;
+    gap: 6px;
+    border-radius: 8px;
   }
 
   .quickActionIcon {
-    width: 40px;
-    height: 40px;
+    width: 32px;
+    height: 32px;
+    border-radius: 6px;
   }
 
   .quickActionIcon svg {
-    width: 20px;
-    height: 20px;
+    width: 16px;
+    height: 16px;
+  }
+
+  .quickActionTitle {
+    font-size: 11px;
   }
 
   .scheduleWeek {

@@ -271,6 +271,13 @@
   grid-column: span 1;
 }
 
+/* Full-height card (fills parent) */
+.cardFull {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
 /* Responsive */
 @media (max-width: 768px) {
   .card {
