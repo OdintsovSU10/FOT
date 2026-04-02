@@ -355,25 +355,50 @@
   text-align: center;
 }
 
-.skud-range-input {
-  padding: 5px 8px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--bg-tertiary);
-  color: var(--text-primary);
-  font-size: 13px;
-  font-family: inherit;
-  outline: none;
-  transition: border-color 0.15s ease;
-}
-
-.skud-range-input:focus {
-  border-color: var(--primary);
-}
-
 .skud-range-sep {
   font-size: 14px;
   color: var(--text-secondary);
+}
+
+.date-input-group {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-tertiary);
+  padding: 3px 6px;
+  gap: 1px;
+}
+
+.date-input-segment {
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-family: inherit;
+  text-align: center;
+  outline: none;
+  padding: 2px 0;
+}
+
+.date-input-dd,
+.date-input-mm {
+  width: 24px;
+}
+
+.date-input-yyyy {
+  width: 38px;
+}
+
+.date-input-dot {
+  color: var(--text-tertiary);
+  font-size: 13px;
+  user-select: none;
+}
+
+.date-input-segment::placeholder {
+  color: var(--text-tertiary);
+  opacity: 0.6;
 }
 
 .skud-period-btn {

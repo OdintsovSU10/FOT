@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { skudService } from '../../services/skudService';
 import { exportEmployeeSkudExcel } from './exportEmployeeSkudExcel';
+import { DateInput } from '../ui/DateInput';
 import type { SkudEvent } from '../../types';
 
 interface IEmployeeSkudSectionProps {
@@ -355,19 +356,9 @@ export const EmployeeSkudSection: FC<IEmployeeSkudSectionProps> = ({
         </div>
         {viewMode === 'range' ? (
           <div className="skud-date-nav">
-            <input
-              type="date"
-              className="skud-range-input"
-              value={rangeStart}
-              onChange={e => setRangeStart(e.target.value)}
-            />
+            <DateInput value={rangeStart} onChange={setRangeStart} />
             <span className="skud-range-sep">—</span>
-            <input
-              type="date"
-              className="skud-range-input"
-              value={rangeEnd}
-              onChange={e => setRangeEnd(e.target.value)}
-            />
+            <DateInput value={rangeEnd} onChange={setRangeEnd} />
           </div>
         ) : (
           <div className="skud-date-nav">
