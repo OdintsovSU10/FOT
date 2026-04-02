@@ -12,31 +12,33 @@ const parse = (iso: string): [string, string, string] => {
   return [d, m, y];
 };
 
-/** Собирает обратно YYYY-MM-DD */
-const build = (day: string, month: string, year: string): string =>
-  `${year.padStart(4, '0')}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
-
 export const DateInput: FC<IDateInputProps> = ({ value, onChange, className }) => {
   const [day, month, year] = parse(value);
   const [d, setD] = useState(day);
   const [m, setM] = useState(month);
   const [y, setY] = useState(year);
+  const focusedRef = useRef(false);
 
   const dayRef = useRef<HTMLInputElement>(null);
   const monthRef = useRef<HTMLInputElement>(null);
   const yearRef = useRef<HTMLInputElement>(null);
 
-  // Синхронизация с внешним value
+  // Синхронизация с внешним value — только когда НЕ в фокусе
   useEffect(() => {
+    if (focusedRef.current) return;
     const [nd, nm, ny] = parse(value);
     setD(nd);
     setM(nm);
     setY(ny);
   }, [value]);
 
-  const emit = (nd: string, nm: string, ny: string) => {
-    if (nd.length >= 1 && nm.length >= 1 && ny.length >= 1) {
-      onChange(build(nd, nm, ny));
+  const tryEmit = (nd: string, nm: string, ny: string) => {
+    // Эмитим только когда все поля полностью заполнены
+    if (nd.length === 2 && nm.length === 2 && ny.length === 4) {
+      const numD = Number(nd), numM = Number(nm), numY = Number(ny);
+      if (numD >= 1 && numD <= 31 && numM >= 1 && numM <= 12 && numY >= 1900) {
+        onChange(`${ny}-${nm}-${nd}`);
+      }
     }
   };
 
@@ -47,7 +49,7 @@ export const DateInput: FC<IDateInputProps> = ({ value, onChange, className }) =
       monthRef.current?.focus();
       monthRef.current?.select();
     }
-    emit(clean, m, y);
+    tryEmit(clean, m, y);
   };
 
   const handleMonth = (val: string) => {
@@ -57,29 +59,47 @@ export const DateInput: FC<IDateInputProps> = ({ value, onChange, className }) =
       yearRef.current?.focus();
       yearRef.current?.select();
     }
-    emit(d, clean, y);
+    tryEmit(d, clean, y);
   };
 
   const handleYear = (val: string) => {
     const clean = val.replace(/\D/g, '').slice(0, 4);
     setY(clean);
-    emit(d, m, clean);
+    tryEmit(d, m, clean);
+  };
+
+  const handleFocus = (e: React.FocusEvent<HTMLInputElement>) => {
+    focusedRef.current = true;
+    e.target.select();
+  };
+
+  const handleBlur = () => {
+    // Проверяем, не перешёл ли фокус на соседнее поле внутри группы
+    requestAnimationFrame(() => {
+      const active = document.activeElement;
+      if (
+        active !== dayRef.current &&
+        active !== monthRef.current &&
+        active !== yearRef.current
+      ) {
+        focusedRef.current = false;
+        // При потере фокуса — синхронизация с parent
+        const [nd, nm, ny] = parse(value);
+        setD(nd);
+        setM(nm);
+        setY(ny);
+      }
+    });
   };
 
   const handleKeyDown = (
     e: React.KeyboardEvent<HTMLInputElement>,
     field: 'day' | 'month' | 'year',
   ) => {
-    if (e.key === 'Backspace') {
-      const input = e.currentTarget;
-      if (input.value.length === 0) {
-        e.preventDefault();
-        if (field === 'year') {
-          monthRef.current?.focus();
-        } else if (field === 'month') {
-          dayRef.current?.focus();
-        }
-      }
+    if (e.key === 'Backspace' && e.currentTarget.value.length === 0) {
+      e.preventDefault();
+      if (field === 'year') monthRef.current?.focus();
+      else if (field === 'month') dayRef.current?.focus();
     }
   };
 
@@ -93,7 +113,8 @@ export const DateInput: FC<IDateInputProps> = ({ value, onChange, className }) =
         value={d}
         onChange={e => handleDay(e.target.value)}
         onKeyDown={e => handleKeyDown(e, 'day')}
-        onFocus={e => e.target.select()}
+        onFocus={handleFocus}
+        onBlur={handleBlur}
         placeholder="ДД"
         maxLength={2}
       />
@@ -106,7 +127,8 @@ export const DateInput: FC<IDateInputProps> = ({ value, onChange, className }) =
         value={m}
         onChange={e => handleMonth(e.target.value)}
         onKeyDown={e => handleKeyDown(e, 'month')}
-        onFocus={e => e.target.select()}
+        onFocus={handleFocus}
+        onBlur={handleBlur}
         placeholder="ММ"
         maxLength={2}
       />
@@ -119,7 +141,8 @@ export const DateInput: FC<IDateInputProps> = ({ value, onChange, className }) =
         value={y}
         onChange={e => handleYear(e.target.value)}
         onKeyDown={e => handleKeyDown(e, 'year')}
-        onFocus={e => e.target.select()}
+        onFocus={handleFocus}
+        onBlur={handleBlur}
         placeholder="ГГГГ"
         maxLength={4}
       />
