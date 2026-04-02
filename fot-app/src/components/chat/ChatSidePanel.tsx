@@ -85,17 +85,17 @@ export const ChatSidePanel: FC = () => {
     }
   };
 
-  const handleStartChat = async (user: IChatUser) => {
+  const handleStartChat = (user: IChatUser) => {
     setSearchOpen(false);
     setSearchQuery('');
     setSearchResults([]);
-    await startConversation(user.id);
     setMobileShowChat(true);
+    startConversation(user.id);
   };
 
-  const handleSelectConversation = async (convId: string) => {
-    await selectConversation(convId);
+  const handleSelectConversation = (convId: string) => {
     setMobileShowChat(true);
+    selectConversation(convId);
   };
 
   const handleToggleSearch = () => {
