@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import type { FC } from 'react';
 import styles from './Header.module.css';
-import { SearchInput } from '../ui/SearchInput';
 import { IconButton } from '../ui/Button';
 import { Tabs } from '../ui/Tabs';
 import { MoonIcon, SunIcon, BellIcon } from '../ui/Icons';
@@ -17,7 +16,6 @@ interface IHeaderProps {
 const periodTabs = ['Сегодня', 'Неделя', 'Месяц'];
 
 export const Header: FC<IHeaderProps> = ({ title, theme, onToggleTheme, onMenuOpen, showPeriodTabs = false }) => {
-  const [search, setSearch] = useState('');
   const [activeTab, setActiveTab] = useState(0);
 
   return (
@@ -37,12 +35,6 @@ export const Header: FC<IHeaderProps> = ({ title, theme, onToggleTheme, onMenuOp
       </div>
 
       <div className={styles.right}>
-        <SearchInput
-          value={search}
-          onValueChange={setSearch}
-          placeholder="Поиск сотрудника..."
-        />
-
         <IconButton onClick={onToggleTheme} title="Переключить тему">
           {theme === 'dark' ? <MoonIcon /> : <SunIcon />}
         </IconButton>

@@ -35,12 +35,12 @@ const navGroups: INavGroup[] = [
   {
     label: 'Основное',
     items: [
+      { id: 'my-cabinet', path: '/employee', label: 'Личный кабинет', icon: UserIcon, requiredPosition: 'header' },
       { id: 'overview', path: '/', label: 'Обзор', icon: GridIcon },
       { id: 'header-employees', path: '/my-employees', label: 'Сотрудники', icon: UsersIcon, exactPosition: 'header' },
       { id: 'employees', path: '/tender', label: 'Сотрудники', icon: UsersIcon, requiredPosition: 'admin' },
       { id: 'timesheet', path: '/timesheet', label: 'Табель', icon: CalendarIcon },
       { id: 'leave-requests', path: '/leave-requests', label: 'Заявления', icon: ClipboardCheckIcon, requiredPosition: 'header' },
-      { id: 'my-cabinet', path: '/employee', label: 'Личный кабинет', icon: UserIcon, requiredPosition: 'header' },
     ]
   },
   {

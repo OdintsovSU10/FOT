@@ -126,11 +126,6 @@ export const ChatSidePanel: FC = () => {
                 <path d="M12 5v14M5 12h14"/>
               </svg>
             </button>
-            <button className={styles.iconBtn} onClick={closeChat}>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="18" height="18">
-                <path d="M18 6L6 18M6 6l12 12"/>
-              </svg>
-            </button>
           </div>
 
           {searchOpen && (
@@ -195,15 +190,21 @@ export const ChatSidePanel: FC = () => {
         {/* Right pane: chat */}
         <div className={`${styles.chatPane} ${!mobileShowChat ? styles.hidden : ''}`}>
           {!activeConversationId ? (
-            <div className={styles.chatPlaceholder}>Выберите диалог</div>
+            <div className={styles.chatPlaceholder}>
+              <button className={styles.iconBtn} onClick={closeChat} style={{ position: 'absolute', top: 12, right: 12 }}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="18" height="18">
+                  <path d="M18 6L6 18M6 6l12 12"/>
+                </svg>
+              </button>
+              Выберите диалог
+            </div>
           ) : (
             <>
               <div className={styles.chatPaneHeader}>
                 {/* Back button only on mobile */}
                 <button
-                  className={styles.iconBtn}
+                  className={`${styles.iconBtn} ${styles.backBtn}`}
                   onClick={() => setMobileShowChat(false)}
-                  style={{ display: 'none' }}
                 >
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="18" height="18">
                     <path d="M15 18l-6-6 6-6"/>
