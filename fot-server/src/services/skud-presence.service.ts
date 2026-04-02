@@ -187,10 +187,14 @@ export async function getPresence(params: IPresenceParams): Promise<IPresenceIte
     const empEvents = allExternalEvents.get(emp.id) || [];
     const { exit_count, time_outside_minutes } = computeExitMetrics(empEvents);
 
-    // Если сотрудник на месте (online) и total_hours = 0 или null — считаем от first_entry до сейчас (MSK)
+    // first_entry: приоритет — из событий напрямую, fallback на summary
+    const firstEntryEvent = empEvents.find(e => e.direction === 'entry');
+    const firstEntry = firstEntryEvent?.event_time || summary?.first_entry || null;
+
+    // Если сотрудник на месте (online) — считаем total_hours от first_entry до сейчас
     let totalHours = summary?.total_hours || null;
-    if (status === 'online' && summary?.first_entry && (!totalHours || totalHours === 0)) {
-      const [fh, fm, fs] = summary.first_entry.split(':').map(Number);
+    if (status === 'online' && firstEntry && (!totalHours || totalHours === 0)) {
+      const [fh, fm, fs] = firstEntry.split(':').map(Number);
       const entryMs = (fh * 3600 + fm * 60 + (fs || 0)) * 1000;
       const msk = new Date(new Date().toLocaleString('en-US', { timeZone: 'Europe/Moscow' }));
       const nowMs = (msk.getHours() * 3600 + msk.getMinutes() * 60 + msk.getSeconds()) * 1000;
@@ -206,7 +210,7 @@ export async function getPresence(params: IPresenceParams): Promise<IPresenceIte
       position_name: emp.position_id ? posMap.get(emp.position_id) || null : null,
       status,
       since,
-      first_entry: summary?.first_entry || null,
+      first_entry: firstEntry,
       total_hours: totalHours,
       exit_count,
       time_outside_minutes,
