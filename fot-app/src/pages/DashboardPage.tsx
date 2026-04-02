@@ -1,23 +1,15 @@
 import React, { useEffect, useMemo, useRef, useState, memo } from 'react';
-import { useSearchParams } from 'react-router-dom';
-import { ChevronDown, ChevronLeft, ChevronRight, Search, Building2, LogOut } from 'lucide-react';
-import { StatCard } from '../components/ui/StatCard';
+import { useSearchParams, useNavigate } from 'react-router-dom';
+import { ChevronDown, ChevronLeft, ChevronRight, Search, Building2, LogOut, Users, Clock, ArrowDownRight, ArrowUpRight, X } from 'lucide-react';
 import { ActivityList } from '../components/dashboard/ActivityList';
 import { PunctualityCard, AvgArrivalCard, RisksCard } from '../components/dashboard/AnalyticsRow';
 import { HourlyActivityCard, ComparisonCard, TopLateCard } from '../components/dashboard/DashboardSidebar';
-import { PresenceTodayCard } from '../components/dashboard/stats/PresenceTodayCard';
-import { LatenessCard } from '../components/dashboard/stats/LatenessCard';
 import { LiveEventsCard } from '../components/dashboard/stats/LiveEventsCard';
 import { usePresence } from '../hooks/usePresence';
 import { useDashboardStats } from '../hooks/useDashboardStats';
 import { useAuth } from '../contexts/AuthContext';
 import { apiClient } from '../api/client';
 import type { DashboardPeriod } from '../types';
-import {
-  MapPinIcon,
-  CheckCircleIcon,
-  ClockIcon,
-} from '../components/ui/Icons';
 import '../styles/DashboardPage.css';
 
 interface IDbDepartment {
@@ -48,8 +40,6 @@ const formatClock = (): string => {
   const now = new Date();
   return now.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 };
-
-const ATTENDANCE_TARGET = 90;
 
 const LiveClock = memo(() => {
   const [clock, setClock] = useState(formatClock);
@@ -155,10 +145,8 @@ export const DashboardPage: React.FC = () => {
     [employees],
   );
 
-  const presencePercent = useMemo(
-    () => employees.length > 0 ? Math.round((onlineCount / employees.length) * 100) : 0,
-    [employees, onlineCount],
-  );
+  const [lateModalOpen, setLateModalOpen] = useState(false);
+  const navigate = useNavigate();
 
   const deptInputRef = useRef<HTMLInputElement>(null);
 
@@ -245,6 +233,28 @@ export const DashboardPage: React.FC = () => {
                 <span className="live-dot" />
                 Прямой эфир
               </span>
+              <div className="header-mini-stats">
+                <span className="hms-item hms-green">
+                  <Users size={13} />
+                  {onlineCount}/{employees.length}
+                </span>
+                <span className="hms-item hms-orange">
+                  <Clock size={13} />
+                  {stats?.lateToday ?? 0}
+                </span>
+                <span className="hms-item hms-red">
+                  <LogOut size={13} />
+                  {stats?.earlyLeaveToday ?? 0}
+                </span>
+                <span className="hms-item hms-muted">
+                  <ArrowDownRight size={13} />
+                  {stats?.todayEntriesCount ?? 0}
+                </span>
+                <span className="hms-item hms-muted">
+                  <ArrowUpRight size={13} />
+                  {stats?.todayExitsCount ?? 0}
+                </span>
+              </div>
             </div>
             {deptSelector}
           </div>
@@ -262,20 +272,6 @@ export const DashboardPage: React.FC = () => {
             </div>
 
             <div className="col-stats">
-              <PresenceTodayCard
-                online={onlineCount}
-                total={employees.length}
-                absent={employees.length - onlineCount}
-                target={ATTENDANCE_TARGET}
-                current={presencePercent}
-              />
-              <LatenessCard
-                lateCount={stats?.lateToday ?? 0}
-                earlyLeaveCount={stats?.earlyLeaveToday ?? 0}
-                entries={stats?.todayEntriesCount ?? 0}
-                exits={stats?.todayExitsCount ?? 0}
-              />
-
               <div className="period-toggle-row">
                 <div className="period-toggle">
                   {(['today', 'week', 'month'] as const).map(p => (
@@ -306,37 +302,35 @@ export const DashboardPage: React.FC = () => {
               </div>
 
               {period !== 'today' && stats?.periodStats && (
-                <div className="period-stat-cards">
-                  <StatCard
-                    label="Ср. посещаемость"
-                    value={String(stats.periodStats.avgPresent)}
-                    icon={<MapPinIcon />}
-                    iconType="green"
-                    change={`из ${employees.length} в день`}
-                    changeType="neutral"
-                  />
-                  <StatCard
-                    label="Ср. отсутствие"
-                    value={String(stats.periodStats.avgAbsent)}
-                    icon={<LogOut size={18} />}
-                    iconType="red"
-                    change="в среднем за день"
-                    changeType="neutral"
-                  />
-                  <StatCard
-                    label="Посещаемость"
-                    value={`${stats.periodStats.attendanceRate}%`}
-                    icon={<CheckCircleIcon />}
-                    iconType="green"
-                  />
-                  <StatCard
-                    label={period === 'week' ? 'Опоздания за неделю' : 'Опоздания за месяц'}
-                    value={String(stats.periodStats.lateCount)}
-                    icon={<ClockIcon />}
-                    iconType="orange"
-                    change={`${stats.periodStats.lateCount > stats.periodStats.prevLateCount ? '+' : ''}${stats.periodStats.lateCount - stats.periodStats.prevLateCount} к пред. ${period === 'week' ? 'неделе' : 'месяцу'}`}
-                    changeType={stats.periodStats.lateCount > stats.periodStats.prevLateCount ? 'negative' : stats.periodStats.lateCount < stats.periodStats.prevLateCount ? 'positive' : 'neutral'}
-                  />
+                <div className="period-mini-cards">
+                  <div className="pmc-item pmc-green">
+                    <div className="pmc-label">Ср. присутствие</div>
+                    <div className="pmc-value">{stats.periodStats.avgPresent}<span className="pmc-sub">/{employees.length}</span></div>
+                  </div>
+                  <div className="pmc-item pmc-red">
+                    <div className="pmc-label">Ср. отсутствие</div>
+                    <div className="pmc-value">{stats.periodStats.avgAbsent}</div>
+                  </div>
+                  <div className="pmc-item pmc-blue">
+                    <div className="pmc-label">Посещаемость</div>
+                    <div className="pmc-value">{stats.periodStats.attendanceRate}%</div>
+                  </div>
+                  <div
+                    className="pmc-item pmc-orange pmc-clickable"
+                    onClick={() => setLateModalOpen(true)}
+                    title="Посмотреть топ опаздывающих"
+                  >
+                    <div className="pmc-label">Опоздания</div>
+                    <div className="pmc-value">
+                      {stats.periodStats.lateCount}
+                      {stats.periodStats.lateCount !== stats.periodStats.prevLateCount && (
+                        <span className={`pmc-delta ${stats.periodStats.lateCount > stats.periodStats.prevLateCount ? 'neg' : 'pos'}`}>
+                          {stats.periodStats.lateCount > stats.periodStats.prevLateCount ? '+' : ''}
+                          {stats.periodStats.lateCount - stats.periodStats.prevLateCount}
+                        </span>
+                      )}
+                    </div>
+                  </div>
                 </div>
               )}
 
@@ -349,6 +343,43 @@ export const DashboardPage: React.FC = () => {
                   <RisksCard risks={stats.risks} period={period} />
                   <TopLateCard data={stats.topLate} period={period} />
                 </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Late rating modal */}
+      {lateModalOpen && stats && (
+        <div className="dash-modal-overlay" onClick={() => setLateModalOpen(false)}>
+          <div className="dash-modal" onClick={e => e.stopPropagation()}>
+            <div className="dash-modal-header">
+              <span>Опоздания за {period === 'week' ? 'неделю' : 'месяц'}</span>
+              <button className="dash-modal-close" onClick={() => setLateModalOpen(false)}>
+                <X size={16} />
+              </button>
+            </div>
+            <div className="dash-modal-body">
+              {stats.topLate.length === 0 ? (
+                <div className="dash-modal-empty">Опозданий нет</div>
+              ) : (
+                stats.topLate.map((item, i) => (
+                  <div
+                    key={item.employee_id}
+                    className="dash-late-row"
+                    onClick={() => {
+                      setLateModalOpen(false);
+                      navigate(`/tender/${item.employee_id}`, { state: { from: '/dashboard', label: 'Обзор' } });
+                    }}
+                  >
+                    <span className="dash-late-rank">{i + 1}</span>
+                    <div className="dash-late-info">
+                      <div className="dash-late-name">{item.full_name}</div>
+                      <div className="dash-late-avg">~{item.avgArrival}</div>
+                    </div>
+                    <span className="dash-late-count">{item.lateCount}</span>
+                    <ChevronRight size={14} className="dash-late-chevron" />
+                  </div>
+                ))
               )}
             </div>
           </div>
