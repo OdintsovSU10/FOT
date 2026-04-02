@@ -3,8 +3,8 @@ import { useSearchParams } from 'react-router-dom';
 import { ChevronDown, Search, Building2, LogOut } from 'lucide-react';
 import { StatCard } from '../components/ui/StatCard';
 import { ActivityList } from '../components/dashboard/ActivityList';
-import { AnalyticsRow, PunctualityCard, AvgArrivalCard, RisksCard } from '../components/dashboard/AnalyticsRow';
-import { DashboardSidebar } from '../components/dashboard/DashboardSidebar';
+import { PunctualityCard, AvgArrivalCard, RisksCard } from '../components/dashboard/AnalyticsRow';
+import { HourlyActivityCard, ComparisonCard, TopLateCard } from '../components/dashboard/DashboardSidebar';
 import { PresenceTodayCard } from '../components/dashboard/stats/PresenceTodayCard';
 import { LatenessCard } from '../components/dashboard/stats/LatenessCard';
 import { LiveEventsCard } from '../components/dashboard/stats/LiveEventsCard';
@@ -209,7 +209,7 @@ export const DashboardPage: React.FC = () => {
           {deptSelector}
         </div>
       ) : (
-        <>
+        <div className="dashboard-wrap">
           <div className="content-header">
             <div className="content-header-left">
               <div>
@@ -224,90 +224,93 @@ export const DashboardPage: React.FC = () => {
             {deptSelector}
           </div>
 
-          <div className="stats-section">
-            <div className="period-toggle">
-              {(['today', 'week', 'month'] as const).map(p => (
-                <button
-                  key={p}
-                  className={`period-btn ${period === p ? 'active' : ''}`}
-                  onClick={() => setPeriod(p)}
-                >
-                  {p === 'today' ? 'Сегодня' : p === 'week' ? 'Неделя' : 'Месяц'}
-                </button>
-              ))}
+          <div className="dashboard-columns">
+            <div className="col-activity">
+              <ActivityList employees={employees} loading={loading} />
             </div>
-            {period === 'today' ? (
-              <div className="stats-grid-today">
-                <PresenceTodayCard
-                  online={onlineCount}
-                  total={employees.length}
-                  absent={employees.length - onlineCount}
-                  target={ATTENDANCE_TARGET}
-                  current={presencePercent}
-                />
-                <LatenessCard
-                  lateCount={stats?.lateToday ?? 0}
-                  earlyLeaveCount={stats?.earlyLeaveToday ?? 0}
-                  entries={stats?.todayEntriesCount ?? 0}
-                  exits={stats?.todayExitsCount ?? 0}
-                />
-                <div className="stats-events-tall">
-                  <LiveEventsCard
-                    events={stats?.recentEvents ?? []}
-                    totalCount={(stats?.todayEntriesCount ?? 0) + (stats?.todayExitsCount ?? 0)}
+
+            <div className="col-events">
+              <LiveEventsCard
+                events={stats?.recentEvents ?? []}
+                totalCount={(stats?.todayEntriesCount ?? 0) + (stats?.todayExitsCount ?? 0)}
+              />
+            </div>
+
+            <div className="col-stats">
+              <PresenceTodayCard
+                online={onlineCount}
+                total={employees.length}
+                absent={employees.length - onlineCount}
+                target={ATTENDANCE_TARGET}
+                current={presencePercent}
+              />
+              <LatenessCard
+                lateCount={stats?.lateToday ?? 0}
+                earlyLeaveCount={stats?.earlyLeaveToday ?? 0}
+                entries={stats?.todayEntriesCount ?? 0}
+                exits={stats?.todayExitsCount ?? 0}
+              />
+
+              <div className="period-toggle">
+                {(['today', 'week', 'month'] as const).map(p => (
+                  <button
+                    key={p}
+                    className={`period-btn ${period === p ? 'active' : ''}`}
+                    onClick={() => setPeriod(p)}
+                  >
+                    {p === 'today' ? 'Сегодня' : p === 'week' ? 'Неделя' : 'Месяц'}
+                  </button>
+                ))}
+              </div>
+
+              {period !== 'today' && stats?.periodStats && (
+                <div className="period-stat-cards">
+                  <StatCard
+                    label="Ср. посещаемость"
+                    value={String(stats.periodStats.avgPresent)}
+                    icon={<MapPinIcon />}
+                    iconType="green"
+                    change={`из ${employees.length} в день`}
+                    changeType="neutral"
+                  />
+                  <StatCard
+                    label="Ср. отсутствие"
+                    value={String(stats.periodStats.avgAbsent)}
+                    icon={<LogOut size={18} />}
+                    iconType="red"
+                    change="в среднем за день"
+                    changeType="neutral"
+                  />
+                  <StatCard
+                    label="Посещаемость"
+                    value={`${stats.periodStats.attendanceRate}%`}
+                    icon={<CheckCircleIcon />}
+                    iconType="green"
+                  />
+                  <StatCard
+                    label={period === 'week' ? 'Опоздания за неделю' : 'Опоздания за месяц'}
+                    value={String(stats.periodStats.lateCount)}
+                    icon={<ClockIcon />}
+                    iconType="orange"
+                    change={`${stats.periodStats.lateCount > stats.periodStats.prevLateCount ? '+' : ''}${stats.periodStats.lateCount - stats.periodStats.prevLateCount} к пред. ${period === 'week' ? 'неделе' : 'месяцу'}`}
+                    changeType={stats.periodStats.lateCount > stats.periodStats.prevLateCount ? 'negative' : stats.periodStats.lateCount < stats.periodStats.prevLateCount ? 'positive' : 'neutral'}
                   />
                 </div>
-                {stats && !statsLoading && (
-                  <>
-                    <PunctualityCard punctuality={stats.punctuality} period={period} />
-                    <AvgArrivalCard data={stats.avgArrivalByDay} period={period} />
-                    <RisksCard risks={stats.risks} period={period} />
-                  </>
-                )}
-              </div>
-            ) : (
-              <div className="stats-row">
-                <StatCard
-                  label="Ср. посещаемость"
-                  value={stats?.periodStats ? String(stats.periodStats.avgPresent) : '—'}
-                  icon={<MapPinIcon />}
-                  iconType="green"
-                  change={stats?.periodStats ? `из ${employees.length} в день` : undefined}
-                  changeType="neutral"
-                />
-                <StatCard
-                  label="Ср. отсутствие"
-                  value={stats?.periodStats ? String(stats.periodStats.avgAbsent) : '—'}
-                  icon={<LogOut size={18} />}
-                  iconType="red"
-                  change={stats?.periodStats ? `в среднем за день` : undefined}
-                  changeType="neutral"
-                />
-                <StatCard
-                  label="Посещаемость"
-                  value={stats?.periodStats ? `${stats.periodStats.attendanceRate}%` : '—'}
-                  icon={<CheckCircleIcon />}
-                  iconType="green"
-                />
-                <StatCard
-                  label={period === 'week' ? 'Опоздания за неделю' : 'Опоздания за месяц'}
-                  value={stats?.periodStats ? String(stats.periodStats.lateCount) : '—'}
-                  icon={<ClockIcon />}
-                  iconType="orange"
-                  change={stats?.periodStats ? `${stats.periodStats.lateCount > stats.periodStats.prevLateCount ? '+' : ''}${stats.periodStats.lateCount - stats.periodStats.prevLateCount} к пред. ${period === 'week' ? 'неделе' : 'месяцу'}` : undefined}
-                  changeType={stats?.periodStats ? (stats.periodStats.lateCount > stats.periodStats.prevLateCount ? 'negative' : stats.periodStats.lateCount < stats.periodStats.prevLateCount ? 'positive' : 'neutral') : 'neutral'}
-                />
-              </div>
-            )}
-          </div>
+              )}
 
-          {period !== 'today' && stats && !statsLoading && <AnalyticsRow stats={stats} period={period} />}
-
-          <div className="main-grid">
-            <ActivityList employees={employees} loading={loading} />
-            {stats && !statsLoading && <DashboardSidebar stats={stats} period={period} />}
+              {stats && !statsLoading && (
+                <>
+                  <PunctualityCard punctuality={stats.punctuality} period={period} />
+                  <AvgArrivalCard data={stats.avgArrivalByDay} period={period} />
+                  <HourlyActivityCard data={stats.hourlyActivity} period={period} />
+                  <ComparisonCard comparison={stats.weekComparison} period={period} />
+                  <RisksCard risks={stats.risks} period={period} />
+                  <TopLateCard data={stats.topLate} period={period} />
+                </>
+              )}
+            </div>
           </div>
-        </>
+        </div>
       )}
     </>
   );
