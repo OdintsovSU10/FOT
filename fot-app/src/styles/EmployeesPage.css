@@ -121,9 +121,12 @@
 }
 
 .ep-dept-header.highlighted {
-  background: var(--surface);
+  background: rgba(59, 130, 246, 0.08);
   color: var(--text-primary);
-  box-shadow: inset 2px 0 0 var(--primary);
+}
+
+.ep-dept-header.highlighted .ep-dept-icon {
+  color: var(--primary);
 }
 
 .ep-dept-all {
@@ -314,6 +317,22 @@
 
 .ep-toolbar-search input::placeholder {
   color: var(--text-tertiary);
+}
+
+.ep-search-clear {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-tertiary);
+  padding: 0;
+  flex-shrink: 0;
+}
+
+.ep-search-clear:hover {
+  color: var(--text-primary);
 }
 
 .ep-toolbar-actions {

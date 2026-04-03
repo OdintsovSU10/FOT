@@ -363,6 +363,11 @@ export const EmployeesPage: FC = () => {
               value={unifiedSearch}
               onChange={e => setUnifiedSearch(e.target.value)}
             />
+            {unifiedSearch && (
+              <button className="ep-search-clear" onClick={() => setUnifiedSearch('')}>
+                <X size={14} />
+              </button>
+            )}
           </div>
           {canEdit && (
             <div className="ep-toolbar-actions">
