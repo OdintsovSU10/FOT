@@ -362,7 +362,32 @@ export const EmployeeCardPage: FC = () => {
           )}
         </div>
 
-        {/* Stats */}
+        <div className="ec-stats-row">
+          <div className="ec-stat-card">
+            <div className="ec-stat-icon green"><CheckCircle size={12} /></div>
+            <span className="ec-stat-label-inline">Посещаемость</span>
+            <div className="ec-stat-value">{pStats.attendancePercent}%</div>
+          </div>
+          <div className="ec-stat-card">
+            <div className="ec-stat-icon orange"><Clock size={12} /></div>
+            <span className="ec-stat-label-inline">Опозданий</span>
+            <div className="ec-stat-value">{pStats.lateCount}</div>
+          </div>
+          <div className="ec-stat-card">
+            <div className="ec-stat-icon blue"><DollarSign size={12} /></div>
+            <span className="ec-stat-label-inline">Часов</span>
+            <div className="ec-stat-value">{pStats.hoursWorked}/{pStats.hoursPlanned}</div>
+          </div>
+          <div className="ec-stat-card">
+            <div className="ec-stat-icon purple"><BarChart3 size={12} /></div>
+            <span className="ec-stat-label-inline">Приход</span>
+            <div className="ec-stat-value">{pStats.avgArrivalTime || '—'}</div>
+          </div>
+        </div>
+      </div>
+
+      {/* ===== Period + Tabs ===== */}
+      <div className="ec-controls-bar">
         <div className="ec-stats-period-row">
           <div className="ec-stats-period-selector">
             {(['today', 'week', 'month', 'range'] as ViewPeriod[]).map(p => (
@@ -394,32 +419,6 @@ export const EmployeeCardPage: FC = () => {
             </div>
           )}
         </div>
-        <div className="ec-stats-row">
-          <div className="ec-stat-card">
-            <div className="ec-stat-icon green"><CheckCircle size={12} /></div>
-            <span className="ec-stat-label-inline">Посещаемость</span>
-            <div className="ec-stat-value">{pStats.attendancePercent}%</div>
-          </div>
-          <div className="ec-stat-card">
-            <div className="ec-stat-icon orange"><Clock size={12} /></div>
-            <span className="ec-stat-label-inline">Опозданий</span>
-            <div className="ec-stat-value">{pStats.lateCount}</div>
-          </div>
-          <div className="ec-stat-card">
-            <div className="ec-stat-icon blue"><DollarSign size={12} /></div>
-            <span className="ec-stat-label-inline">Часов</span>
-            <div className="ec-stat-value">{pStats.hoursWorked}/{pStats.hoursPlanned}</div>
-          </div>
-          <div className="ec-stat-card">
-            <div className="ec-stat-icon purple"><BarChart3 size={12} /></div>
-            <span className="ec-stat-label-inline">Приход</span>
-            <div className="ec-stat-value">{pStats.avgArrivalTime || '—'}</div>
-          </div>
-        </div>
-      </div>
-
-      {/* ===== Tabs ===== */}
-      <div className="ec-tabs-container">
         <div className="ec-tabs">
           {TABS.map(t => (
             <button
@@ -432,6 +431,7 @@ export const EmployeeCardPage: FC = () => {
           ))}
         </div>
       </div>
+
 
       {/* ===== Tab Content ===== */}
       {activeTab === 'attendance' && (() => {
@@ -482,12 +482,12 @@ export const EmployeeCardPage: FC = () => {
         const absentCalc = absentSec > 0 ? `${Math.floor(absentSec / 3600)}ч ${Math.floor((absentSec % 3600) / 60)}м` : null;
 
         return (
-          <div className="ec-attendance-layout">
-            {/* Блок «Сегодня» — адаптивный по высоте */}
+          <div className="ec-attendance-3col">
+            {/* Блок «Сегодня» */}
             <div className="ec-card ec-today-card">
               <div className="ec-card-header">
                 <div className="ec-card-title">
-                  <Clock size={18} />
+                  <Clock size={16} />
                   {dayLabel}
                 </div>
               </div>
@@ -559,24 +559,24 @@ export const EmployeeCardPage: FC = () => {
               )}
             </div>
 
-            {/* Календарь + сайдбар в одну строку */}
-            <div className="ec-bottom-row">
-              <div className="ec-calendar-col">
-                <AttendanceCalendar
-                  days={attendance.days}
-                  month={calMonth}
-                  year={calYear}
-                  onPrevMonth={prevMonth}
-                  onNextMonth={nextMonth}
-                  onDayClick={handleDayClick}
-                />
-              </div>
-              <EmployeeCardSidebar
-                weeklyPattern={periodData.weeklyPattern}
-                alerts={attendance.alerts}
-                employee={employee}
+            {/* Календарь — компактный */}
+            <div className="ec-calendar-col">
+              <AttendanceCalendar
+                days={attendance.days}
+                month={calMonth}
+                year={calYear}
+                onPrevMonth={prevMonth}
+                onNextMonth={nextMonth}
+                onDayClick={handleDayClick}
               />
             </div>
+
+            {/* Сайдбар — паттерн + алерты + инфо */}
+            <EmployeeCardSidebar
+              weeklyPattern={periodData.weeklyPattern}
+              alerts={attendance.alerts}
+              employee={employee}
+            />
           </div>
         );
       })()}

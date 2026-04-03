@@ -13,20 +13,21 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 0;
+  padding: 6px 12px;
   margin-bottom: 10px;
-  background: none;
-  border: none;
-  border-radius: var(--radius-md);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 500;
   cursor: pointer;
   transition: all 0.15s ease;
 }
 
 .ec-back-btn:hover {
-  background: var(--bg-tertiary);
+  background: var(--surface-hover);
+  border-color: var(--text-tertiary);
   color: var(--text-primary);
 }
 
@@ -225,6 +226,23 @@
   height: 16px;
 }
 
+/* ==================== Controls Bar ==================== */
+.ec-controls-bar {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.ec-controls-bar .ec-tabs {
+  width: fit-content;
+}
+
+.ec-controls-bar .ec-stats-row {
+  justify-content: center;
+}
+
 /* ==================== Stats Period Selector ==================== */
 .ec-stats-period-selector {
   display: flex;
@@ -238,8 +256,8 @@
 }
 
 .ec-stats-period-btn {
-  padding: 6px 16px;
-  font-size: 12px;
+  padding: 8px 20px;
+  font-size: 14px;
   font-weight: 500;
   color: var(--text-tertiary);
   border-radius: 6px;
@@ -261,13 +279,16 @@
 .ec-stats-period-row {
   display: flex;
   align-items: center;
+  justify-content: center;
   margin-bottom: 10px;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 3px;
+  border-radius: 10px;
+  padding: 4px;
   width: fit-content;
   gap: 2px;
+  margin-left: auto;
+  margin-right: auto;
 }
 
 .ec-stats-period-row .ec-stats-period-selector {
@@ -323,9 +344,9 @@
 }
 
 .ec-date-nav-label {
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
-  min-width: 90px;
+  min-width: 100px;
   text-align: center;
 }
 
@@ -340,10 +361,9 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 4px 10px;
+  background: none;
+  border: none;
+  padding: 4px 8px;
 }
 
 .ec-stat-header {
@@ -455,30 +475,36 @@
   gap: 16px;
 }
 
-/* ==================== Attendance Layout ==================== */
-.ec-attendance-layout {
+/* ==================== Attendance 3-col Layout ==================== */
+.ec-attendance-3col {
+  display: grid;
+  grid-template-columns: 1fr 1.2fr 1fr 1fr;
+  gap: 12px;
+  align-items: start;
+}
+
+/* Sidebar cards flow into grid columns */
+.ec-attendance-3col > .ec-right-col {
+  display: contents;
+}
+
+/* Sidebar stack for 4th column */
+.ec-sidebar-stack {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 12px;
 }
 
 .ec-today-card {
-  /* Адаптивный по высоте — без stretch */
-}
-
-.ec-bottom-row {
-  display: flex;
-  gap: 16px;
-  align-items: flex-start;
+  min-width: 0;
 }
 
 .ec-calendar-col {
-  flex: 1;
   min-width: 0;
 }
 
 .ec-today-events {
-  padding: 12px 16px;
+  padding: 10px 14px;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -1322,14 +1348,17 @@
   .ec-history-timeline {
     padding: 12px;
   }
-  /* Attendance: stack bottom row vertically */
-  .ec-bottom-row {
+  /* Attendance: stack to single column */
+  .ec-attendance-3col {
+    grid-template-columns: 1fr;
+  }
+  .ec-attendance-3col > .ec-right-col {
+    display: flex;
     flex-direction: column;
     gap: 10px;
   }
-  .ec-calendar-col {
-    flex: none;
-    width: 100%;
+  .ec-attendance-3col > .ec-right-col > .ec-card:nth-child(n+2) {
+    grid-column: auto;
   }
 }
 
@@ -1561,10 +1590,7 @@
   }
 
   /* Attendance Layout */
-  .ec-attendance-layout {
-    gap: 8px;
-  }
-  .ec-bottom-row {
+  .ec-attendance-3col {
     gap: 8px;
   }
   .ec-today-events {

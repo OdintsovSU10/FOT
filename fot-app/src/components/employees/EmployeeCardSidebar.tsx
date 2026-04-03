@@ -55,75 +55,76 @@ export const EmployeeCardSidebar: FC<IEmployeeCardSidebarProps> = ({
         </div>
       </div>
 
-      {/* Alerts */}
-      <div className="ec-card">
-        <div className="ec-card-header">
-          <div className="ec-card-title">
-            <AlertTriangle size={18} />
-            Внимание
+      {/* Alerts + Info — grouped for 4th grid column */}
+      <div className="ec-sidebar-stack">
+        <div className="ec-card">
+          <div className="ec-card-header">
+            <div className="ec-card-title">
+              <AlertTriangle size={18} />
+              Внимание
+            </div>
           </div>
+          {alerts.length > 0 ? (
+            <div className="ec-alerts-list">
+              {alerts.map((a, i) => (
+                <div key={i} className={`ec-alert-item ${a.type}`}>
+                  <div className="ec-alert-icon">
+                    {a.type === 'warning' ? <Clock size={16} /> : <CalendarX size={16} />}
+                  </div>
+                  <div className="ec-alert-content">
+                    <div className="ec-alert-title">{a.title}</div>
+                    <div className="ec-alert-desc">{a.description}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="ec-alerts-empty">Нет предупреждений</div>
+          )}
         </div>
-        {alerts.length > 0 ? (
-          <div className="ec-alerts-list">
-            {alerts.map((a, i) => (
-              <div key={i} className={`ec-alert-item ${a.type}`}>
-                <div className="ec-alert-icon">
-                  {a.type === 'warning' ? <Clock size={16} /> : <CalendarX size={16} />}
-                </div>
-                <div className="ec-alert-content">
-                  <div className="ec-alert-title">{a.title}</div>
-                  <div className="ec-alert-desc">{a.description}</div>
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="ec-alerts-empty">Нет предупреждений</div>
-        )}
-      </div>
 
-      {/* Quick Info */}
-      <div className="ec-card">
-        <div className="ec-card-header">
-          <div className="ec-card-title">
-            <Info size={18} />
-            Информация
+        <div className="ec-card">
+          <div className="ec-card-header">
+            <div className="ec-card-title">
+              <Info size={18} />
+              Информация
+            </div>
           </div>
-        </div>
-        <div className="ec-info-list">
-          {employee.email && (
+          <div className="ec-info-list">
+            {employee.email && (
+              <div className="ec-info-item">
+                <span className="ec-info-label">Email</span>
+                <span className="ec-info-value">{employee.email}</span>
+              </div>
+            )}
             <div className="ec-info-item">
-              <span className="ec-info-label">Email</span>
-              <span className="ec-info-value">{employee.email}</span>
+              <span className="ec-info-label">Дата найма</span>
+              <span className="ec-info-value">{formatDate(employee.hire_date)}</span>
             </div>
-          )}
-          <div className="ec-info-item">
-            <span className="ec-info-label">Дата найма</span>
-            <span className="ec-info-value">{formatDate(employee.hire_date)}</span>
-          </div>
-          {employee.birth_date && (
+            {employee.birth_date && (
+              <div className="ec-info-item">
+                <span className="ec-info-label">Дата рождения</span>
+                <span className="ec-info-value">{formatDate(employee.birth_date)}</span>
+              </div>
+            )}
+            {employee.country && (
+              <div className="ec-info-item">
+                <span className="ec-info-label">Страна</span>
+                <span className="ec-info-value">{employee.country}</span>
+              </div>
+            )}
+            {employee.pension_number && (
+              <div className="ec-info-item">
+                <span className="ec-info-label">СНИЛС</span>
+                <span className="ec-info-value">{employee.pension_number}</span>
+              </div>
+            )}
             <div className="ec-info-item">
-              <span className="ec-info-label">Дата рождения</span>
-              <span className="ec-info-value">{formatDate(employee.birth_date)}</span>
+              <span className="ec-info-label">Статус</span>
+              <span className="ec-info-value">
+                {employee.employment_status === 'active' ? 'Активен' : 'Уволен'}
+              </span>
             </div>
-          )}
-          {employee.country && (
-            <div className="ec-info-item">
-              <span className="ec-info-label">Страна</span>
-              <span className="ec-info-value">{employee.country}</span>
-            </div>
-          )}
-          {employee.pension_number && (
-            <div className="ec-info-item">
-              <span className="ec-info-label">СНИЛС</span>
-              <span className="ec-info-value">{employee.pension_number}</span>
-            </div>
-          )}
-          <div className="ec-info-item">
-            <span className="ec-info-label">Статус</span>
-            <span className="ec-info-value">
-              {employee.employment_status === 'active' ? 'Активен' : 'Уволен'}
-            </span>
           </div>
         </div>
       </div>
