@@ -378,6 +378,39 @@
   .inputArea {
     padding: 8px 12px;
   }
+
+  .conversationItem {
+    padding: 14px 16px;
+    min-height: 68px;
+    gap: 14px;
+  }
+
+  .avatar {
+    width: 46px;
+    height: 46px;
+    min-width: 46px;
+    font-size: 16px;
+  }
+
+  .convName {
+    font-size: 16px;
+  }
+
+  .convPreview {
+    font-size: 13px;
+    margin-top: 3px;
+  }
+
+  .convTime {
+    font-size: 12px;
+  }
+
+  .unreadBadge {
+    min-width: 20px;
+    height: 20px;
+    border-radius: 10px;
+    font-size: 12px;
+  }
 }
 
 /* iPad */
