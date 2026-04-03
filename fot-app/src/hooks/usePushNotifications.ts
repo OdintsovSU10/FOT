@@ -59,7 +59,7 @@ export const usePushNotifications = (): IUsePushNotifications => {
       );
       if (!res.success) return;
 
-      const applicationServerKey = urlBase64ToUint8Array(res.data.publicKey);
+      const applicationServerKey = urlBase64ToUint8Array(res.data.publicKey).buffer as ArrayBuffer;
       const sub = await registration.pushManager.subscribe({
         userVisibleOnly: true,
         applicationServerKey,
