@@ -3,6 +3,7 @@ import styles from './Layout.module.css';
 import { Sidebar } from './Sidebar';
 import { Header } from './Header';
 import { useMobileMenu } from '../../hooks/useMobileMenu';
+import { useSwipe } from '../../hooks/useSwipe';
 
 interface ILayoutProps {
   children: ReactNode;
@@ -14,9 +15,10 @@ interface ILayoutProps {
 
 export const Layout: FC<ILayoutProps> = ({ children, title, theme, onToggleTheme, showPeriodTabs = false }) => {
   const { isOpen, open, close } = useMobileMenu();
+  const swipeHandlers = useSwipe({ isOpen, onOpen: open, onClose: close });
 
   return (
-    <div className={styles.app}>
+    <div className={styles.app} {...swipeHandlers}>
       {isOpen && <div className={styles.overlay} onClick={close} />}
       <Sidebar theme={theme} isOpen={isOpen} onClose={close} />
       <main className={styles.main}>

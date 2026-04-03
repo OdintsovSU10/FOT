@@ -2,6 +2,7 @@ import type { FC, ReactNode } from 'react';
 import { EmployeeSidebar } from './EmployeeSidebar';
 import styles from './EmployeeLayout.module.css';
 import { useMobileMenu } from '../../hooks/useMobileMenu';
+import { useSwipe } from '../../hooks/useSwipe';
 import { useTheme } from '../../hooks/useTheme';
 import { useMyPresence } from '../../hooks/useMyPresence';
 
@@ -14,9 +15,10 @@ export const EmployeeLayout: FC<IEmployeeLayoutProps> = ({ children, title }) =>
   const { isOpen, open, close } = useMobileMenu();
   const { theme, toggleTheme } = useTheme();
   const { status: presenceStatus } = useMyPresence();
+  const swipeHandlers = useSwipe({ isOpen, onOpen: open, onClose: close });
 
   return (
-    <div className={styles.app}>
+    <div className={styles.app} {...swipeHandlers}>
       {isOpen && <div className={styles.overlay} onClick={close} />}
       <EmployeeSidebar isOpen={isOpen} onClose={close} theme={theme} />
       <main className={styles.main}>

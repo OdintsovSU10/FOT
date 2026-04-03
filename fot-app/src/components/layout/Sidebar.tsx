@@ -14,6 +14,7 @@ import {
   DatabaseIcon,
   UserIcon,
   BarChartIcon,
+  ShieldIcon,
 } from '../ui/Icons';
 
 interface INavItem {
@@ -59,6 +60,7 @@ const navGroups: INavGroup[] = [
       { id: 'sigur-settings', path: '/skud-settings', label: 'Настройки СКУД', icon: SettingsIcon, requiredPosition: 'super_admin' },
       { id: 'admin-users', path: '/admin/users', label: 'Пользователи', icon: SettingsIcon, requiredPosition: 'super_admin' },
       { id: 'admin-audit', path: '/admin/audit', label: 'Аудит данных', icon: ClipboardCheckIcon, requiredPosition: 'super_admin' },
+      { id: 'admin-roles', path: '/admin/roles', label: 'Роли', icon: ShieldIcon, requiredPosition: 'super_admin' },
     ]
   }
 ];
@@ -72,7 +74,7 @@ interface ISidebarProps {
 export const Sidebar: FC<ISidebarProps> = ({ theme = 'dark', isOpen, onClose }) => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { profile, logout, canAccess, positionType } = useAuth();
+  const { profile, logout, canAccess, positionType, getRoleLabel } = useAuth();
 
   const logoSrc = theme === 'dark' ? '/fot-logo-dark.svg' : '/fot-logo-light.svg';
 
@@ -127,14 +129,8 @@ export const Sidebar: FC<ISidebarProps> = ({ theme = 'dark', isOpen, onClose }) 
 
   const getPositionLabel = (positionType: EmployeePositionType | null, importedPosition: string | null) => {
     if (importedPosition) return importedPosition;
-    switch (positionType) {
-      case 'super_admin': return 'Супер-админ';
-      case 'admin': return 'Администратор';
-      case 'hr': return 'Отдел кадров';
-      case 'header': return 'Руководитель';
-      case 'worker': return 'Сотрудник';
-      default: return 'Пользователь';
-    }
+    if (!positionType) return 'Пользователь';
+    return getRoleLabel(positionType);
   };
 
   return (

@@ -27,6 +27,7 @@ const DashboardPage = lazy(() => import('./pages/DashboardPage').then(m => ({ de
 const UserManagementPage = lazy(() => import('./pages/super-admin/UserManagementPage').then(m => ({ default: m.UserManagementPage })));
 const AdminManagePage = lazy(() => import('./pages/super-admin/AdminManagePage').then(m => ({ default: m.AdminManagePage })));
 const DataAuditPage = lazy(() => import('./pages/super-admin/DataAuditPage').then(m => ({ default: m.DataAuditPage })));
+const RoleManagementPage = lazy(() => import('./pages/super-admin/RoleManagementPage').then(m => ({ default: m.RoleManagementPage })));
 
 // Employees & SKUD
 const EmployeesPage = lazy(() => import('./pages/employees/EmployeesPage').then(m => ({ default: m.EmployeesPage })));
@@ -318,6 +319,14 @@ const AppRoutes = () => {
             element={
               <Layout title="Аудит данных" theme={theme} onToggleTheme={toggleTheme}>
                 <DataAuditPage />
+              </Layout>
+            }
+          />
+          <Route
+            path="/admin/roles"
+            element={
+              <Layout title="Управление ролями" theme={theme} onToggleTheme={toggleTheme}>
+                <RoleManagementPage />
               </Layout>
             }
           />

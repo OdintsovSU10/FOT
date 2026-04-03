@@ -141,7 +141,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     });
 
     return { requires2FA: false };
-  }, []);
+  }, [loadRoles]);
 
   const verify2FA = useCallback(async (code: string): Promise<void> => {
     const response = await apiClient.post<{ token: string; user: User & UserProfile }>('/auth/verify-2fa', { code });
