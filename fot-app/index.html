@@ -9,7 +9,7 @@
         var ua = navigator.userAgent;
         var isSafari = /^((?!chrome|crios|fxios|yabrowser|android).)*safari/i.test(ua);
         if (isSafari && window.screen.width <= 480) {
-          var w = Math.round(window.screen.width / 1.15);
+          var w = Math.round(window.screen.width / 1.08);
           document.querySelector('meta[name="viewport"]').content =
             'width=' + w + ', viewport-fit=cover, minimum-scale=1.0, maximum-scale=5.0';
         }
