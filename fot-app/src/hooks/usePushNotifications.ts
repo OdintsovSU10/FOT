@@ -18,6 +18,21 @@ const urlBase64ToUint8Array = (base64String: string): Uint8Array => {
   return new Uint8Array([...rawData].map(char => char.charCodeAt(0)));
 };
 
+const saveSubscriptionToServer = async (sub: PushSubscription): Promise<boolean> => {
+  const json = sub.toJSON();
+  if (!json.endpoint || !json.keys?.p256dh || !json.keys?.auth) return false;
+  try {
+    await apiClient.post('/push/subscribe', {
+      endpoint: json.endpoint,
+      p256dh: json.keys.p256dh,
+      auth: json.keys.auth,
+    });
+    return true;
+  } catch {
+    return false;
+  }
+};
+
 export const usePushNotifications = (): IUsePushNotifications => {
   const isSupported =
     typeof window !== 'undefined' &&
@@ -31,7 +46,7 @@ export const usePushNotifications = (): IUsePushNotifications => {
   const [isSubscribed, setIsSubscribed] = useState(false);
   const [registration, setRegistration] = useState<ServiceWorkerRegistration | null>(null);
 
-  // Регистрируем SW и проверяем текущую подписку
+  // Регистрируем SW. Если подписка уже есть — переотправляем на сервер (могла потеряться)
   useEffect(() => {
     if (!isSupported) return;
 
@@ -40,7 +55,11 @@ export const usePushNotifications = (): IUsePushNotifications => {
       .then(async (reg) => {
         setRegistration(reg);
         const existing = await reg.pushManager.getSubscription();
-        setIsSubscribed(!!existing);
+        if (existing) {
+          setIsSubscribed(true);
+          // Переотправляем на сервер — upsert обновит или создаст запись
+          await saveSubscriptionToServer(existing);
+        }
       })
       .catch(() => undefined);
   }, [isSupported]);
@@ -65,16 +84,10 @@ export const usePushNotifications = (): IUsePushNotifications => {
         applicationServerKey,
       });
 
-      const json = sub.toJSON();
-      await apiClient.post('/push/subscribe', {
-        endpoint: json.endpoint,
-        p256dh: json.keys?.p256dh,
-        auth: json.keys?.auth,
-      });
-
-      setIsSubscribed(true);
+      const saved = await saveSubscriptionToServer(sub);
+      if (saved) setIsSubscribed(true);
     } catch {
-      // ignore — пользователь отклонил или сервер не настроен
+      // ignore
     }
   }, [isSupported, registration]);
 
