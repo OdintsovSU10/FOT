@@ -725,20 +725,28 @@
     padding: 2px 6px;
   }
 
+  .dash-dept-dropdown {
+    width: 100%;
+  }
+
   .dash-dept-trigger {
-    min-width: 120px;
-    max-width: 200px;
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
     font-size: 0.8rem;
     padding: 6px 10px;
+    box-sizing: border-box;
   }
 
   .dash-dept-menu {
     min-width: 220px;
     left: 0;
+    right: 0;
+    max-width: 100%;
   }
 
   .dash-dept-trigger--large {
-    min-width: 280px;
+    min-width: 0;
   }
 
   .dash-dept-menu--center {
@@ -823,11 +831,6 @@
 
   .live-clock {
     font-size: 0.75rem;
-  }
-
-  .dash-dept-trigger {
-    min-width: 100px;
-    max-width: 160px;
   }
 
   .dash-placeholder {

@@ -50,6 +50,14 @@ export async function getDashboardStats(
     empNameMap.set(e.id, e.full_name || '');
   }
 
+  const { data: apSettings } = await supabase
+    .from('skud_access_point_settings')
+    .select('access_point_name')
+    .eq('is_internal', true);
+  const internalPoints = new Set<string>(
+    (apSettings || []).map(s => s.access_point_name.trim()),
+  );
+
   // Resolve графики — нужны для пороговых значений и исключения remote
   // Загрузка org_department_id из employees
   const empDeptQuery = supabase
@@ -474,6 +482,7 @@ export async function getDashboardStats(
     name: ev.employee_id ? (empNameMap.get(ev.employee_id) || ev.physical_person || 'Неизвестный') : (ev.physical_person || 'Неизвестный'),
     accessPoint: ev.access_point || '',
     direction: ev.direction as 'entry' | 'exit' | null,
+    isInternal: internalPoints.size > 0 && !!ev.access_point && internalPoints.has(ev.access_point.trim()),
   }));
 
   return {

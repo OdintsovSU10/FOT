@@ -81,7 +81,7 @@ const DayEvents: FC<{ group: IDayGroup }> = ({ group }) => (
             <div className={styles.skudEventRow}>
               <span className={`${styles.skudEventIcon} ${styles.skudEventEntry}`}>→</span>
               <span className={styles.skudEventTime}>—</span>
-              <span className={styles.skudEventDir}>на месте</span>
+              <span className={`${styles.skudEventDir} ${styles.skudOnsite}`}>на месте</span>
             </div>
           )}
           {pair.durationMinutes > 0 && (

@@ -205,6 +205,19 @@
   color: var(--error);
 }
 
+/* Internal access point events — muted colors */
+.eventEntryInternal {
+  border-left: 3px solid var(--success);
+  padding-left: 8px;
+  opacity: 0.45;
+}
+
+.eventExitInternal {
+  border-left: 3px solid var(--error);
+  padding-left: 8px;
+  opacity: 0.45;
+}
+
 /* Goal bar (inside presence card) */
 .goalBar {
   margin-top: 12px;

@@ -359,7 +359,8 @@
 .skud-view-selector {
   display: flex;
   gap: 4px;
-  background: var(--bg-tertiary);
+  background: var(--surface);
+  border: 1px solid var(--border);
   padding: 3px;
   border-radius: var(--radius-md);
 }

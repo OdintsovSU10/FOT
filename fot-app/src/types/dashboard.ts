@@ -59,6 +59,7 @@ export interface IRecentEvent {
   name: string;
   accessPoint: string;
   direction: 'entry' | 'exit' | null;
+  isInternal?: boolean;
 }
 
 export interface IDashboardStats {

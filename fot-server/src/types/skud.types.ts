@@ -32,6 +32,7 @@ export interface IDashboardRecentEvent {
   name: string;
   accessPoint: string;
   direction: 'entry' | 'exit' | null;
+  isInternal: boolean;
 }
 
 export interface IDashboardRisk {

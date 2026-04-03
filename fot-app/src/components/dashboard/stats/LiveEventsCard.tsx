@@ -21,7 +21,11 @@ export const LiveEventsCard: FC<ILiveEventsCardProps> = ({ events, totalCount })
     </div>
     <div className={styles.eventsList}>
       {events.map((ev, i) => {
-        const dirClass = ev.direction === 'entry' ? styles.eventEntry : ev.direction === 'exit' ? styles.eventExit : '';
+        const dirClass = ev.direction === 'entry'
+          ? (ev.isInternal ? styles.eventEntryInternal : styles.eventEntry)
+          : ev.direction === 'exit'
+          ? (ev.isInternal ? styles.eventExitInternal : styles.eventExit)
+          : '';
         return (
           <div key={i} className={`${styles.eventItem} ${dirClass}`}>
             <span className={styles.eventTime}>{ev.time}</span>

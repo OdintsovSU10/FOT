@@ -1,4 +1,5 @@
 import { type FC, useState, useEffect, useCallback, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { TimesheetStats } from '../../components/timesheet/TimesheetStats';
 import { TimesheetGrid } from '../../components/timesheet/TimesheetGrid';
@@ -24,6 +25,7 @@ const DEFAULT_STATS: ITimesheetStats = {
 };
 
 export const EmployeeTimesheetPage: FC = () => {
+  const navigate = useNavigate();
   const { profile } = useAuth();
   const now = new Date();
   const [year, setYear] = useState(now.getFullYear());
@@ -136,7 +138,10 @@ export const EmployeeTimesheetPage: FC = () => {
     <div className="ts-page">
       <div className="ts-header">
         <div className="ts-header-left">
-          <h1 className="ts-title">Мой табель</h1>
+          <button className="ts-back-btn" onClick={() => navigate('/employee')}>
+            <ChevronLeft size={16} />
+            Назад
+          </button>
           <div className="ts-month-nav">
             <button className="ts-month-btn" onClick={prevMonth}>
               <ChevronLeft size={16} />
