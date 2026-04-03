@@ -47,7 +47,7 @@ const pageAccessItemSchema = z.object({
 
 export const rolesController = {
   // GET /api/roles
-  async getRoles(req: AuthenticatedRequest, res: Response): Promise<void> {
+  async getRoles(_req: AuthenticatedRequest, res: Response): Promise<void> {
     const { data, error } = await supabase
       .from('system_roles')
       .select('*')
@@ -164,7 +164,7 @@ export const rolesController = {
   },
 
   // GET /api/roles/page-access
-  async getPageAccess(req: AuthenticatedRequest, res: Response): Promise<void> {
+  async getPageAccess(_req: AuthenticatedRequest, res: Response): Promise<void> {
     const { data, error } = await supabase
       .from('role_page_access')
       .select('*');
