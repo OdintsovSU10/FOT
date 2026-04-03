@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, type FC } from 'react';
 import {
   LogIn, LogOut, ChevronDown, ChevronRight, ChevronLeft,
-  Clock, RefreshCw, Timer, Download,
+  Clock, Timer, Download,
 } from 'lucide-react';
 import { skudService } from '../../services/skudService';
 import { exportEmployeeSkudExcel } from './exportEmployeeSkudExcel';
@@ -232,8 +232,6 @@ export const EmployeeSkudSection: FC<IEmployeeSkudSectionProps> = ({
   const [viewDateStr, setViewDateStr] = useState(() => focusDate || toLocalISO(new Date()));
   const [rangeStart, setRangeStart] = useState(() => toLocalISO(new Date()));
   const [rangeEnd, setRangeEnd] = useState(() => toLocalISO(new Date()));
-  const [syncing, setSyncing] = useState(false);
-  const [syncResult, setSyncResult] = useState<string | null>(null);
   const [internalPoints, setInternalPoints] = useState<Set<string>>(new Set());
   const prevFocusKey = useRef<number>(0);
   const requestIdRef = useRef(0);
@@ -330,31 +328,6 @@ export const EmployeeSkudSection: FC<IEmployeeSkudSectionProps> = ({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [internalPoints]);
 
-  const handleSync = async () => {
-    setSyncing(true);
-    setSyncResult(null);
-    try {
-      const { startDate, endDate } = getEffectiveRange();
-      const result = await skudService.syncEmployee(
-        employeeId, startDate, endDate,
-        (msg) => setSyncResult(msg),
-      );
-      setSyncResult(`Загружено ${result.inserted} новых событий (пропущено ${result.skipped})`);
-      // Перезагрузить данные
-      const currentReqId = ++requestIdRef.current;
-      const events = await skudService.getEmployeeEvents(employeeId, startDate, endDate);
-      if (requestIdRef.current === currentReqId) {
-        setGroups(groupByDay(events, internalPointsRef.current));
-      }
-      if (result.inserted > 0) {
-        onSync?.();
-      }
-    } catch {
-      setSyncResult('Ошибка синхронизации');
-    } finally {
-      setSyncing(false);
-    }
-  };
 
   const toggleDay = (date: string) => {
     setExpandedDays(prev => {
@@ -429,7 +402,6 @@ export const EmployeeSkudSection: FC<IEmployeeSkudSectionProps> = ({
           Экспорт
         </button>
       </div>
-      {syncResult && <div className="skud-sync-result">{syncResult}</div>}
 
       {loading ? (
         <div className="skud-loading">Загрузка событий СКУД...</div>
