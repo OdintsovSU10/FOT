@@ -133,6 +133,39 @@ export const EmployeesPage: FC = () => {
     return () => clearInterval(interval);
   }, [loadPresence]);
 
+  // Highlight departments of found employees when search is active
+  const highlightedDeptIds = useMemo(() => {
+    if (!debouncedSearch) return new Set<string>();
+    const ids = new Set<string>();
+    for (const emp of employees) {
+      if (emp.org_department_id) ids.add(emp.org_department_id);
+    }
+    return ids;
+  }, [debouncedSearch, employees]);
+
+  // Auto-expand ancestors of highlighted departments
+  useEffect(() => {
+    if (!debouncedSearch || highlightedDeptIds.size === 0 || departments.length === 0) return;
+    const flatMap = new Map<string, OrgDepartmentNode>();
+    const walk = (nodes: OrgDepartmentNode[]) => {
+      for (const n of nodes) { flatMap.set(n.id, n); walk(n.children); }
+    };
+    walk(departments);
+    const toExpand = new Set<string>();
+    for (const deptId of highlightedDeptIds) {
+      let node = flatMap.get(deptId);
+      while (node) {
+        toExpand.add(node.id);
+        node = node.parent_id ? flatMap.get(node.parent_id) : undefined;
+      }
+    }
+    setExpandedDepts(prev => {
+      const next = new Set(prev);
+      for (const id of toExpand) next.add(id);
+      return next;
+    });
+  }, [debouncedSearch, highlightedDeptIds, departments]);
+
   // Department employee counts from server
   const deptCounts = useMemo(() => {
     const map = new Map<string, number>();
@@ -281,6 +314,7 @@ export const EmployeesPage: FC = () => {
         expandedDepts={expandedDepts}
         deptCounts={deptCounts}
         totalActive={totalActive}
+        highlightedDeptIds={highlightedDeptIds}
         onSelectDept={setSelectedDeptId}
         onToggleDept={toggleDept}
         onRefresh={loadDepartments}

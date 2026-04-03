@@ -8,6 +8,7 @@ interface IDepartmentPanelProps {
   expandedDepts: Set<string>;
   deptCounts: Map<string, number>;
   totalActive: number;
+  highlightedDeptIds?: Set<string>;
   onSelectDept: (id: string | null) => void;
   onToggleDept: (id: string) => void;
   onRefresh: () => void;
@@ -15,6 +16,7 @@ interface IDepartmentPanelProps {
 
 export const DepartmentPanel: FC<IDepartmentPanelProps> = ({
   departments, selectedDeptId, expandedDepts, deptCounts, totalActive,
+  highlightedDeptIds,
   onSelectDept, onToggleDept, onRefresh,
 }) => {
   const [deptSearch, setDeptSearch] = useState('');
@@ -37,12 +39,13 @@ export const DepartmentPanel: FC<IDepartmentPanelProps> = ({
     const hasChildren = node.children.length > 0;
     const isExpanded = deptSearch ? true : expandedDepts.has(node.id);
     const isSelected = selectedDeptId === node.id;
+    const isHighlighted = !isSelected && (highlightedDeptIds?.has(node.id) ?? false);
     const count = deptCounts.get(node.id) || 0;
 
     return (
       <div key={node.id} className="ep-dept-item">
         <div
-          className={`ep-dept-header ${isSelected ? 'active' : ''}`}
+          className={`ep-dept-header ${isSelected ? 'active' : ''} ${isHighlighted ? 'highlighted' : ''}`}
           style={{ paddingLeft: `${12 + level * 20}px` }}
           onClick={() => onSelectDept(isSelected ? null : node.id)}
         >
