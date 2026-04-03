@@ -92,6 +92,13 @@ export const ChatProvider: FC<{ children: ReactNode }> = ({ children }) => {
     return unsub;
   }, [ws, info, conversations, selectConversation]);
 
+  // Re-load conversations when user becomes authenticated (fixes empty list on new device)
+  useEffect(() => {
+    if (isAuthenticated && isApproved) {
+      loadConversations();
+    }
+  }, [isAuthenticated, isApproved, loadConversations]);
+
   const openChat = useCallback(() => { setIsOpen(true); loadConversations(); }, [loadConversations]);
   const closeChat = useCallback(() => {
     setIsOpen(false);

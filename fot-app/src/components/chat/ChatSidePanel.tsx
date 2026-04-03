@@ -41,6 +41,9 @@ export const ChatSidePanel: FC = () => {
   const [searchOpen, setSearchOpen] = useState(false);
   const [mobileShowChat, setMobileShowChat] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const touchStartX = useRef(0);
+  const touchStartY = useRef(0);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -62,6 +65,29 @@ export const ChatSidePanel: FC = () => {
     return () => { document.body.style.overflow = ''; };
   }, [isOpen]);
 
+  // Динамическая высота панели при открытой клавиатуре (iOS Safari)
+  useEffect(() => {
+    if (!isOpen) return;
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const update = () => {
+      if (!panelRef.current) return;
+      panelRef.current.style.height = `${vv.height}px`;
+      panelRef.current.style.top = `${vv.offsetTop}px`;
+    };
+    update();
+    vv.addEventListener('resize', update);
+    vv.addEventListener('scroll', update);
+    return () => {
+      vv.removeEventListener('resize', update);
+      vv.removeEventListener('scroll', update);
+      if (panelRef.current) {
+        panelRef.current.style.height = '';
+        panelRef.current.style.top = '';
+      }
+    };
+  }, [isOpen]);
+
   useEffect(() => {
     if (!searchOpen) { setSearchResults([]); return; }
     const timeout = setTimeout(async () => {
@@ -74,6 +100,29 @@ export const ChatSidePanel: FC = () => {
     }, 300);
     return () => clearTimeout(timeout);
   }, [searchQuery, searchOpen]);
+
+  const handleTouchStart = (e: React.TouchEvent) => {
+    touchStartX.current = e.touches[0].clientX;
+    touchStartY.current = e.touches[0].clientY;
+  };
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    const dx = e.touches[0].clientX - touchStartX.current;
+    const dy = Math.abs(e.touches[0].clientY - touchStartY.current);
+    if (dx > 10 && dx > dy && panelRef.current) {
+      panelRef.current.style.transform = `translateX(${dx}px)`;
+      panelRef.current.style.transition = 'none';
+    }
+  };
+
+  const handleTouchEnd = (e: React.TouchEvent) => {
+    const dx = e.changedTouches[0].clientX - touchStartX.current;
+    if (panelRef.current) {
+      panelRef.current.style.transform = '';
+      panelRef.current.style.transition = '';
+    }
+    if (dx > 80) closeChat();
+  };
 
   const handleSend = async () => {
     if (!inputValue.trim()) return;
@@ -147,17 +196,20 @@ export const ChatSidePanel: FC = () => {
   return (
     <>
       {isOpen && <div className={styles.overlay} onClick={closeChat} />}
-      <div className={`${styles.panel} ${isOpen ? styles.open : ''}`}>
+      <div
+        ref={panelRef}
+        className={`${styles.panel} ${isOpen ? styles.open : ''}`}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+      >
         {/* Left pane */}
         <div className={`${styles.listPane} ${mobileShowChat ? styles.hidden : ''}`}>
           <div className={styles.listPaneHeader}>
-            {/* Мобильные: + слева */}
-            <button className={`${styles.iconBtn} ${styles.mobileNewChat} ${styles.mobileOnly}`} onClick={handleToggleSearch}>
+            {/* Мобильные: ← Назад слева */}
+            <button className={`${styles.iconBtn} ${styles.mobileOnly}`} onClick={closeChat}>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="18" height="18">
-                {searchOpen
-                  ? <path d="M18 6L6 18M6 6l12 12"/>
-                  : <path d="M12 5v14M5 12h14"/>
-                }
+                <path d="M15 18l-6-6 6-6"/>
               </svg>
             </button>
             <h3 className={styles.listPaneTitle}>{searchOpen ? 'Новый чат' : 'Чаты'}</h3>
@@ -173,11 +225,17 @@ export const ChatSidePanel: FC = () => {
                 </svg>
               )}
             </button>
-            {/* Мобильные: × справа */}
-            <button className={`${styles.iconBtn} ${styles.mobileOnly}`} onClick={closeChat}>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="18" height="18">
-                <path d="M18 6L6 18M6 6l12 12"/>
-              </svg>
+            {/* Мобильные: + справа */}
+            <button className={`${styles.iconBtn} ${styles.mobileOnly} ${searchOpen ? styles.iconBtnActive : ''}`} onClick={handleToggleSearch}>
+              {searchOpen ? (
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="18" height="18">
+                  <path d="M18 6L6 18M6 6l12 12"/>
+                </svg>
+              ) : (
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="18" height="18">
+                  <path d="M12 5v14M5 12h14"/>
+                </svg>
+              )}
             </button>
           </div>
 

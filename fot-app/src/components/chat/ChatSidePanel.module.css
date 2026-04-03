@@ -10,7 +10,7 @@
   top: 0;
   right: 0;
   width: 560px;
-  height: 100vh;
+  height: 100dvh;
   z-index: 1002;
   background: var(--surface);
   border-left: 1px solid var(--border);
@@ -195,20 +195,6 @@
   display: none;
 }
 
-.mobileNewChat {
-  background: var(--primary, #3b82f6);
-  color: white;
-  border-radius: 50%;
-  width: 32px;
-  height: 32px;
-  padding: 0;
-}
-
-.mobileNewChat:hover {
-  opacity: 0.85;
-  background: var(--primary, #3b82f6);
-  color: white;
-}
 
 .searchSection {
   padding: 8px;
@@ -528,6 +514,43 @@
 
   .mobileOnly {
     display: flex !important;
+  }
+
+  /* Размеры для iPhone */
+  .listPaneTitle {
+    font-size: 16px;
+  }
+
+  .conversationItem {
+    padding: 14px 16px;
+    min-height: 60px;
+  }
+
+  .convName {
+    font-size: 15px;
+  }
+
+  .convPreview {
+    font-size: 13px;
+  }
+
+  .messageBubble {
+    font-size: 16px;
+  }
+
+  .messageInput {
+    font-size: 16px;
+    padding: 10px 14px;
+  }
+
+  .inputArea {
+    padding: 12px 16px;
+  }
+
+  .sendBtn {
+    width: 44px;
+    height: 44px;
+    min-width: 44px;
   }
 }
 
