@@ -414,15 +414,7 @@ export const EmployeeSkudSection: FC<IEmployeeSkudSectionProps> = ({
             </button>
           </div>
         ))}
-        <button
-          className="skud-period-btn skud-sync-btn"
-          onClick={handleSync}
-          disabled={syncing}
-          title="Загрузить события из Сигур"
-        >
-          <RefreshCw size={14} className={syncing ? 'spinning' : ''} />
-          {syncing ? 'Синхронизация...' : 'Из Сигур'}
-        </button>
+
         <button
           className="skud-period-btn skud-sync-btn"
           onClick={() => {

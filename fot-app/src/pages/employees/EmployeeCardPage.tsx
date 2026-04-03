@@ -388,37 +388,6 @@ export const EmployeeCardPage: FC = () => {
 
       {/* ===== Period + Tabs ===== */}
       <div className="ec-controls-bar">
-        <div className="ec-stats-period-row">
-          <div className="ec-stats-period-selector">
-            {(['today', 'week', 'month', 'range'] as ViewPeriod[]).map(p => (
-              <button
-                key={p}
-                className={`ec-stats-period-btn ${viewPeriod === p ? 'active' : ''}`}
-                onClick={() => { setViewPeriod(p); if (p !== 'range') setSkudViewDate(new Date().toISOString().slice(0, 10)); }}
-              >
-                {PERIOD_LABELS[p]}
-              </button>
-            ))}
-          </div>
-          <div className="ec-period-divider" />
-          {viewPeriod === 'range' ? (
-            <div className="ec-range-inputs">
-              <DateInput value={rangeStart} onChange={setRangeStart} />
-              <span className="ec-range-sep">—</span>
-              <DateInput value={rangeEnd} onChange={setRangeEnd} />
-            </div>
-          ) : (
-            <div className="ec-date-nav">
-              <button className="ec-date-nav-btn" onClick={() => setSkudViewDate(s => navigateViewDate(viewPeriod, s, -1))}>
-                <ChevronLeft size={16} />
-              </button>
-              <span className="ec-date-nav-label">{getViewLabel(viewPeriod, skudViewDate)}</span>
-              <button className="ec-date-nav-btn" onClick={() => setSkudViewDate(s => navigateViewDate(viewPeriod, s, 1))}>
-                <ChevronRight size={16} />
-              </button>
-            </div>
-          )}
-        </div>
         <div className="ec-tabs">
           {TABS.map(t => (
             <button
@@ -430,6 +399,39 @@ export const EmployeeCardPage: FC = () => {
             </button>
           ))}
         </div>
+        {activeTab === 'skud' && (
+          <div className="ec-stats-period-row">
+            <div className="ec-stats-period-selector">
+              {(['today', 'week', 'month', 'range'] as ViewPeriod[]).map(p => (
+                <button
+                  key={p}
+                  className={`ec-stats-period-btn ${viewPeriod === p ? 'active' : ''}`}
+                  onClick={() => { setViewPeriod(p); if (p !== 'range') setSkudViewDate(new Date().toISOString().slice(0, 10)); }}
+                >
+                  {PERIOD_LABELS[p]}
+                </button>
+              ))}
+            </div>
+            <div className="ec-period-divider" />
+            {viewPeriod === 'range' ? (
+              <div className="ec-range-inputs">
+                <DateInput value={rangeStart} onChange={setRangeStart} />
+                <span className="ec-range-sep">—</span>
+                <DateInput value={rangeEnd} onChange={setRangeEnd} />
+              </div>
+            ) : (
+              <div className="ec-date-nav">
+                <button className="ec-date-nav-btn" onClick={() => setSkudViewDate(s => navigateViewDate(viewPeriod, s, -1))}>
+                  <ChevronLeft size={16} />
+                </button>
+                <span className="ec-date-nav-label">{getViewLabel(viewPeriod, skudViewDate)}</span>
+                <button className="ec-date-nav-btn" onClick={() => setSkudViewDate(s => navigateViewDate(viewPeriod, s, 1))}>
+                  <ChevronRight size={16} />
+                </button>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
 

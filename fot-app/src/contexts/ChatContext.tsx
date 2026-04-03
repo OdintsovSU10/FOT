@@ -92,7 +92,7 @@ export const ChatProvider: FC<{ children: ReactNode }> = ({ children }) => {
     return unsub;
   }, [ws, info, conversations, selectConversation]);
 
-  const openChat = useCallback(() => setIsOpen(true), []);
+  const openChat = useCallback(() => { setIsOpen(true); loadConversations(); }, [loadConversations]);
   const closeChat = useCallback(() => {
     setIsOpen(false);
     resetActiveChat();
