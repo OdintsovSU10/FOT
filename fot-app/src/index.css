@@ -160,3 +160,12 @@ body {
     --header-height: 52px;
   }
 }
+
+/* Safari iOS only: scale up to match Chromium-based browsers rendering */
+@supports (-webkit-touch-callout: none) {
+  @media (max-width: 768px) {
+    body {
+      zoom: 1.15;
+    }
+  }
+}
