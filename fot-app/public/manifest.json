@@ -1,0 +1,16 @@
+{
+  "name": "ФОТ — Управление персоналом",
+  "short_name": "ФОТ",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#ffffff",
+  "icons": [
+    {
+      "src": "/fot-favicon-32.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
