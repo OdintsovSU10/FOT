@@ -1355,6 +1355,14 @@
     flex-direction: column;
     align-items: flex-start;
   }
+  .ts-header-left {
+    width: 100%;
+    justify-content: space-between;
+  }
+  .ts-month-nav {
+    flex: 1;
+    justify-content: center;
+  }
   .ts-header-right {
     width: 100%;
     overflow-x: auto;
@@ -1386,6 +1394,13 @@
   .ts-stat-value {
     font-size: 13px;
   }
+  .ts-stats-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+  .ts-stat-card {
+    flex: 1;
+  }
   .ts-month-label {
     font-size: 13px;
     min-width: 120px;
@@ -1395,6 +1410,9 @@
   }
   .ts-title {
     font-size: 16px;
+  }
+  .ts-table-title {
+    font-size: 12px;
   }
   .ts-table {
     min-width: 600px;
@@ -1406,5 +1424,16 @@
   .ts-table td {
     font-size: 11px;
     padding: 4px 2px;
+  }
+  .ts-modal-overlay {
+    align-items: flex-end;
+    padding: 0;
+  }
+  .ts-modal,
+  .ts-late-modal {
+    width: 100%;
+    max-height: 85vh;
+    border-radius: 20px 20px 0 0;
+    margin: 0;
   }
 }

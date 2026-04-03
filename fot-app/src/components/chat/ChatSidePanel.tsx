@@ -226,7 +226,7 @@ export const ChatSidePanel: FC = () => {
               )}
             </button>
             {/* Мобильные: + справа */}
-            <button className={`${styles.iconBtn} ${styles.mobileOnly} ${searchOpen ? styles.iconBtnActive : ''}`} onClick={handleToggleSearch}>
+            <button className={`${styles.iconBtn} ${styles.mobileOnly} ${styles.iconBtnPrimary} ${searchOpen ? styles.iconBtnActive : ''}`} onClick={handleToggleSearch}>
               {searchOpen ? (
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="18" height="18">
                   <path d="M18 6L6 18M6 6l12 12"/>

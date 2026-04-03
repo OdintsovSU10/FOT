@@ -187,6 +187,10 @@
   color: var(--text-primary);
 }
 
+.iconBtnPrimary {
+  color: var(--primary, #3b82f6);
+}
+
 .desktopOnly {
   display: flex;
 }
@@ -518,7 +522,8 @@
 
   /* Размеры для iPhone */
   .listPaneTitle {
-    font-size: 16px;
+    font-size: 21px;
+    font-weight: 700;
   }
 
   .conversationItem {
