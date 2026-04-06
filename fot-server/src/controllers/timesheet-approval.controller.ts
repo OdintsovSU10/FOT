@@ -167,4 +167,27 @@ const getPending = async (_req: AuthenticatedRequest, res: Response): Promise<vo
   }
 };
 
-export const timesheetApprovalController = { submit, getStatus, approve, reject, getPending };
+/** HR: список табелей по статусу */
+const getByStatus = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const status = req.query.status as string | undefined;
+    let query = supabase
+      .from('timesheet_approvals')
+      .select('*');
+
+    if (status) {
+      query = query.eq('status', status);
+    }
+
+    query = query.order('updated_at', { ascending: false });
+
+    const { data, error } = await query;
+    if (error) throw error;
+    res.json({ success: true, data: data || [] });
+  } catch (err) {
+    console.error('timesheet-approval.getByStatus error:', err);
+    res.status(500).json({ success: false, error: 'Ошибка получения списка' });
+  }
+};
+
+export const timesheetApprovalController = { submit, getStatus, approve, reject, getPending, getByStatus };

@@ -304,11 +304,12 @@ const ModalContent: FC<Omit<ICorrectionModalProps, 'open'>> = ({
   );
 };
 
-export const TimesheetCorrectionModal: FC<ICorrectionModalProps> = ({ open, ...rest }) => (
-  <div
-    className={`ts-modal-overlay ${open ? 'ts-modal-overlay--open' : ''}`}
-    onClick={rest.onClose}
-  >
-    {open && <ModalContent {...rest} />}
-  </div>
-);
+export const TimesheetCorrectionModal: FC<ICorrectionModalProps> = ({ open, ...rest }) =>
+  open ? (
+    <div
+      className="ts-modal-overlay ts-modal-overlay--open"
+      onClick={rest.onClose}
+    >
+      <ModalContent {...rest} />
+    </div>
+  ) : null;

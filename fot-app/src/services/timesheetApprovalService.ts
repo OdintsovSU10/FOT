@@ -44,6 +44,11 @@ export const timesheetApprovalService = {
     return res.data;
   },
 
+  getByStatus: async (status: string) => {
+    const res = await apiClient.get<ApiResponse<ITimesheetApproval[]>>(`/timesheet-approvals/list?status=${status}`);
+    return res.data;
+  },
+
   approve: async (id: number, comment?: string) => {
     const res = await apiClient.post<ApiResponse<ITimesheetApproval>>(`/timesheet-approvals/${id}/approve`, { comment });
     return res.data;

@@ -15,6 +15,9 @@ router.get('/status', requirePosition('header', 'hr', 'admin', 'super_admin'), t
 // GET /api/timesheet-approvals/pending — hr: все неутверждённые
 router.get('/pending', requirePosition('hr', 'admin', 'super_admin'), timesheetApprovalController.getPending);
 
+// GET /api/timesheet-approvals/list?status=... — hr: список по статусу
+router.get('/list', requirePosition('hr', 'admin', 'super_admin'), timesheetApprovalController.getByStatus);
+
 // POST /api/timesheet-approvals/:id/approve — hr утверждает
 router.post('/:id/approve', requirePosition('hr', 'admin', 'super_admin'), timesheetApprovalController.approve);
 

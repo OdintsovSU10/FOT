@@ -146,9 +146,7 @@ export const EmployeeTimesheetPage: FC = () => {
 
   // Salary calculation
   const salaryData = useMemo(() => {
-    const salary = employee?.salary_actual ?? employee?.current_salary ?? 0;
-    const units = employee?.staff_units ?? 1;
-    const effective = salary * units;
+    const salary = employee?.salary_calculated ?? employee?.current_salary ?? 0;
     const sched = employeeId ? schedules[employeeId] : undefined;
 
     let normDays = 0;
@@ -160,10 +158,10 @@ export const EmployeeTimesheetPage: FC = () => {
     const actualHours = entries.reduce((sum, e) => sum + (e.hours_worked || 0), 0);
     const workHoursPerDay = sched?.work_hours ?? 8;
     const normHours = normDays * workHoursPerDay;
-    const dailyRate = normDays > 0 ? effective / normDays : 0;
+    const dailyRate = normDays > 0 ? salary / normDays : 0;
     const accrued = dailyRate * workedDays;
 
-    return { salary, units, effective, normDays, workedDays, dailyRate, accrued, actualHours, normHours };
+    return { salary, normDays, workedDays, dailyRate, accrued, actualHours, normHours };
   }, [employee, entries, schedules, employeeId, year, month, daysCount]);
 
   const prevMonth = () => {
@@ -351,11 +349,6 @@ export const EmployeeTimesheetPage: FC = () => {
             <span className={s.pillLabel}>Оклад</span>
             <span className={s.pillValue}>{formatMoneyShort(salaryData.salary)} ₽</span>
           </div>
-          <span className={s.operator}>×</span>
-          <div className={s.pill}>
-            <span className={s.pillLabel}>Ставка</span>
-            <span className={s.pillValue}>{salaryData.units}</span>
-          </div>
           <span className={s.operator}>÷</span>
           <div className={s.pill}>
             <span className={s.pillLabel}>Норма дней</span>
@@ -414,7 +407,7 @@ export const EmployeeTimesheetPage: FC = () => {
                   </td>
                   <td className={s.cellFormula}>
                     {row.isWorked
-                      ? `${formatMoneyShort(salaryData.effective)}÷${salaryData.normDays}`
+                      ? `${formatMoneyShort(salaryData.salary)}÷${salaryData.normDays}`
                       : '—'
                     }
                   </td>

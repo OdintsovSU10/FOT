@@ -312,6 +312,40 @@
   background: #fef2f2;
 }
 
+/* Массовое назначение */
+.sched-bulk {
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-color, #e5e7eb);
+  border-radius: 8px;
+  background: var(--bg-secondary, #f9fafb);
+}
+
+.sched-bulk-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.sched-bulk-form {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-color, #e5e7eb);
+}
+
+.sched-bulk-form select,
+.sched-bulk-form input {
+  padding: 6px 10px;
+  border: 1px solid var(--border-color, #d1d5db);
+  border-radius: 6px;
+  font-size: 13px;
+  background: var(--bg-primary, #fff);
+}
+
 /* Сотрудники */
 .sched-emp-list {
   display: flex;
@@ -325,10 +359,18 @@
   border-radius: 8px;
 }
 
+.sched-emp-header {
+  margin-bottom: 4px;
+}
+
+.sched-emp-item.selected {
+  border-color: var(--accent, #3b82f6);
+  background: #eff6ff;
+}
+
 .sched-emp-name {
   font-size: 14px;
   font-weight: 500;
-  margin-bottom: 4px;
 }
 
 .sched-emp-schedules {
@@ -378,6 +420,14 @@
 
 .sched-tpl-name {
   font-weight: 500;
+}
+
+.sched-item-actions {
+  display: flex;
+  gap: 4px;
+  position: absolute;
+  right: 10px;
+  top: 10px;
 }
 
 /* Настройка по дням */
