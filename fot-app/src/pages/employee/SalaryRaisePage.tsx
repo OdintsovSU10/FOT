@@ -26,7 +26,7 @@ export const SalaryRaisePage: FC = () => {
     setLoading(true);
     try {
       const res = await salaryRaiseService.getMy();
-      setRequests(res.data);
+      setRequests(res);
     } catch {
       setRequests([]);
     } finally {

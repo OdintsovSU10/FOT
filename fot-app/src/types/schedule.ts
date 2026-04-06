@@ -1,5 +1,11 @@
 export type ScheduleType = 'office' | 'remote' | 'hybrid' | 'shift';
 
+export interface IDayOverride {
+  work_start: string;
+  work_end: string;
+  work_hours: number;
+}
+
 export interface IWorkSchedule {
   id: string;
   name: string;
@@ -10,6 +16,7 @@ export interface IWorkSchedule {
   work_days: number[];
   office_days: number[] | null;
   late_threshold_minutes: number;
+  day_overrides: Record<string, IDayOverride> | null;
   is_default: boolean;
   created_at: string;
   updated_at: string;
@@ -47,6 +54,7 @@ export interface IResolvedSchedule {
   work_days: number[];
   office_days: number[] | null;
   late_threshold_minutes: number;
+  day_overrides: Record<string, IDayOverride> | null;
   source: 'employee' | 'department' | 'default';
 }
 

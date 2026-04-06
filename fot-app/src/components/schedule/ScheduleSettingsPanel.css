@@ -380,6 +380,70 @@
   font-weight: 500;
 }
 
+/* Настройка по дням */
+.sched-checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  cursor: pointer;
+  color: var(--text-primary, #111);
+}
+
+.sched-checkbox-label input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+
+.sched-day-overrides {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 12px;
+  border: 1px solid var(--border-color, #e5e7eb);
+  border-radius: 8px;
+  background: var(--bg-secondary, #f9fafb);
+}
+
+.sched-day-override-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.sched-day-label {
+  font-weight: 500;
+  min-width: 28px;
+}
+
+.sched-day-override-row input[type="time"] {
+  width: 80px;
+  padding: 3px 6px;
+  border: 1px solid var(--border-color, #d1d5db);
+  border-radius: 6px;
+  font-size: 12px;
+}
+
+.sched-hours-input {
+  width: 56px;
+  padding: 3px 6px;
+  border: 1px solid var(--border-color, #d1d5db);
+  border-radius: 6px;
+  font-size: 12px;
+}
+
+.sched-hours-label {
+  font-size: 12px;
+  color: var(--text-secondary, #6b7280);
+}
+
+.sched-overrides-info {
+  color: var(--accent, #3b82f6);
+  font-weight: 500;
+}
+
 /* Мобильная адаптация */
 @media (max-width: 768px) {
   .sched-panel {

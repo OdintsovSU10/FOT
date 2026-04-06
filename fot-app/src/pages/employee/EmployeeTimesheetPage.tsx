@@ -21,7 +21,6 @@ import type {
 import type { IResolvedSchedule } from '../../types/schedule';
 import s from './EmployeeTimesheet.module.css';
 
-const WEEKDAY_FULL = ['Воскресенье', 'Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота'];
 const WEEKDAY_SHORT = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
 
 const STATUS_LABELS: Record<string, string> = {

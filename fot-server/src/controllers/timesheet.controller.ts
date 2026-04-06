@@ -4,7 +4,7 @@ import { supabase } from '../config/database.js';
 import { auditService } from '../services/audit.service.js';
 import type { AuthenticatedRequest, TimeStatus, IResolvedSchedule } from '../types/index.js';
 import { exportTimesheet } from './timesheet-export.controller.js';
-import { resolveSchedulesBulk, isWorkingDay, needsSkudCheck, countWorkingDaysUpToToday as schedWorkingDaysUpToToday, getEffectiveLateThreshold } from '../services/schedule.service.js';
+import { resolveSchedulesBulk, isWorkingDay, needsSkudCheck, countWorkingDaysUpToToday as schedWorkingDaysUpToToday, countNormHoursUpToToday, getScheduleForDate, getEffectiveLateThreshold } from '../services/schedule.service.js';
 import { getInternalAccessPoints } from '../services/skud-shared.service.js';
 
 const validStatuses: TimeStatus[] = ['work', 'vacation', 'dayoff', 'remote', 'unpaid', 'absent', 'sick', 'business_trip', 'manual'];
@@ -340,7 +340,7 @@ export const timesheetController = {
               employee_id: empId,
               work_date: dateStr,
               status: 'remote',
-              hours_worked: sched.work_hours,
+              hours_worked: getScheduleForDate(sched, dateObj).work_hours,
               is_correction: false,
               first_entry: null,
               last_exit: null,
@@ -357,7 +357,9 @@ export const timesheetController = {
         const empWorkDays = sched
           ? schedWorkingDaysUpToToday(year, mon, sched)
           : getWorkingDaysUpToToday(year, mon);
-        normHours += empWorkDays * (sched ? sched.work_hours : 8);
+        normHours += sched
+          ? countNormHoursUpToToday(year, mon, sched)
+          : empWorkDays * 8;
         totalWorkingDays = Math.max(totalWorkingDays, empWorkDays);
       }
 

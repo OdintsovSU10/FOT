@@ -212,14 +212,14 @@ export const SalaryRaiseViewPage: FC = () => {
             { key: 'complexity_increase', label: 'Рост сложности' },
             { key: 'cross_functional', label: 'Кросс-функциональность' },
           ].map(({ key, label }) => {
-            const rc = request.responsibility_changes as Record<string, unknown>;
+            const rc = request.responsibility_changes as unknown as Record<string, unknown>;
             if (!rc[key]) return null;
             return (
               <div key={key} className={styles.toggleItem}>
                 <span className={styles.toggleIcon}>&#10003;</span>
                 <div>
                   <div className={styles.toggleText}>{label}</div>
-                  {rc[`${key}_desc`] && <div className={styles.toggleDesc}>{rc[`${key}_desc`] as string}</div>}
+                  {rc[`${key}_desc`] ? <div className={styles.toggleDesc}>{String(rc[`${key}_desc`])}</div> : null}
                 </div>
               </div>
             );
@@ -238,7 +238,7 @@ export const SalaryRaiseViewPage: FC = () => {
             { key: 'development_areas', label: 'Области развития' },
             { key: 'career_goals', label: 'Карьерные цели' },
           ].map(({ key, label }) => {
-            const sa = request.self_assessment as Record<string, string>;
+            const sa = request.self_assessment as unknown as Record<string, string>;
             if (!sa[key]) return null;
             return (
               <div key={key} className={styles.infoItem} style={{ marginBottom: 12 }}>

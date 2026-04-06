@@ -72,7 +72,7 @@ export const SalaryRaiseFormPage: FC = () => {
 
   // Вложения
   const [attachments, setAttachments] = useState<ISalaryRaiseAttachment[]>([]);
-  const [uploading, setUploading] = useState<number | null>(null); // achievement index or -1 for uploading
+  const [uploading, setUploading] = useState<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const uploadTargetIdx = useRef<number | null>(null);
 
@@ -216,6 +216,9 @@ export const SalaryRaiseFormPage: FC = () => {
 
   return (
     <div className={styles.page}>
+      <input type="file" ref={fileInputRef} onChange={handleFileSelect} style={{ display: 'none' }}
+        accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png,.gif,.zip" />
+
       <span className={styles.backLink} onClick={() => navigate('/employee/salary-raise')}>
         ← Назад к заявкам
       </span>
@@ -347,6 +350,28 @@ export const SalaryRaiseFormPage: FC = () => {
                 <input className={styles.formInput} value={a.result}
                   onChange={e => updateAchievement(idx, 'result', e.target.value)}
                   placeholder="Конкретные цифры, метрики" />
+              </div>
+              {/* Вложения к достижению */}
+              <div className={styles.formGroupFull}>
+                <label className={styles.formLabel}>Подтверждающие документы</label>
+                {getAttachmentsForAchievement(idx).map(att => (
+                  <div key={att.id} className={styles.fileItem}>
+                    <span className={styles.fileName}>{att.file_name}</span>
+                    <span className={styles.fileSize}>{formatFileSize(att.file_size)}</span>
+                    <button className={styles.removeBtn} onClick={() => handleDeleteAttachment(att.id)}>×</button>
+                  </div>
+                ))}
+                {existing && (
+                  <button
+                    type="button"
+                    className={styles.uploadBtn}
+                    onClick={() => triggerFileUpload(idx)}
+                    disabled={uploading !== null}
+                  >
+                    {uploading === idx ? 'Загрузка...' : '+ Прикрепить файл'}
+                  </button>
+                )}
+                {!existing && <span className={styles.uploadHint}>Сохраните черновик, чтобы прикрепить файлы</span>}
               </div>
             </div>
           </div>

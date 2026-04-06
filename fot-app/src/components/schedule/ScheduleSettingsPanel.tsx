@@ -1,7 +1,7 @@
 import { type FC, useState, useEffect, useCallback } from 'react';
 import { X, Plus, Trash2, Building2, User, Calendar } from 'lucide-react';
 import { scheduleService } from '../../services/scheduleService';
-import type { IWorkSchedule, IDepartmentSchedule, IEmployeeSchedule, ScheduleType } from '../../types/schedule';
+import type { IWorkSchedule, IDepartmentSchedule, IEmployeeSchedule, IDayOverride, ScheduleType } from '../../types/schedule';
 import { SCHEDULE_TYPE_LABELS, WEEKDAY_LABELS } from '../../types/schedule';
 import './ScheduleSettingsPanel.css';
 
@@ -42,6 +42,8 @@ export const ScheduleSettingsPanel: FC<IProps> = ({ open, onClose, departmentId,
   const [newWorkDays, setNewWorkDays] = useState<number[]>(DEFAULT_WORK_DAYS);
   const [newOfficeDays, setNewOfficeDays] = useState<number[]>([1, 3, 5]);
   const [newLateThreshold, setNewLateThreshold] = useState(0);
+  const [dayOverridesEnabled, setDayOverridesEnabled] = useState(false);
+  const [dayOverrides, setDayOverrides] = useState<Record<string, IDayOverride>>({});
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -54,13 +56,15 @@ export const ScheduleSettingsPanel: FC<IProps> = ({ open, onClose, departmentId,
       setTemplates(tpls);
       setDeptSchedules(deptSch);
 
-      // Загрузить графики для всех сотрудников
+      // Загрузить графики для всех сотрудников (параллельно)
       const empSchMap = new Map<number, IEmployeeSchedule[]>();
-      for (const emp of employees) {
-        try {
-          const scheds = await scheduleService.getEmployeeSchedule(emp.id);
-          if (scheds.length > 0) empSchMap.set(emp.id, scheds);
-        } catch { /* ignore */ }
+      const results = await Promise.allSettled(
+        employees.map(emp => scheduleService.getEmployeeSchedule(emp.id).then(scheds => ({ id: emp.id, scheds })))
+      );
+      for (const r of results) {
+        if (r.status === 'fulfilled' && r.value.scheds.length > 0) {
+          empSchMap.set(r.value.id, r.value.scheds);
+        }
       }
       setEmpSchedules(empSchMap);
     } catch (err) {
@@ -112,9 +116,12 @@ export const ScheduleSettingsPanel: FC<IProps> = ({ open, onClose, departmentId,
         work_days: newWorkDays,
         office_days: newType === 'hybrid' ? newOfficeDays : null,
         late_threshold_minutes: newLateThreshold,
+        day_overrides: dayOverridesEnabled && Object.keys(dayOverrides).length > 0 ? dayOverrides : null,
       });
       setShowCreateForm(false);
       setNewName('');
+      setDayOverridesEnabled(false);
+      setDayOverrides({});
       await loadData();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Ошибка создания');
@@ -320,6 +327,61 @@ export const ScheduleSettingsPanel: FC<IProps> = ({ open, onClose, departmentId,
                     </div>
                   </div>
 
+                  <div className="sched-form-row">
+                    <label className="sched-checkbox-label">
+                      <input
+                        type="checkbox"
+                        checked={dayOverridesEnabled}
+                        onChange={e => {
+                          setDayOverridesEnabled(e.target.checked);
+                          if (!e.target.checked) setDayOverrides({});
+                        }}
+                      />
+                      Настройка по дням
+                    </label>
+                  </div>
+
+                  {dayOverridesEnabled && (
+                    <div className="sched-day-overrides">
+                      {newWorkDays.sort((a, b) => a - b).map(day => {
+                        const key = String(day);
+                        const ov = dayOverrides[key];
+                        return (
+                          <div key={day} className="sched-day-override-row">
+                            <span className="sched-day-label">{WEEKDAY_LABELS[day - 1]}</span>
+                            {ov ? (
+                              <>
+                                <input type="time" value={ov.work_start.slice(0, 5)} onChange={e => setDayOverrides(prev => ({
+                                  ...prev, [key]: { ...prev[key], work_start: e.target.value + ':00' },
+                                }))} />
+                                <span>–</span>
+                                <input type="time" value={ov.work_end.slice(0, 5)} onChange={e => setDayOverrides(prev => ({
+                                  ...prev, [key]: { ...prev[key], work_end: e.target.value + ':00' },
+                                }))} />
+                                <input type="number" min={0.5} max={24} step={0.5} value={ov.work_hours} onChange={e => setDayOverrides(prev => ({
+                                  ...prev, [key]: { ...prev[key], work_hours: Number(e.target.value) },
+                                }))} className="sched-hours-input" />
+                                <span className="sched-hours-label">ч</span>
+                                <button className="sched-btn-icon" onClick={() => setDayOverrides(prev => {
+                                  const next = { ...prev };
+                                  delete next[key];
+                                  return next;
+                                })} title="Сбросить"><X size={14} /></button>
+                              </>
+                            ) : (
+                              <>
+                                <span className="sched-muted">{newStart}–{newEnd}, {newHours}ч</span>
+                                <button className="sched-btn sm" onClick={() => setDayOverrides(prev => ({
+                                  ...prev, [key]: { work_start: newStart + ':00', work_end: newEnd + ':00', work_hours: newHours },
+                                }))}>Изменить</button>
+                              </>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+
                   {newType === 'hybrid' && (
                     <div className="sched-form-row">
                       <label>Дни в офисе:</label>
@@ -355,6 +417,14 @@ export const ScheduleSettingsPanel: FC<IProps> = ({ open, onClose, departmentId,
                       дни: {t.work_days.map(d => WEEKDAY_LABELS[d - 1]).join(', ')}
                       {t.office_days && ` (офис: ${t.office_days.map(d => WEEKDAY_LABELS[d - 1]).join(', ')})`}
                       {t.late_threshold_minutes > 0 && `, допуск ${t.late_threshold_minutes} мин`}
+                      {t.day_overrides && Object.keys(t.day_overrides).length > 0 && (
+                        <span className="sched-overrides-info">
+                          {' | '}
+                          {Object.entries(t.day_overrides).map(([d, ov]) =>
+                            `${WEEKDAY_LABELS[Number(d) - 1]}: ${ov.work_start.slice(0, 5)}–${ov.work_end.slice(0, 5)} (${ov.work_hours}ч)`
+                          ).join(', ')}
+                        </span>
+                      )}
                     </div>
                     {!t.is_default && (
                       <button className="sched-btn-icon danger" onClick={() => handleDeleteTemplate(t.id)} title="Удалить">

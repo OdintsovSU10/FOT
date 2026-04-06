@@ -276,6 +276,60 @@
 .btnSecondary:hover { background: #e5e7eb; }
 .btnSecondary:disabled { opacity: 0.5; cursor: not-allowed; }
 
+.fileItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  margin-bottom: 6px;
+}
+
+.fileName {
+  flex: 1;
+  font-size: 13px;
+  color: #374151;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fileSize {
+  font-size: 12px;
+  color: #9ca3af;
+  flex-shrink: 0;
+}
+
+.uploadBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 12px;
+  background: none;
+  border: 1px dashed #d1d5db;
+  border-radius: 6px;
+  color: #6b7280;
+  cursor: pointer;
+  font-size: 13px;
+  transition: all 0.2s;
+}
+.uploadBtn:hover {
+  border-color: #3b82f6;
+  color: #3b82f6;
+}
+.uploadBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.uploadHint {
+  font-size: 12px;
+  color: #9ca3af;
+  font-style: italic;
+}
+
 .loading {
   display: flex;
   justify-content: center;
@@ -315,3 +369,6 @@
 [data-theme="dark"] .toggleLabel { color: #d1d5db; }
 [data-theme="dark"] .btnSecondary { background: #374151; color: #d1d5db; border-color: #4b5563; }
 [data-theme="dark"] .addBtn { background: #374151; border-color: #4b5563; color: #9ca3af; }
+[data-theme="dark"] .fileItem { background: #374151; border-color: #4b5563; }
+[data-theme="dark"] .fileName { color: #d1d5db; }
+[data-theme="dark"] .uploadBtn { border-color: #4b5563; color: #9ca3af; }

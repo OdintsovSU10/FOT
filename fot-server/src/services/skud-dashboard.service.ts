@@ -4,7 +4,7 @@
 import { supabase } from '../config/database.js';
 import { formatDateToISO } from '../utils/date.utils.js';
 import { collectDeptIds, getMonday, DAY_NAMES, countWorkingDays, getInternalAccessPoints } from './skud-shared.service.js';
-import { resolveSchedulesBulk, getEffectiveLateThreshold, needsSkudCheck } from './schedule.service.js';
+import { resolveSchedulesBulk, getEffectiveLateThreshold, getScheduleForDate, needsSkudCheck } from './schedule.service.js';
 import type {
   IDashboardStatsParams,
   IDashboardStatsResult,
@@ -177,16 +177,20 @@ export async function getDashboardStats(
 
   // --- Агрегация ---
 
-  // Хелпер: получить порог опоздания для сотрудника
-  const getLateThresholdFor = (empId: number): string => {
+  // Хелпер: получить порог опоздания для сотрудника на конкретную дату
+  const getLateThresholdFor = (empId: number, dateStr: string): string => {
     const sched = schedulesMap.get(empId);
-    return sched ? getEffectiveLateThreshold(sched) : LATE_THRESHOLD_DEFAULT;
+    if (!sched) return LATE_THRESHOLD_DEFAULT;
+    const dateObj = new Date(dateStr + 'T00:00:00');
+    return getEffectiveLateThreshold(sched, dateObj);
   };
 
-  const getSlightlyLateFor = (empId: number): string => {
+  const getSlightlyLateFor = (empId: number, dateStr: string): string => {
     const sched = schedulesMap.get(empId);
     if (!sched) return SLIGHTLY_LATE_THRESHOLD_DEFAULT;
-    const [h, m] = sched.work_start.split(':').map(Number);
+    const dateObj = new Date(dateStr + 'T00:00:00');
+    const dayParams = getScheduleForDate(sched, dateObj);
+    const [h, m] = dayParams.work_start.split(':').map(Number);
     const totalMin = h * 60 + m + sched.late_threshold_minutes + 15;
     return `${String(Math.floor(totalMin / 60)).padStart(2, '0')}:${String(totalMin % 60).padStart(2, '0')}:00`;
   };
@@ -197,7 +201,7 @@ export async function getDashboardStats(
   for (const s of summaries || []) {
     if (!s.first_entry) continue;
     if (remoteEmpIds.has(s.employee_id)) continue;
-    const threshold = getLateThresholdFor(s.employee_id);
+    const threshold = getLateThresholdFor(s.employee_id, s.date);
     if (s.date === todayStr && s.first_entry > threshold) lateToday++;
     if (s.date === yesterdayStr && s.first_entry > threshold) lateYesterday++;
   }
@@ -212,8 +216,8 @@ export async function getDashboardStats(
   let slightlyLateCount = 0;
   let veryLateCount = 0;
   for (const s of periodWithEntry) {
-    const threshold = getLateThresholdFor(s.employee_id);
-    const slightlyThreshold = getSlightlyLateFor(s.employee_id);
+    const threshold = getLateThresholdFor(s.employee_id, s.date);
+    const slightlyThreshold = getSlightlyLateFor(s.employee_id, s.date);
     if (s.first_entry! <= threshold) onTimeCount++;
     else if (s.first_entry! <= slightlyThreshold) slightlyLateCount++;
     else veryLateCount++;

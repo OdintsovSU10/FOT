@@ -10,6 +10,12 @@ import type { AuthenticatedRequest } from '../types/index.js';
 const scheduleTypeEnum = z.enum(['office', 'remote', 'hybrid', 'shift']);
 const weekDayArray = z.array(z.number().int().min(1).max(7)).min(1).max(7);
 
+const dayOverrideSchema = z.object({
+  work_start: z.string().regex(/^\d{2}:\d{2}(:\d{2})?$/),
+  work_end: z.string().regex(/^\d{2}:\d{2}(:\d{2})?$/),
+  work_hours: z.number().min(0.5).max(24),
+});
+
 const createScheduleSchema = z.object({
   name: z.string().min(1).max(100),
   schedule_type: scheduleTypeEnum,
@@ -19,7 +25,11 @@ const createScheduleSchema = z.object({
   work_days: weekDayArray,
   office_days: weekDayArray.nullable().optional(),
   late_threshold_minutes: z.number().int().min(0).max(120).optional(),
-});
+  day_overrides: z.record(z.string().regex(/^[1-7]$/), dayOverrideSchema).nullable().optional(),
+}).refine((data) => {
+  if (!data.day_overrides) return true;
+  return Object.keys(data.day_overrides).every(k => data.work_days.includes(Number(k)));
+}, { message: 'day_overrides keys must be in work_days' });
 
 const assignSchema = z.object({
   schedule_id: z.string().uuid(),
@@ -27,6 +37,25 @@ const assignSchema = z.object({
   effective_to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
   reason: z.string().max(500).nullable().optional(),
 });
+
+/** Нормализация HH:MM → HH:MM:SS */
+const normalizeTime = (t: string): string => (t.length === 5 ? t + ':00' : t);
+
+/** Нормализация day_overrides: time → HH:MM:SS */
+const normalizeDayOverrides = (
+  overrides: Record<string, { work_start: string; work_end: string; work_hours: number }> | null | undefined,
+): Record<string, { work_start: string; work_end: string; work_hours: number }> | null => {
+  if (!overrides) return null;
+  const result: Record<string, { work_start: string; work_end: string; work_hours: number }> = {};
+  for (const [key, val] of Object.entries(overrides)) {
+    result[key] = {
+      work_start: normalizeTime(val.work_start),
+      work_end: normalizeTime(val.work_end),
+      work_hours: val.work_hours,
+    };
+  }
+  return result;
+};
 
 /** Проверка: header может управлять только своим отделом */
 const canManageDept = (req: AuthenticatedRequest, deptId: string): boolean => {
@@ -60,9 +89,16 @@ export const scheduleController = {
       const parsed = createScheduleSchema.safeParse(req.body);
       if (!parsed.success) return res.status(400).json({ success: false, error: parsed.error.issues });
 
+      const body = {
+        ...parsed.data,
+        work_start: normalizeTime(parsed.data.work_start),
+        work_end: normalizeTime(parsed.data.work_end),
+        day_overrides: normalizeDayOverrides(parsed.data.day_overrides),
+      };
+
       const { data, error } = await supabase
         .from('work_schedules')
-        .insert({ ...parsed.data })
+        .insert(body)
         .select()
         .single();
 
@@ -82,9 +118,14 @@ export const scheduleController = {
       const parsed = createScheduleSchema.partial().safeParse(req.body);
       if (!parsed.success) return res.status(400).json({ success: false, error: parsed.error.issues });
 
+      const body: Record<string, unknown> = { ...parsed.data, updated_at: new Date().toISOString() };
+      if (parsed.data.work_start) body.work_start = normalizeTime(parsed.data.work_start);
+      if (parsed.data.work_end) body.work_end = normalizeTime(parsed.data.work_end);
+      if (parsed.data.day_overrides !== undefined) body.day_overrides = normalizeDayOverrides(parsed.data.day_overrides);
+
       const { data, error } = await supabase
         .from('work_schedules')
-        .update({ ...parsed.data, updated_at: new Date().toISOString() })
+        .update(body)
         .eq('id', id)
         .select()
         .single();

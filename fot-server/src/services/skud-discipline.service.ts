@@ -4,7 +4,7 @@
 import { supabase } from '../config/database.js';
 import { formatDateToISO } from '../utils/date.utils.js';
 import type { IDisciplineParams, IDisciplineResult, IDisciplineViolation, IDailySummaryRow } from '../types/skud.types.js';
-import { resolveSchedulesBulk, getEffectiveLateThreshold, needsSkudCheck } from './schedule.service.js';
+import { resolveSchedulesBulk, getEffectiveLateThreshold, getScheduleForDate, needsSkudCheck } from './schedule.service.js';
 
 const LATE_THRESHOLD_DEFAULT = '09:00:00';
 const WORK_NORM_HOURS_DEFAULT = 9;
@@ -136,12 +136,14 @@ export async function getDisciplineViolations(
       if (!needsSkudCheck(sched, dateObj)) continue;
     }
 
-    // Пороги с учётом графика
-    const lateThreshold = sched ? getEffectiveLateThreshold(sched) : LATE_THRESHOLD_DEFAULT;
-    const workPresenceHours = sched ? sched.work_hours : WORK_PRESENCE_HOURS_DEFAULT;
-    const workStartMin = sched ? timeToMin(sched.work_start) : 9 * 60;
-    const workNormHours = sched
-      ? (timeToMin(sched.work_end) - timeToMin(sched.work_start)) / 60
+    // Пороги с учётом графика (day_overrides)
+    const dateObj2 = new Date(s.date + 'T00:00:00');
+    const dayParams = sched ? getScheduleForDate(sched, dateObj2) : null;
+    const lateThreshold = sched ? getEffectiveLateThreshold(sched, dateObj2) : LATE_THRESHOLD_DEFAULT;
+    const workPresenceHours = dayParams ? dayParams.work_hours : WORK_PRESENCE_HOURS_DEFAULT;
+    const workStartMin = dayParams ? timeToMin(dayParams.work_start) : 9 * 60;
+    const workNormHours = dayParams
+      ? (timeToMin(dayParams.work_end) - timeToMin(dayParams.work_start)) / 60
       : WORK_NORM_HOURS_DEFAULT;
 
     // 1. Опоздание

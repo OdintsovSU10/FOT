@@ -2,7 +2,7 @@ import { Response } from 'express';
 import XLSX from 'xlsx';
 import { supabase } from '../config/database.js';
 import type { AuthenticatedRequest } from '../types/index.js';
-import { resolveSchedulesBulk, isWorkingDay, needsSkudCheck, countWorkingDaysForSchedule } from '../services/schedule.service.js';
+import { resolveSchedulesBulk, isWorkingDay, needsSkudCheck, getScheduleForDate, countNormHoursForSchedule } from '../services/schedule.service.js';
 import { getInternalAccessPoints } from '../services/skud-shared.service.js';
 
 /** GET /api/timesheet/export?month=YYYY-MM&department_id=... */
@@ -189,7 +189,7 @@ export async function exportTimesheet(req: AuthenticatedRequest, res: Response) 
         const dateObj = new Date(year, mon - 1, d);
         if (!isWorkingDay(sched, dateObj)) continue;
         if (!needsSkudCheck(sched, dateObj)) {
-          empData.set(dateStr, { status: 'remote', hours: sched.work_hours });
+          empData.set(dateStr, { status: 'remote', hours: getScheduleForDate(sched, dateObj).work_hours });
         }
       }
     }
@@ -242,7 +242,7 @@ export async function exportTimesheet(req: AuthenticatedRequest, res: Response) 
     (employees || []).forEach((emp, idx) => {
       const sched = schedulesMap.get(emp.id);
       const empNormHours = sched
-        ? countWorkingDaysForSchedule(year, mon, sched) * sched.work_hours
+        ? countNormHoursForSchedule(year, mon, sched)
         : new Date(year, mon, 0).getDate() * 8; // fallback
 
       const row: (string | number | null)[] = [
