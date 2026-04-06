@@ -105,10 +105,10 @@ export const EmployeeHistorySection: FC<IEmployeeHistorySectionProps> = ({ histo
                 <Briefcase size={14} className="ec-history-assign-icon" />
                 <span className="ec-history-assign-title">{getAssignmentTitle(data)}</span>
               </div>
-              {(data.position || data.department) && (
+              {(data.position as string || data.department as string) && (
                 <div className="ec-history-card-details">
-                  {data.position && <span>{String(data.position)}</span>}
-                  {data.department && <span className="ec-history-dept">{String(data.department)}</span>}
+                  {data.position ? <span>{String(data.position)}</span> : null}
+                  {data.department ? <span className="ec-history-dept">{String(data.department)}</span> : null}
                 </div>
               )}
             </div>
