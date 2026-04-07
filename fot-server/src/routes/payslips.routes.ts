@@ -10,5 +10,6 @@ router.get('/my', requirePosition('worker', 'header', 'hr', 'admin', 'super_admi
 router.get('/employee/:empId', requirePosition('hr', 'admin', 'super_admin'), payslipsController.getByEmployee);
 router.post('/', requirePosition('hr', 'admin', 'super_admin'), payslipsController.create);
 router.post('/import', requirePosition('hr', 'admin', 'super_admin'), payslipsController.importBatch);
+router.post('/generate', requirePosition('admin', 'super_admin'), payslipsController.generate);
 
 export default router;

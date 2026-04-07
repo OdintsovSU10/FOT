@@ -59,7 +59,7 @@ export const SalaryRaisePage: FC = () => {
       ) : (
         <div className={styles.list}>
           {requests.map((r) => {
-            const currentSalary = r.employee_snapshot?.current_salary ?? r.employee_snapshot?.salary_actual;
+            const currentSalary = r.employee_snapshot?.salary_actual ?? r.employee_snapshot?.current_salary;
             const raisePercent = r.raise_percentage != null
               ? r.raise_percentage.toFixed(1)
               : null;

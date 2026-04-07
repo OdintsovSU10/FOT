@@ -14,6 +14,11 @@ interface ICorrectionModalProps {
   employeeId?: number;
   workDate?: string;
   hideCorrectionTab?: boolean;
+  correctionInfo?: {
+    is_correction: boolean;
+    corrected_at?: string | null;
+    corrected_by_name?: string | null;
+  } | null;
 }
 
 interface ITypeOption {
@@ -234,6 +239,11 @@ const CorrectionTab: FC<{
   );
 };
 
+const formatCorrectionDate = (iso: string): string => {
+  const d = new Date(iso);
+  return `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}.${d.getFullYear()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+};
+
 const ModalContent: FC<Omit<ICorrectionModalProps, 'open'>> = ({
   onClose,
   onSave,
@@ -244,6 +254,7 @@ const ModalContent: FC<Omit<ICorrectionModalProps, 'open'>> = ({
   employeeId,
   workDate,
   hideCorrectionTab,
+  correctionInfo,
 }) => {
   const [tab, setTab] = useState<ModalTab>('events');
 
@@ -266,6 +277,15 @@ const ModalContent: FC<Omit<ICorrectionModalProps, 'open'>> = ({
           <X size={18} />
         </button>
       </div>
+
+      {correctionInfo?.is_correction && (
+        <div className="ts-correction-info">
+          <span className="ts-correction-info-icon">✎</span>
+          Скорректировано
+          {correctionInfo.corrected_at && `: ${formatCorrectionDate(correctionInfo.corrected_at)}`}
+          {correctionInfo.corrected_by_name && ` — ${correctionInfo.corrected_by_name}`}
+        </div>
+      )}
 
       <div className="ts-modal-tabs">
         <button

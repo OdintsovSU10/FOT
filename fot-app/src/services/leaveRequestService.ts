@@ -1,6 +1,6 @@
 import { apiClient } from '../api/client';
 
-export type LeaveRequestType = 'vacation' | 'sick_leave' | 'remote' | 'dayoff' | 'business_trip' | 'certificate';
+export type LeaveRequestType = 'vacation' | 'sick_leave' | 'remote' | 'dayoff' | 'business_trip' | 'certificate' | 'time_correction';
 export type LeaveRequestStatus = 'pending' | 'approved' | 'rejected' | 'cancelled';
 
 export interface ILeaveRequest {
@@ -14,6 +14,9 @@ export interface ILeaveRequest {
   reviewer_id: string | null;
   reviewed_at: string | null;
   review_comment: string | null;
+  correction_date: string | null;
+  correction_status: string | null;
+  correction_hours: number | null;
   created_at: string;
   updated_at: string;
   employee_name?: string | null;
@@ -26,6 +29,7 @@ export const REQUEST_TYPE_LABELS: Record<LeaveRequestType, string> = {
   dayoff: 'Отгул',
   business_trip: 'Командировка',
   certificate: 'Справка',
+  time_correction: 'Корректировка табеля',
 };
 
 export const STATUS_LABELS: Record<LeaveRequestStatus, string> = {
@@ -46,6 +50,9 @@ export const leaveRequestService = {
     start_date: string;
     end_date: string;
     reason?: string;
+    correction_date?: string;
+    correction_status?: string;
+    correction_hours?: number;
   }) => {
     const res = await apiClient.post<ApiResponse<ILeaveRequest>>('/leave-requests', data);
     return res.data;

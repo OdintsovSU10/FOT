@@ -37,6 +37,12 @@ export const LeaveRequestsPage: FC = () => {
   const [formStart, setFormStart] = useState('');
   const [formEnd, setFormEnd] = useState('');
   const [formReason, setFormReason] = useState('');
+  // Correction-specific fields
+  const [correctionDate, setCorrectionDate] = useState('');
+  const [correctionStatus, setCorrectionStatus] = useState('work');
+  const [correctionHours, setCorrectionHours] = useState<number>(8);
+
+  const isCorrection = formType === 'time_correction';
 
   const loadRequests = useCallback(async () => {
     setLoading(true);
@@ -53,20 +59,33 @@ export const LeaveRequestsPage: FC = () => {
   useEffect(() => { loadRequests(); }, [loadRequests]);
 
   const handleSubmit = async () => {
-    if (!formStart || !formEnd) return;
+    if (isCorrection) {
+      if (!correctionDate) return;
+    } else {
+      if (!formStart || !formEnd) return;
+    }
     setSaving(true);
     try {
-      await leaveRequestService.create({
+      const payload: Record<string, unknown> = {
         request_type: formType,
-        start_date: formStart,
-        end_date: formEnd,
+        start_date: isCorrection ? correctionDate : formStart,
+        end_date: isCorrection ? correctionDate : formEnd,
         reason: formReason || undefined,
-      });
+      };
+      if (isCorrection) {
+        payload.correction_date = correctionDate;
+        payload.correction_status = correctionStatus;
+        payload.correction_hours = correctionHours;
+      }
+      await leaveRequestService.create(payload as Parameters<typeof leaveRequestService.create>[0]);
       setShowForm(false);
       setFormType('vacation');
       setFormStart('');
       setFormEnd('');
       setFormReason('');
+      setCorrectionDate('');
+      setCorrectionStatus('work');
+      setCorrectionHours(8);
       await loadRequests();
     } catch (err) {
       console.error('Create leave request error:', err);
@@ -111,21 +130,47 @@ export const LeaveRequestsPage: FC = () => {
                 ))}
               </select>
             </label>
-            <div className="lr-form-row">
-              <label className="lr-form-label">
-                С
-                <input type="date" className="lr-form-input" value={formStart} onChange={e => setFormStart(e.target.value)} />
-              </label>
-              <label className="lr-form-label">
-                По
-                <input type="date" className="lr-form-input" value={formEnd} onChange={e => setFormEnd(e.target.value)} />
-              </label>
-            </div>
+            {isCorrection ? (
+              <>
+                <label className="lr-form-label">
+                  Дата корректировки
+                  <input type="date" className="lr-form-input" value={correctionDate} onChange={e => setCorrectionDate(e.target.value)} />
+                </label>
+                <div className="lr-form-row">
+                  <label className="lr-form-label">
+                    Статус
+                    <select className="lr-form-select" value={correctionStatus} onChange={e => setCorrectionStatus(e.target.value)}>
+                      <option value="work">Присутствие</option>
+                      <option value="remote">Удалёнка</option>
+                      <option value="sick">Больничный</option>
+                      <option value="vacation">Отпуск</option>
+                      <option value="business_trip">Командировка</option>
+                      <option value="manual">Ручная корр.</option>
+                    </select>
+                  </label>
+                  <label className="lr-form-label">
+                    Часы
+                    <input type="number" className="lr-form-input" value={correctionHours} onChange={e => setCorrectionHours(parseFloat(e.target.value) || 0)} min={0} max={24} step={0.5} />
+                  </label>
+                </div>
+              </>
+            ) : (
+              <div className="lr-form-row">
+                <label className="lr-form-label">
+                  С
+                  <input type="date" className="lr-form-input" value={formStart} onChange={e => setFormStart(e.target.value)} />
+                </label>
+                <label className="lr-form-label">
+                  По
+                  <input type="date" className="lr-form-input" value={formEnd} onChange={e => setFormEnd(e.target.value)} />
+                </label>
+              </div>
+            )}
             <label className="lr-form-label">
-              Причина
-              <textarea className="lr-form-textarea" value={formReason} onChange={e => setFormReason(e.target.value)} placeholder="Необязательно" />
+              Причина / комментарий
+              <textarea className="lr-form-textarea" value={formReason} onChange={e => setFormReason(e.target.value)} placeholder={isCorrection ? 'Укажите причину корректировки' : 'Необязательно'} />
             </label>
-            <button className="lr-submit-btn" onClick={handleSubmit} disabled={saving || !formStart || !formEnd}>
+            <button className="lr-submit-btn" onClick={handleSubmit} disabled={saving || (isCorrection ? !correctionDate : (!formStart || !formEnd))}>
               {saving ? 'Отправка...' : 'Отправить'}
             </button>
           </div>
@@ -144,7 +189,11 @@ export const LeaveRequestsPage: FC = () => {
               <div key={r.id} className="lr-card">
                 <div className="lr-card-left">
                   <div className="lr-card-type">{REQUEST_TYPE_LABELS[r.request_type]}</div>
-                  <div className="lr-card-dates">{formatDate(r.start_date)} — {formatDate(r.end_date)}</div>
+                  {r.request_type === 'time_correction' && r.correction_date ? (
+                    <div className="lr-card-dates">Дата: {formatDate(r.correction_date)} · Статус: {r.correction_status} · {r.correction_hours != null ? `${r.correction_hours}ч` : ''}</div>
+                  ) : (
+                    <div className="lr-card-dates">{formatDate(r.start_date)} — {formatDate(r.end_date)}</div>
+                  )}
                   {r.reason && <div className="lr-card-reason">{r.reason}</div>}
                   {r.review_comment && <div className="lr-card-comment">Комментарий: {r.review_comment}</div>}
                 </div>

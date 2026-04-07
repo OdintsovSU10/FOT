@@ -2,9 +2,14 @@ import type { Response } from 'express';
 import { supabase } from '../config/database.js';
 import type { AuthenticatedRequest } from '../types/index.js';
 import { pushService } from '../services/push.service.js';
+import { notificationService } from '../services/notification.service.js';
 import { getIo } from '../socket/io-instance.js';
 
-const LEAVE_REQUEST_TYPES = ['vacation', 'sick_leave', 'remote', 'dayoff', 'business_trip', 'certificate'] as const;
+const LEAVE_REQUEST_TYPES = ['vacation', 'sick_leave', 'remote', 'dayoff', 'business_trip', 'certificate', 'time_correction'] as const;
+const LEAVE_TYPE_LABELS: Record<string, string> = {
+  vacation: 'Отпуск', sick_leave: 'Больничный', remote: 'Удалёнка',
+  dayoff: 'Отгул', business_trip: 'Командировка', certificate: 'Справка', time_correction: 'Корректировка',
+};
 const LEAVE_TO_TIMESHEET: Record<string, string> = {
   vacation: 'vacation',
   sick_leave: 'sick',
@@ -16,7 +21,7 @@ const LEAVE_TO_TIMESHEET: Record<string, string> = {
 /** Создание заявления (worker+) */
 const create = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
-    const { request_type, start_date, end_date, reason } = req.body;
+    const { request_type, start_date, end_date, reason, correction_date, correction_status, correction_hours } = req.body;
     if (!request_type || !start_date || !end_date) {
       res.status(400).json({ success: false, error: 'request_type, start_date, end_date обязательны' });
       return;
@@ -26,27 +31,44 @@ const create = async (req: AuthenticatedRequest, res: Response): Promise<void> =
       return;
     }
 
+    // Валидация для time_correction
+    if (request_type === 'time_correction') {
+      if (!correction_date || !correction_status) {
+        res.status(400).json({ success: false, error: 'correction_date и correction_status обязательны для корректировки' });
+        return;
+      }
+    }
+
     const employeeId = req.user.employee_id;
     if (!employeeId) {
       res.status(400).json({ success: false, error: 'У пользователя нет привязки к сотруднику' });
       return;
     }
 
+    const insertData: Record<string, unknown> = {
+      employee_id: employeeId,
+      request_type,
+      start_date,
+      end_date,
+      reason: reason || null,
+    };
+
+    if (request_type === 'time_correction') {
+      insertData.correction_date = correction_date;
+      insertData.correction_status = correction_status;
+      insertData.correction_hours = correction_hours ?? null;
+    }
+
     const { data, error } = await supabase
       .from('leave_requests')
-      .insert({
-        employee_id: employeeId,
-        request_type,
-        start_date,
-        end_date,
-        reason: reason || null,
-      })
+      .insert(insertData)
       .select()
       .single();
 
     if (error) throw error;
 
     // Уведомляем руководителя отдела и админов (fire-and-forget)
+    const label = LEAVE_TYPE_LABELS[request_type] || request_type;
     pushService.sendLeaveRequestNotification(employeeId, request_type, req.user.id)
       .then((recipientIds) => {
         const io = getIo();
@@ -55,6 +77,16 @@ const create = async (req: AuthenticatedRequest, res: Response): Promise<void> =
             io.to(`user:${uid}`).emit('leave_request_notification', { requestType: request_type });
           }
         }
+        // Сохраняем в БД
+        notificationService.createMany(
+          recipientIds.map(uid => ({
+            userId: uid,
+            type: 'leave_request',
+            title: 'Новое заявление',
+            body: `Сотрудник подал заявление: ${label}`,
+            metadata: { requestType: request_type, employeeId },
+          })),
+        ).catch((e) => console.error('leave-request notification save error:', e));
       })
       .catch((e) => console.error('leave-request notify error:', e));
 
@@ -246,6 +278,20 @@ const approve = async (req: AuthenticatedRequest, res: Response): Promise<void> 
           ignoreDuplicates: false,
         });
       }
+    }
+
+    // Обработка корректировки табеля
+    if (request.request_type === 'time_correction' && request.correction_date) {
+      await supabase.from('tender_timesheet').upsert({
+        employee_id: request.employee_id,
+        work_date: request.correction_date,
+        status: request.correction_status || 'work',
+        hours_worked: request.correction_hours ?? null,
+        is_correction: true,
+        corrected_by: req.user.employee_id ?? null,
+        corrected_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'employee_id,work_date' });
     }
 
     res.json({ success: true, data });

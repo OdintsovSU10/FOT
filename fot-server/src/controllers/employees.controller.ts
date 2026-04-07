@@ -47,6 +47,7 @@ export const employeesController = {
         : req.query.department_id as string | undefined;
       const isListView = req.query.view === 'list';
       const listColumns = 'id, full_name, position_id, email, org_department_id, employment_status, department_locked, is_archived, archived_at, created_at, updated_at';
+      const staffColumns = listColumns + ', salary_actual, salary_calculated, current_salary';
 
       // --- Paginated mode ---
       const pageParam = req.query.page as string | undefined;
@@ -58,9 +59,10 @@ export const employeesController = {
         const offset = (page - 1) * pageSize;
 
         // Main query with exact count
+        const selectCols = req.query.view === 'staff' ? staffColumns : listColumns;
         let q = supabase
           .from('employees')
-          .select(listColumns, { count: 'exact' })
+          .select(selectCols, { count: 'exact' })
           .eq('is_archived', showArchived)
           .order('full_name')
           .range(offset, offset + pageSize - 1);

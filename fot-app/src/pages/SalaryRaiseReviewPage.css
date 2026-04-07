@@ -1,0 +1,188 @@
+.srr-page {
+  padding: 24px;
+}
+
+.srr-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 20px;
+}
+
+.srr-title {
+  font-size: 20px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.srr-filter {
+  display: flex;
+  gap: 4px;
+  background: var(--bg-secondary);
+  border-radius: 8px;
+  padding: 3px;
+}
+
+.srr-filter-btn {
+  padding: 6px 14px;
+  border-radius: 6px;
+  border: none;
+  background: none;
+  color: var(--text-secondary);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.srr-filter-btn.active {
+  background: var(--accent);
+  color: white;
+}
+
+.srr-loading,
+.srr-empty {
+  padding: 48px 0;
+  text-align: center;
+  color: var(--text-secondary);
+}
+
+.srr-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.srr-card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px 20px;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+
+.srr-card:hover {
+  border-color: var(--accent);
+}
+
+.srr-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.srr-card-employee {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.srr-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  padding: 2px 10px;
+  border-radius: 12px;
+}
+
+.srr-card-type {
+  font-size: 14px;
+  font-weight: 500;
+  margin-bottom: 4px;
+}
+
+.srr-salary-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  margin-bottom: 4px;
+}
+
+.srr-salary-label {
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.srr-salary-value {
+  font-weight: 600;
+}
+
+.srr-arrow {
+  color: var(--text-secondary);
+}
+
+.srr-raise-pct {
+  color: #10b981;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.srr-card-meta {
+  display: flex;
+  gap: 16px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-top: 6px;
+}
+
+.srr-card-reason {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-top: 6px;
+}
+
+@media (max-width: 768px) {
+  .srr-page {
+    padding: 16px;
+  }
+
+  .srr-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  .srr-title {
+    font-size: 18px;
+  }
+}
+
+@media (max-width: 430px) {
+  .srr-page {
+    padding: 12px;
+  }
+
+  .srr-card {
+    padding: 12px 14px;
+  }
+
+  .srr-card-employee {
+    font-size: 14px;
+  }
+
+  .srr-card-type {
+    font-size: 13px;
+  }
+
+  .srr-salary-row {
+    font-size: 13px;
+    flex-wrap: wrap;
+  }
+
+  .srr-card-meta {
+    font-size: 11px;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .srr-filter-btn {
+    padding: 5px 10px;
+    font-size: 12px;
+  }
+
+  .srr-title {
+    font-size: 16px;
+  }
+}

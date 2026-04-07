@@ -1,5 +1,6 @@
-import { useState, useEffect, useCallback, useMemo, type FC } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef, memo, type FC } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import { Pencil, ArrowRightLeft, History, TrendingUp, Upload, UserPlus } from 'lucide-react';
 import { SearchInput } from '../components/ui/SearchInput';
 import { employeeService } from '../services/employeeService';
@@ -29,6 +30,359 @@ const sortDepts = (depts: OrgDepartmentNode[]): OrgDepartmentNode[] =>
 const fmt = (n: number | null | undefined) =>
   n ? n.toLocaleString('ru-RU') + ' ₽' : '—';
 
+type ModalType = 'salary' | 'salary_actual' | 'position' | 'department';
+
+/* ───────── Memoized table row ───────── */
+
+interface IStaffRowProps {
+  emp: Employee;
+  index: number;
+  onNavigate: (emp: Employee) => void;
+  onOpenModal: (emp: Employee, type: ModalType) => void;
+  onOpenHistory: (emp: Employee) => void;
+}
+
+const StaffRow: FC<IStaffRowProps> = memo(({ emp, index, onNavigate, onOpenModal, onOpenHistory }) => (
+  <tr className="sc-row" onClick={() => onNavigate(emp)}>
+    <td className="sc-td-num">{index + 1}</td>
+    <td className="sc-td-name">{emp.full_name}</td>
+    <td>
+      <span className="sc-cell-with-btn">
+        {emp.department || '—'}
+        <button className="sc-inline-btn" title="Сменить отдел" onClick={e => { e.stopPropagation(); onOpenModal(emp, 'department'); }}>
+          <ArrowRightLeft size={12} />
+        </button>
+      </span>
+    </td>
+    <td>
+      <span className="sc-cell-with-btn">
+        <button className="sc-inline-btn" title="Сменить должность" onClick={e => { e.stopPropagation(); onOpenModal(emp, 'position'); }}>
+          <Pencil size={12} />
+        </button>
+        {emp.position_name || '—'}
+      </span>
+    </td>
+    <td className="sc-td-salary">
+      <span className="sc-cell-with-btn">
+        <button className="sc-inline-btn" title="Изменить оклад (договор)" onClick={e => { e.stopPropagation(); onOpenModal(emp, 'salary_actual'); }}>
+          <Pencil size={12} />
+        </button>
+        {fmt(emp.salary_actual)}
+      </span>
+    </td>
+    <td className="sc-td-salary">
+      <span className="sc-cell-with-btn">
+        <button className="sc-inline-btn" title="Изменить реальный оклад" onClick={e => { e.stopPropagation(); onOpenModal(emp, 'salary'); }}>
+          <Pencil size={12} />
+        </button>
+        {fmt(emp.salary_calculated)}
+      </span>
+    </td>
+    <td className="sc-td-hist" onClick={e => e.stopPropagation()}>
+      <button className="sc-btn-icon" title="История" onClick={() => onOpenHistory(emp)}>
+        <History size={14} />
+      </button>
+    </td>
+  </tr>
+));
+
+/* ───────── Modals (isolated from table renders) ───────── */
+
+interface IStaffModalsProps {
+  modalType: ModalType | null;
+  modalEmp: Employee | null;
+  allDepts: OrgDepartmentNode[];
+  onClose: () => void;
+  onSaveSalary: (empId: number, val: number, type: ModalType, reason?: string, date?: string) => Promise<void>;
+  onSavePosition: (empId: number, val: string, reason?: string, date?: string) => Promise<void>;
+  onSaveDepartment: (empId: number, deptId: string) => Promise<void>;
+}
+
+const StaffModals: FC<IStaffModalsProps> = memo(({ modalType, modalEmp, allDepts, onClose, onSaveSalary, onSavePosition, onSaveDepartment }) => {
+  const [salaryVal, setSalaryVal] = useState('');
+  const [salaryDate, setSalaryDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [salaryReason, setSalaryReason] = useState('');
+  const [positionVal, setPositionVal] = useState('');
+  const [positionDate, setPositionDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [positionReason, setPositionReason] = useState('');
+  const [deptVal, setDeptVal] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (modalEmp) {
+      setSalaryVal('');
+      setSalaryDate(new Date().toISOString().slice(0, 10));
+      setSalaryReason('');
+      setPositionVal('');
+      setPositionDate(new Date().toISOString().slice(0, 10));
+      setPositionReason('');
+      setDeptVal(modalEmp.org_department_id || '');
+    }
+  }, [modalEmp]);
+
+  if (!modalType || !modalEmp) return null;
+
+  const handleSalary = async () => {
+    if (!salaryVal) return;
+    setSaving(true);
+    await onSaveSalary(modalEmp.id, Number(salaryVal), modalType, salaryReason || undefined, salaryDate || undefined);
+    setSaving(false);
+  };
+
+  const handlePosition = async () => {
+    if (!positionVal) return;
+    setSaving(true);
+    await onSavePosition(modalEmp.id, positionVal, positionReason || undefined, positionDate || undefined);
+    setSaving(false);
+  };
+
+  const handleDepartment = async () => {
+    if (!deptVal) return;
+    setSaving(true);
+    await onSaveDepartment(modalEmp.id, deptVal);
+    setSaving(false);
+  };
+
+  if (modalType === 'salary' || modalType === 'salary_actual') {
+    const title = modalType === 'salary' ? 'Изменить реальный оклад' : 'Изменить оклад (договор)';
+    const placeholder = modalType === 'salary' ? 'Повышение, пересмотр...' : 'Изменение договора...';
+    return (
+      <div className="sc-overlay" onClick={onClose}>
+        <div className="sc-modal" onClick={e => e.stopPropagation()}>
+          <div className="sc-modal-header">
+            <h3>{title} — {modalEmp.full_name}</h3>
+            <button className="sc-modal-close" onClick={onClose}>&times;</button>
+          </div>
+          <div className="sc-modal-body">
+            <div className="sc-field">
+              <label>Новый оклад (₽)</label>
+              <input type="number" value={salaryVal} onChange={e => setSalaryVal(e.target.value)} placeholder="150 000" autoFocus />
+            </div>
+            <div className="sc-field">
+              <label>Дата вступления в силу</label>
+              <input type="date" value={salaryDate} onChange={e => setSalaryDate(e.target.value)} />
+            </div>
+            <div className="sc-field">
+              <label>Причина</label>
+              <input value={salaryReason} onChange={e => setSalaryReason(e.target.value)} placeholder={placeholder} />
+            </div>
+          </div>
+          <div className="sc-modal-footer">
+            <button className="sc-btn cancel" onClick={onClose}>Отмена</button>
+            <button className="sc-btn apply" onClick={handleSalary} disabled={!salaryVal || saving}>
+              {saving ? 'Сохранение...' : 'Применить'}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (modalType === 'position') {
+    return (
+      <div className="sc-overlay" onClick={onClose}>
+        <div className="sc-modal" onClick={e => e.stopPropagation()}>
+          <div className="sc-modal-header">
+            <h3>Сменить должность — {modalEmp.full_name}</h3>
+            <button className="sc-modal-close" onClick={onClose}>&times;</button>
+          </div>
+          <div className="sc-modal-body">
+            <div className="sc-field">
+              <label>Должность</label>
+              <input value={positionVal} onChange={e => setPositionVal(e.target.value)} placeholder="Название должности" autoFocus />
+            </div>
+            <div className="sc-field">
+              <label>Дата вступления в силу</label>
+              <input type="date" value={positionDate} onChange={e => setPositionDate(e.target.value)} />
+            </div>
+            <div className="sc-field">
+              <label>Причина</label>
+              <input value={positionReason} onChange={e => setPositionReason(e.target.value)} placeholder="Повышение, перевод..." />
+            </div>
+          </div>
+          <div className="sc-modal-footer">
+            <button className="sc-btn cancel" onClick={onClose}>Отмена</button>
+            <button className="sc-btn apply" onClick={handlePosition} disabled={!positionVal || saving}>
+              {saving ? 'Сохранение...' : 'Применить'}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="sc-overlay" onClick={onClose}>
+      <div className="sc-modal" onClick={e => e.stopPropagation()}>
+        <div className="sc-modal-header">
+          <h3>Сменить отдел — {modalEmp.full_name}</h3>
+          <button className="sc-modal-close" onClick={onClose}>&times;</button>
+        </div>
+        <div className="sc-modal-body">
+          <div className="sc-field">
+            <label>Отдел</label>
+            <select value={deptVal} onChange={e => setDeptVal(e.target.value)} autoFocus>
+              <option value="">Выберите отдел</option>
+              {allDepts.map(d => (
+                <option key={d.id} value={d.id}>{d.name}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+        <div className="sc-modal-footer">
+          <button className="sc-btn cancel" onClick={onClose}>Отмена</button>
+          <button className="sc-btn apply" onClick={handleDepartment} disabled={!deptVal || deptVal === modalEmp.org_department_id || saving}>
+            {saving ? 'Сохранение...' : 'Применить'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+});
+
+/* ───────── Virtualized Table ───────── */
+
+interface IVirtualTableProps {
+  filtered: Employee[];
+  onNavigate: (emp: Employee) => void;
+  onOpenModal: (emp: Employee, type: ModalType) => void;
+  onOpenHistory: (emp: Employee) => void;
+}
+
+const ROW_HEIGHT = 36;
+
+const VirtualTable: FC<IVirtualTableProps> = memo(({ filtered, onNavigate, onOpenModal, onOpenHistory }) => {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const virtualizer = useVirtualizer({
+    count: filtered.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => ROW_HEIGHT,
+    overscan: 15,
+  });
+
+  return (
+    <div className="sc-table-wrap" ref={scrollRef}>
+      <table className="sc-table">
+        <thead>
+          <tr>
+            <th className="sc-th-num">№</th>
+            <th>ФИО</th>
+            <th>Отдел</th>
+            <th>Должность</th>
+            <th>Оклад (договор)</th>
+            <th>Реальный оклад</th>
+            <th className="sc-th-hist"></th>
+          </tr>
+        </thead>
+        <tbody>
+          {filtered.length === 0 ? (
+            <tr><td colSpan={7} className="sc-empty">Нет сотрудников</td></tr>
+          ) : (
+            <>
+              {/* spacer top */}
+              {virtualizer.getVirtualItems()[0]?.start > 0 && (
+                <tr><td colSpan={7} style={{ height: virtualizer.getVirtualItems()[0].start, padding: 0, border: 'none' }} /></tr>
+              )}
+              {virtualizer.getVirtualItems().map(vRow => {
+                const emp = filtered[vRow.index];
+                return (
+                  <StaffRow
+                    key={emp.id}
+                    emp={emp}
+                    index={vRow.index}
+                    onNavigate={onNavigate}
+                    onOpenModal={onOpenModal}
+                    onOpenHistory={onOpenHistory}
+                  />
+                );
+              })}
+              {/* spacer bottom */}
+              {(() => {
+                const items = virtualizer.getVirtualItems();
+                const lastItem = items[items.length - 1];
+                const remaining = lastItem ? virtualizer.getTotalSize() - lastItem.end : 0;
+                return remaining > 0 ? <tr><td colSpan={7} style={{ height: remaining, padding: 0, border: 'none' }} /></tr> : null;
+              })()}
+            </>
+          )}
+        </tbody>
+      </table>
+    </div>
+  );
+});
+
+/* ───────── Virtualized Mobile Cards ───────── */
+
+interface IVirtualCardsProps {
+  filtered: Employee[];
+  onNavigate: (emp: Employee) => void;
+  onOpenModal: (emp: Employee, type: ModalType) => void;
+  onOpenHistory: (emp: Employee) => void;
+}
+
+const CARD_HEIGHT = 180;
+
+const MobileCard: FC<{ emp: Employee; onNavigate: (emp: Employee) => void; onOpenModal: (emp: Employee, type: ModalType) => void; onOpenHistory: (emp: Employee) => void }> = memo(({ emp, onNavigate, onOpenModal, onOpenHistory }) => (
+  <div className="sc-card" onClick={() => onNavigate(emp)}>
+    <div className="sc-card-name">{emp.full_name}</div>
+    <div className="sc-card-row">
+      <span className="sc-card-label">Отдел</span>
+      <span>{emp.department || '—'}</span>
+    </div>
+    <div className="sc-card-row">
+      <span className="sc-card-label">Должность</span>
+      <span>{emp.position_name || '—'}</span>
+    </div>
+    <div className="sc-card-row">
+      <span className="sc-card-label">Оклад (дог.)</span>
+      <span>{fmt(emp.salary_actual)}</span>
+    </div>
+    <div className="sc-card-row">
+      <span className="sc-card-label">Оклад (прог.)</span>
+      <span>{fmt(emp.salary_calculated)}</span>
+    </div>
+    <div className="sc-card-actions">
+      <button className="sc-btn-icon" title="История" onClick={e => { e.stopPropagation(); onOpenHistory(emp); }}>
+        <History size={14} />
+      </button>
+      <button className="sc-btn-icon" title="Сменить должность" onClick={e => { e.stopPropagation(); onOpenModal(emp, 'position'); }}>
+        <Pencil size={14} />
+      </button>
+      <button className="sc-btn-icon" title="Изменить оклад" onClick={e => { e.stopPropagation(); onOpenModal(emp, 'salary'); }}>
+        <TrendingUp size={14} />
+      </button>
+      <button className="sc-btn-icon" title="Сменить отдел" onClick={e => { e.stopPropagation(); onOpenModal(emp, 'department'); }}>
+        <ArrowRightLeft size={14} />
+      </button>
+    </div>
+  </div>
+));
+
+const VirtualCards: FC<IVirtualCardsProps> = memo(({ filtered, onNavigate, onOpenModal, onOpenHistory }) => {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const virtualizer = useVirtualizer({
+    count: filtered.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => CARD_HEIGHT,
+    overscan: 5,
+  });
+
+  return (
+    <div className="sc-cards" ref={scrollRef}>
+      <div style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
+        {virtualizer.getVirtualItems().map(vRow => {
+          const emp = filtered[vRow.index];
+          return (
+            <div key={emp.id} style={{ position: 'absolute', top: 0, left: 0, width: '100%', transform: `translateY(${vRow.start}px)` }}>
+              <MobileCard emp={emp} onNavigate={onNavigate} onOpenModal={onOpenModal} onOpenHistory={onOpenHistory} />
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+});
+
 /* ───────── Main Page ───────── */
 
 export const StaffControlPage: FC = () => {
@@ -36,13 +390,20 @@ export const StaffControlPage: FC = () => {
   const [urlParams, setUrlParams] = useSearchParams();
   const isMobile = useIsMobile(768);
 
-  // data — из кэширующего хука
-  const { employees, departments, loading, refresh, patchEmployee } = useStaffData();
-
-  // filters — синхронизация с URL
   const [search, setSearch] = useState(() => urlParams.get('q') || '');
   const [deptId, setDeptId] = useState(() => urlParams.get('dept') || '');
+  const [page, setPage] = useState(1);
   const debouncedSearch = useDebouncedValue(search, 300);
+
+  // Reset page on filter change
+  useEffect(() => { setPage(1); }, [debouncedSearch, deptId]);
+
+  const { employees, departments, loading, meta, totalActive, refresh, patchEmployee } = useStaffData({
+    page,
+    pageSize: 100,
+    search: debouncedSearch || undefined,
+    departmentId: deptId || undefined,
+  });
 
   useEffect(() => {
     const p = new URLSearchParams();
@@ -57,18 +418,8 @@ export const StaffControlPage: FC = () => {
   const [panelLoading, setPanelLoading] = useState(false);
 
   // modals
-  const [modalType, setModalType] = useState<'salary' | 'salary_actual' | 'position' | 'department' | null>(null);
+  const [modalType, setModalType] = useState<ModalType | null>(null);
   const [modalEmp, setModalEmp] = useState<Employee | null>(null);
-
-  // modal fields
-  const [salaryVal, setSalaryVal] = useState('');
-  const [salaryDate, setSalaryDate] = useState(() => new Date().toISOString().slice(0, 10));
-  const [salaryReason, setSalaryReason] = useState('');
-  const [positionVal, setPositionVal] = useState('');
-  const [positionDate, setPositionDate] = useState(() => new Date().toISOString().slice(0, 10));
-  const [positionReason, setPositionReason] = useState('');
-  const [deptVal, setDeptVal] = useState('');
-  const [saving, setSaving] = useState(false);
 
   // import / add
   const [showImportModal, setShowImportModal] = useState(false);
@@ -88,17 +439,11 @@ export const StaffControlPage: FC = () => {
 
   const allDepts = useMemo(() => sortDepts(flattenDepts(departments)), [departments]);
 
-  const searchLower = debouncedSearch.toLowerCase();
-  const filtered = useMemo(
-    () => employees.filter(e => {
-      if (deptId && e.org_department_id !== deptId) return false;
-      if (searchLower && !e.full_name.toLowerCase().includes(searchLower)) return false;
-      return true;
-    }),
-    [employees, deptId, searchLower],
-  );
+  /* ─── stable callbacks for child components ─── */
 
-  /* ─── history panel ─── */
+  const handleNavigate = useCallback((emp: Employee) => {
+    navigate(`/tender/${emp.id}`, { state: { label: 'Управление кадрами', from: `/staff-control?${urlParams.toString()}` } });
+  }, [navigate, urlParams]);
 
   const openHistory = useCallback(async (emp: Employee) => {
     setPanelEmp(emp);
@@ -113,18 +458,9 @@ export const StaffControlPage: FC = () => {
     setPanelHistory([]);
   }, []);
 
-  /* ─── modal open ─── */
-
-  const openModal = useCallback((emp: Employee, type: 'salary' | 'salary_actual' | 'position' | 'department') => {
+  const openModal = useCallback((emp: Employee, type: ModalType) => {
     setModalEmp(emp);
     setModalType(type);
-    setSalaryVal('');
-    setSalaryDate(new Date().toISOString().slice(0, 10));
-    setSalaryReason('');
-    setPositionVal('');
-    setPositionDate(new Date().toISOString().slice(0, 10));
-    setPositionReason('');
-    setDeptVal(emp.org_department_id || '');
   }, []);
 
   const closeModal = useCallback(() => {
@@ -132,49 +468,36 @@ export const StaffControlPage: FC = () => {
     setModalEmp(null);
   }, []);
 
-  /* ─── save handlers (optimistic updates) ─── */
+  /* ─── modal save handlers ─── */
 
-  const handleSaveSalary = async () => {
-    if (!modalEmp || !salaryVal) return;
-    const empId = modalEmp.id;
-    const val = Number(salaryVal);
-    setSaving(true);
-    await employeeService.changeSalary(empId, val, salaryReason || undefined, salaryDate || undefined);
+  const handleSaveSalary = useCallback(async (empId: number, val: number, type: ModalType, reason?: string, date?: string) => {
+    await employeeService.changeSalary(empId, val, reason, date);
     closeModal();
-    setSaving(false);
-    if (modalType === 'salary_actual') {
+    if (type === 'salary_actual') {
       patchEmployee(empId, { salary_actual: val });
     } else {
       patchEmployee(empId, { salary_calculated: val });
     }
-  };
+  }, [closeModal, patchEmployee]);
 
-  const handleSavePosition = async () => {
-    if (!modalEmp || !positionVal) return;
-    const empId = modalEmp.id;
-    setSaving(true);
-    await employeeService.changePosition(empId, positionVal, positionReason || undefined, positionDate || undefined);
+  const handleSavePosition = useCallback(async (empId: number, val: string, reason?: string, date?: string) => {
+    await employeeService.changePosition(empId, val, reason, date);
     closeModal();
-    setSaving(false);
-    patchEmployee(empId, { position_name: positionVal });
-  };
+    patchEmployee(empId, { position_name: val });
+  }, [closeModal, patchEmployee]);
 
-  const handleSaveDepartment = async () => {
-    if (!modalEmp || !deptVal) return;
-    const empId = modalEmp.id;
-    setSaving(true);
-    await employeeService.moveDepartment(empId, deptVal);
+  const handleSaveDepartment = useCallback(async (empId: number, newDeptId: string) => {
+    await employeeService.moveDepartment(empId, newDeptId);
     closeModal();
-    setSaving(false);
-    const deptName = allDepts.find(d => d.id === deptVal)?.name;
-    patchEmployee(empId, { org_department_id: deptVal, department: deptName });
-  };
+    const deptName = allDepts.find(d => d.id === newDeptId)?.name;
+    patchEmployee(empId, { org_department_id: newDeptId, department: deptName });
+  }, [closeModal, patchEmployee, allDepts]);
 
   /* ─── history panel data changed ─── */
 
   const handleHistoryDataChanged = useCallback(() => {
-    refresh();
-  }, [refresh]);
+    if (panelEmp) openHistory(panelEmp);
+  }, [panelEmp, openHistory]);
 
   /* ─── import handlers ─── */
 
@@ -273,7 +596,7 @@ export const StaffControlPage: FC = () => {
           <SearchInput value={search} onValueChange={setSearch} placeholder="Поиск по ФИО..." />
         </div>
         <div className="sc-filter-count">
-          {filtered.length} из {employees.length}
+          {meta.total} из {totalActive}
         </div>
         <div className="sc-filter-actions">
           <button className="sc-btn secondary" onClick={() => setShowImportModal(true)}>
@@ -288,124 +611,17 @@ export const StaffControlPage: FC = () => {
       {loading ? (
         <div className="sc-loading">Загрузка...</div>
       ) : isMobile ? (
-        /* ─── Mobile cards ─── */
-        <div className="sc-cards">
-          {filtered.map(emp => (
-            <div key={emp.id} className="sc-card" onClick={() => navigate(`/tender/${emp.id}`, { state: { label: 'Управление кадрами', from: `/staff-control?${urlParams.toString()}` } })}>
-              <div className="sc-card-name">{emp.full_name}</div>
-              <div className="sc-card-row">
-                <span className="sc-card-label">Отдел</span>
-                <span>{emp.department || '—'}</span>
-              </div>
-              <div className="sc-card-row">
-                <span className="sc-card-label">Должность</span>
-                <span>{emp.position_name || '—'}</span>
-              </div>
-              <div className="sc-card-row">
-                <span className="sc-card-label">Оклад (дог.)</span>
-                <span>{fmt(emp.salary_actual)}</span>
-              </div>
-              <div className="sc-card-row">
-                <span className="sc-card-label">Оклад (прог.)</span>
-                <span>{fmt(emp.salary_calculated)}</span>
-              </div>
-              <div className="sc-card-actions">
-                <button className="sc-btn-icon" title="История" onClick={e => { e.stopPropagation(); openHistory(emp); }}>
-                  <History size={14} />
-                </button>
-                <button className="sc-btn-icon" title="Сменить должность" onClick={e => { e.stopPropagation(); openModal(emp, 'position'); }}>
-                  <Pencil size={14} />
-                </button>
-                <button className="sc-btn-icon" title="Изменить оклад" onClick={e => { e.stopPropagation(); openModal(emp, 'salary'); }}>
-                  <TrendingUp size={14} />
-                </button>
-                <button className="sc-btn-icon" title="Сменить отдел" onClick={e => { e.stopPropagation(); openModal(emp, 'department'); }}>
-                  <ArrowRightLeft size={14} />
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
+        <VirtualCards filtered={employees} onNavigate={handleNavigate} onOpenModal={openModal} onOpenHistory={openHistory} />
       ) : (
-        /* ─── Desktop table ─── */
-        <div className="sc-table-wrap">
-          <table className="sc-table">
-            <thead>
-              <tr>
-                <th className="sc-th-num">№</th>
-                <th>ФИО</th>
-                <th>Отдел</th>
-                <th>Должность</th>
-                <th>Оклад (договор)</th>
-                <th>Оклад (программа)</th>
-                <th className="sc-th-hist"></th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((emp, i) => (
-                <tr key={emp.id} className="sc-row" onClick={() => navigate(`/tender/${emp.id}`, { state: { label: 'Управление кадрами', from: `/staff-control?${urlParams.toString()}` } })}>
-                  <td className="sc-td-num">{i + 1}</td>
-                  <td className="sc-td-name">{emp.full_name}</td>
-                  <td>
-                    <span className="sc-cell-with-btn">
-                      {emp.department || '—'}
-                      <button
-                        className="sc-inline-btn"
-                        title="Сменить отдел"
-                        onClick={e => { e.stopPropagation(); openModal(emp, 'department'); }}
-                      >
-                        <ArrowRightLeft size={12} />
-                      </button>
-                    </span>
-                  </td>
-                  <td>
-                    <span className="sc-cell-with-btn">
-                      <button
-                        className="sc-inline-btn"
-                        title="Сменить должность"
-                        onClick={e => { e.stopPropagation(); openModal(emp, 'position'); }}
-                      >
-                        <Pencil size={12} />
-                      </button>
-                      {emp.position_name || '—'}
-                    </span>
-                  </td>
-                  <td className="sc-td-salary">
-                    <span className="sc-cell-with-btn">
-                      <button
-                        className="sc-inline-btn"
-                        title="Изменить оклад (договор)"
-                        onClick={e => { e.stopPropagation(); openModal(emp, 'salary_actual'); }}
-                      >
-                        <Pencil size={12} />
-                      </button>
-                      {fmt(emp.salary_actual)}
-                    </span>
-                  </td>
-                  <td className="sc-td-salary">
-                    <span className="sc-cell-with-btn">
-                      <button
-                        className="sc-inline-btn"
-                        title="Изменить оклад (программа)"
-                        onClick={e => { e.stopPropagation(); openModal(emp, 'salary'); }}
-                      >
-                        <Pencil size={12} />
-                      </button>
-                      {fmt(emp.salary_calculated)}
-                    </span>
-                  </td>
-                  <td className="sc-td-hist" onClick={e => e.stopPropagation()}>
-                    <button className="sc-btn-icon" title="История" onClick={() => openHistory(emp)}>
-                      <History size={14} />
-                    </button>
-                  </td>
-                </tr>
-              ))}
-              {filtered.length === 0 && (
-                <tr><td colSpan={7} className="sc-empty">Нет сотрудников</td></tr>
-              )}
-            </tbody>
-          </table>
+        <VirtualTable filtered={employees} onNavigate={handleNavigate} onOpenModal={openModal} onOpenHistory={openHistory} />
+      )}
+
+      {/* Pagination */}
+      {meta.totalPages > 1 && (
+        <div className="sc-pagination">
+          <button className="sc-btn cancel" disabled={page <= 1} onClick={() => setPage(p => p - 1)}>← Назад</button>
+          <span className="sc-pagination-info">{page} / {meta.totalPages}</span>
+          <button className="sc-btn cancel" disabled={page >= meta.totalPages} onClick={() => setPage(p => p + 1)}>Вперёд →</button>
         </div>
       )}
 
@@ -421,130 +637,16 @@ export const StaffControlPage: FC = () => {
         />
       )}
 
-      {/* ─── Change Salary Modal (программа) ─── */}
-      {modalType === 'salary' && modalEmp && (
-        <div className="sc-overlay" onClick={closeModal}>
-          <div className="sc-modal" onClick={e => e.stopPropagation()}>
-            <div className="sc-modal-header">
-              <h3>Изменить оклад (программа) — {modalEmp.full_name}</h3>
-              <button className="sc-modal-close" onClick={closeModal}>&times;</button>
-            </div>
-            <div className="sc-modal-body">
-              <div className="sc-field">
-                <label>Новый оклад (₽)</label>
-                <input type="number" value={salaryVal} onChange={e => setSalaryVal(e.target.value)} placeholder="150 000" autoFocus />
-              </div>
-              <div className="sc-field">
-                <label>Дата вступления в силу</label>
-                <input type="date" value={salaryDate} onChange={e => setSalaryDate(e.target.value)} />
-              </div>
-              <div className="sc-field">
-                <label>Причина</label>
-                <input value={salaryReason} onChange={e => setSalaryReason(e.target.value)} placeholder="Повышение, пересмотр..." />
-              </div>
-            </div>
-            <div className="sc-modal-footer">
-              <button className="sc-btn cancel" onClick={closeModal}>Отмена</button>
-              <button className="sc-btn apply" onClick={handleSaveSalary} disabled={!salaryVal || saving}>
-                {saving ? 'Сохранение...' : 'Применить'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ─── Change Salary Modal (договор) ─── */}
-      {modalType === 'salary_actual' && modalEmp && (
-        <div className="sc-overlay" onClick={closeModal}>
-          <div className="sc-modal" onClick={e => e.stopPropagation()}>
-            <div className="sc-modal-header">
-              <h3>Изменить оклад (договор) — {modalEmp.full_name}</h3>
-              <button className="sc-modal-close" onClick={closeModal}>&times;</button>
-            </div>
-            <div className="sc-modal-body">
-              <div className="sc-field">
-                <label>Новый оклад (₽)</label>
-                <input type="number" value={salaryVal} onChange={e => setSalaryVal(e.target.value)} placeholder="150 000" autoFocus />
-              </div>
-              <div className="sc-field">
-                <label>Дата вступления в силу</label>
-                <input type="date" value={salaryDate} onChange={e => setSalaryDate(e.target.value)} />
-              </div>
-              <div className="sc-field">
-                <label>Причина</label>
-                <input value={salaryReason} onChange={e => setSalaryReason(e.target.value)} placeholder="Изменение договора..." />
-              </div>
-            </div>
-            <div className="sc-modal-footer">
-              <button className="sc-btn cancel" onClick={closeModal}>Отмена</button>
-              <button className="sc-btn apply" onClick={handleSaveSalary} disabled={!salaryVal || saving}>
-                {saving ? 'Сохранение...' : 'Применить'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ─── Change Position Modal ─── */}
-      {modalType === 'position' && modalEmp && (
-        <div className="sc-overlay" onClick={closeModal}>
-          <div className="sc-modal" onClick={e => e.stopPropagation()}>
-            <div className="sc-modal-header">
-              <h3>Сменить должность — {modalEmp.full_name}</h3>
-              <button className="sc-modal-close" onClick={closeModal}>&times;</button>
-            </div>
-            <div className="sc-modal-body">
-              <div className="sc-field">
-                <label>Должность</label>
-                <input value={positionVal} onChange={e => setPositionVal(e.target.value)} placeholder="Название должности" autoFocus />
-              </div>
-              <div className="sc-field">
-                <label>Дата вступления в силу</label>
-                <input type="date" value={positionDate} onChange={e => setPositionDate(e.target.value)} />
-              </div>
-              <div className="sc-field">
-                <label>Причина</label>
-                <input value={positionReason} onChange={e => setPositionReason(e.target.value)} placeholder="Повышение, перевод..." />
-              </div>
-            </div>
-            <div className="sc-modal-footer">
-              <button className="sc-btn cancel" onClick={closeModal}>Отмена</button>
-              <button className="sc-btn apply" onClick={handleSavePosition} disabled={!positionVal || saving}>
-                {saving ? 'Сохранение...' : 'Применить'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ─── Move Department Modal ─── */}
-      {modalType === 'department' && modalEmp && (
-        <div className="sc-overlay" onClick={closeModal}>
-          <div className="sc-modal" onClick={e => e.stopPropagation()}>
-            <div className="sc-modal-header">
-              <h3>Сменить отдел — {modalEmp.full_name}</h3>
-              <button className="sc-modal-close" onClick={closeModal}>&times;</button>
-            </div>
-            <div className="sc-modal-body">
-              <div className="sc-field">
-                <label>Отдел</label>
-                <select value={deptVal} onChange={e => setDeptVal(e.target.value)} autoFocus>
-                  <option value="">Выберите отдел</option>
-                  {allDepts.map(d => (
-                    <option key={d.id} value={d.id}>{d.name}</option>
-                  ))}
-                </select>
-              </div>
-            </div>
-            <div className="sc-modal-footer">
-              <button className="sc-btn cancel" onClick={closeModal}>Отмена</button>
-              <button className="sc-btn apply" onClick={handleSaveDepartment} disabled={!deptVal || deptVal === modalEmp.org_department_id || saving}>
-                {saving ? 'Сохранение...' : 'Применить'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Modals — isolated from table */}
+      <StaffModals
+        modalType={modalType}
+        modalEmp={modalEmp}
+        allDepts={allDepts}
+        onClose={closeModal}
+        onSaveSalary={handleSaveSalary}
+        onSavePosition={handleSavePosition}
+        onSaveDepartment={handleSaveDepartment}
+      />
 
       {/* ─── Import Modal ─── */}
       {showImportModal && (

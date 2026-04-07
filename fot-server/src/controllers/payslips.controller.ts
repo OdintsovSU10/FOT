@@ -1,6 +1,7 @@
 import type { Response } from 'express';
 import { supabase } from '../config/database.js';
 import type { AuthenticatedRequest } from '../types/index.js';
+import { generatePayslipsForMonth } from '../services/payslip-generation.service.js';
 
 /** Мои расчётные листки (worker) */
 const getMy = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
@@ -107,4 +108,21 @@ const importBatch = async (req: AuthenticatedRequest, res: Response): Promise<vo
   }
 };
 
-export const payslipsController = { getMy, getByEmployee, create, importBatch };
+/** Авто-генерация расчётных листков из табеля (admin+) */
+const generate = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const { year, month, department_id } = req.body;
+    if (!year || !month) {
+      res.status(400).json({ success: false, error: 'year и month обязательны' });
+      return;
+    }
+
+    const result = await generatePayslipsForMonth(Number(year), Number(month), req.user.id, department_id || undefined);
+    res.json({ success: true, data: result });
+  } catch (err) {
+    console.error('payslips.generate error:', err);
+    res.status(500).json({ success: false, error: 'Оши��ка генерации расчётных листков' });
+  }
+};
+
+export const payslipsController = { getMy, getByEmployee, create, importBatch, generate };

@@ -51,60 +51,26 @@ export const pushService = {
       .eq('endpoint', endpoint);
   },
 
-  /** Возвращает user_ids получателей (руководитель отдела + админы), исключая submitterUserId */
+  /** Возвращает user_id непосредственного руководителя (supervisor_id) */
   async sendLeaveRequestNotification(
     employeeId: number,
     requestType: string,
     submitterUserId: string,
   ): Promise<string[]> {
-    // Отдел сотрудника
-    const { data: emp } = await supabase
-      .from('employees')
-      .select('org_department_id')
-      .eq('id', employeeId)
+    // Находим непосредственного руководителя через supervisor_id
+    const { data: profile } = await supabase
+      .from('user_profiles')
+      .select('supervisor_id')
+      .eq('employee_id', employeeId)
       .single();
 
     const recipientIds = new Set<string>();
 
-    // Руководитель отдела
-    if (emp?.org_department_id) {
-      const { data: headers } = await supabase
-        .from('user_profiles')
-        .select('id, employee_id')
-        .eq('position_type', 'header')
-        .eq('is_approved', true);
-
-      if (headers && headers.length > 0) {
-        const headerEmpIds = headers.map((h: { id: string; employee_id: number | null }) => h.employee_id).filter(Boolean);
-        if (headerEmpIds.length > 0) {
-          const { data: headerEmps } = await supabase
-            .from('employees')
-            .select('id, org_department_id')
-            .in('id', headerEmpIds)
-            .eq('org_department_id', emp.org_department_id);
-
-          const matchingEmpIds = new Set((headerEmps || []).map((e: { id: number }) => e.id));
-          for (const h of headers) {
-            if (h.employee_id && matchingEmpIds.has(h.employee_id)) {
-              recipientIds.add(h.id);
-            }
-          }
-        }
-      }
+    if (profile?.supervisor_id) {
+      recipientIds.add(profile.supervisor_id);
     }
 
-    // Администраторы
-    const { data: admins } = await supabase
-      .from('user_profiles')
-      .select('id')
-      .in('position_type', ['admin', 'super_admin'])
-      .eq('is_approved', true);
-
-    for (const a of admins || []) {
-      recipientIds.add(a.id);
-    }
-
-    // Исключаем самого отправителя
+    // Исключаем самого отправителя (на случай если сам себе руководитель)
     recipientIds.delete(submitterUserId);
 
     const ids = Array.from(recipientIds);

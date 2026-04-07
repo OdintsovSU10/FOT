@@ -3,6 +3,7 @@ import jwt from 'jsonwebtoken';
 import { env } from '../config/env.js';
 import { chatService } from '../services/chat.service.js';
 import { pushService } from '../services/push.service.js';
+import { notificationService } from '../services/notification.service.js';
 import type { JWTPayload } from '../types/index.js';
 
 interface IAuthenticatedSocket extends Socket {
@@ -72,6 +73,15 @@ export const setupChatSocket = (io: Server) => {
                 messagePreview,
                 conversationId: data.conversationId,
               }).catch(() => undefined);
+
+              // Сохраняем в БД
+              notificationService.createMany([{
+                userId: p.user_id,
+                type: 'chat_message',
+                title: senderName,
+                body: messagePreview,
+                metadata: { conversationId: data.conversationId },
+              }]).catch(() => undefined);
             }
           }
         }

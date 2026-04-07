@@ -119,7 +119,13 @@ export const LeaveRequestsManagePage: FC = () => {
                     </span>
                   </div>
                   <div className="lrm-card-type">{REQUEST_TYPE_LABELS[r.request_type]}</div>
-                  <div className="lrm-card-dates">{formatDate(r.start_date)} — {formatDate(r.end_date)}</div>
+                  {r.request_type === 'time_correction' && r.correction_date ? (
+                    <div className="lrm-card-dates">
+                      Дата: {formatDate(r.correction_date)} · Статус: {r.correction_status} · {r.correction_hours != null ? `${r.correction_hours}ч` : ''}
+                    </div>
+                  ) : (
+                    <div className="lrm-card-dates">{formatDate(r.start_date)} — {formatDate(r.end_date)}</div>
+                  )}
                   {r.reason && <div className="lrm-card-reason">{r.reason}</div>}
                   {r.review_comment && <div className="lrm-card-comment">Комментарий: {r.review_comment}</div>}
                 </div>

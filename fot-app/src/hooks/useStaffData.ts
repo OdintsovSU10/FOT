@@ -3,51 +3,64 @@ import { employeeService } from '../services/employeeService';
 import { structureApi } from '../api/structure';
 import type { Employee } from '../types';
 import type { OrgDepartmentNode } from '../types/organization';
+import type { PaginatedMeta } from '../services/employeeService';
 
-/* ─── module-level cache ─── */
-let cachedEmployees: Employee[] | null = null;
+/* ─── module-level dept cache ─── */
 let cachedDepartments: OrgDepartmentNode[] | null = null;
-let cacheTs = 0;
-const CACHE_TTL = 60_000; // 60 сек
+let deptCacheTs = 0;
+const DEPT_CACHE_TTL = 120_000;
 
-export const useStaffData = () => {
-  const [employees, setEmployees] = useState<Employee[]>(cachedEmployees ?? []);
+interface IUseStaffDataParams {
+  page: number;
+  pageSize?: number;
+  search?: string;
+  departmentId?: string;
+}
+
+export const useStaffData = (params: IUseStaffDataParams) => {
+  const { page, pageSize = 100, search, departmentId } = params;
+  const [employees, setEmployees] = useState<Employee[]>([]);
   const [departments, setDepartments] = useState<OrgDepartmentNode[]>(cachedDepartments ?? []);
-  const [loading, setLoading] = useState(!cachedEmployees);
+  const [loading, setLoading] = useState(true);
+  const [meta, setMeta] = useState<PaginatedMeta>({ page: 1, pageSize, total: 0, totalPages: 0 });
+  const [totalActive, setTotalActive] = useState(0);
 
-  const loadData = useCallback(async (force = false) => {
-    if (!force && cachedEmployees && Date.now() - cacheTs < CACHE_TTL) {
-      setEmployees(cachedEmployees);
-      setDepartments(cachedDepartments!);
-      setLoading(false);
+  const loadDepts = useCallback(async () => {
+    if (cachedDepartments && Date.now() - deptCacheTs < DEPT_CACHE_TTL) {
+      setDepartments(cachedDepartments);
       return;
     }
-    setLoading(true);
-    const [emps, tree] = await Promise.all([
-      employeeService.getAll(),
-      structureApi.getTree(),
-    ]);
-    const active = emps.filter((e: Employee) => e.employment_status === 'active');
+    const tree = await structureApi.getTree();
     const deps = tree.data?.departments ?? [];
-    cachedEmployees = active;
     cachedDepartments = deps;
-    cacheTs = Date.now();
-    setEmployees(active);
+    deptCacheTs = Date.now();
     setDepartments(deps);
-    setLoading(false);
   }, []);
 
-  useEffect(() => { loadData(); }, [loadData]);
+  const loadEmployees = useCallback(async () => {
+    setLoading(true);
+    const result = await employeeService.getPaginated({
+      page,
+      pageSize,
+      search: search || undefined,
+      departmentId: departmentId || undefined,
+      status: 'active',
+      view: 'staff',
+    });
+    setEmployees(result.data);
+    setMeta(result.meta);
+    setTotalActive(result.counts.byStatus.active);
+    setLoading(false);
+  }, [page, pageSize, search, departmentId]);
+
+  useEffect(() => { loadDepts(); }, [loadDepts]);
+  useEffect(() => { loadEmployees(); }, [loadEmployees]);
 
   const patchEmployee = useCallback((id: number, patch: Partial<Employee>) => {
-    setEmployees(prev => {
-      const next = prev.map(e => e.id === id ? { ...e, ...patch } : e);
-      cachedEmployees = next;
-      return next;
-    });
+    setEmployees(prev => prev.map(e => e.id === id ? { ...e, ...patch } : e));
   }, []);
 
-  const refresh = useCallback(() => loadData(true), [loadData]);
+  const refresh = useCallback(() => loadEmployees(), [loadEmployees]);
 
-  return { employees, departments, loading, refresh, patchEmployee };
+  return { employees, departments, loading, meta, totalActive, refresh, patchEmployee };
 };

@@ -3,6 +3,7 @@ import { supabase } from '../config/database.js';
 import type { AuthenticatedRequest, SalaryRaiseStatus } from '../types/index.js';
 import { employeeChangesService } from '../services/employee-changes.service.js';
 import { pushService } from '../services/push.service.js';
+import { notificationService } from '../services/notification.service.js';
 import { getHierarchyLevel } from '../services/roles-cache.service.js';
 import { r2Service } from '../services/r2.service.js';
 import { getIo } from '../socket/io-instance.js';
@@ -93,7 +94,7 @@ const buildSnapshot = async (employeeId: number) => {
   };
 };
 
-/** Уведомить через push + socket */
+/** Уведомить через push + socket + БД */
 const notifyUsers = (userIds: string[], title: string, body: string) => {
   pushService.sendSalaryRaiseNotification(userIds, title, body)
     .then((sentIds) => {
@@ -105,6 +106,10 @@ const notifyUsers = (userIds: string[], title: string, body: string) => {
       }
     })
     .catch((e) => console.error('salary-raise notify error:', e));
+
+  notificationService.createMany(
+    userIds.map(uid => ({ userId: uid, type: 'salary_raise', title, body })),
+  ).catch((e) => console.error('salary-raise notification save error:', e));
 };
 
 /** Получить user_ids по минимальному уровню роли */
@@ -137,7 +142,7 @@ const create = async (req: AuthenticatedRequest, res: Response): Promise<void> =
     }
 
     const {
-      request_type, requested_salary, raise_percentage,
+      request_type, requested_salary,
       desired_effective_date, reason_brief,
       achievements, responsibility_changes, self_assessment,
     } = req.body;
@@ -165,7 +170,9 @@ const create = async (req: AuthenticatedRequest, res: Response): Promise<void> =
         employee_snapshot: snapshot,
         request_type,
         requested_salary,
-        raise_percentage: raise_percentage ?? 0,
+        raise_percentage: snapshot.salary_actual && snapshot.salary_actual > 0
+          ? Math.round(((requested_salary - snapshot.salary_actual) / snapshot.salary_actual) * 1000) / 10
+          : 0,
         desired_effective_date,
         reason_brief,
         achievements: achievements || [],
@@ -208,7 +215,7 @@ const update = async (req: AuthenticatedRequest, res: Response): Promise<void> =
     }
 
     const {
-      request_type, requested_salary, raise_percentage,
+      request_type, requested_salary,
       desired_effective_date, reason_brief,
       achievements, responsibility_changes, self_assessment,
     } = req.body;
@@ -220,7 +227,10 @@ const update = async (req: AuthenticatedRequest, res: Response): Promise<void> =
     if (snapshot) updateData.employee_snapshot = snapshot;
     if (request_type !== undefined) updateData.request_type = request_type;
     if (requested_salary !== undefined) updateData.requested_salary = requested_salary;
-    if (raise_percentage !== undefined) updateData.raise_percentage = raise_percentage;
+    const finalSalary = requested_salary ?? request.requested_salary;
+    if (snapshot && snapshot.salary_actual && snapshot.salary_actual > 0 && finalSalary) {
+      updateData.raise_percentage = Math.round(((finalSalary - snapshot.salary_actual) / snapshot.salary_actual) * 1000) / 10;
+    }
     if (desired_effective_date !== undefined) updateData.desired_effective_date = desired_effective_date;
     if (reason_brief !== undefined) updateData.reason_brief = reason_brief;
     if (achievements !== undefined) updateData.achievements = achievements;
@@ -265,7 +275,7 @@ const getPending = async (req: AuthenticatedRequest, res: Response): Promise<voi
     const userLevel = await getHierarchyLevel(req.user.position_type);
     const results: unknown[] = [];
 
-    // Supervisor review: заявки где текущий user — supervisor или header отдела
+    // Supervisor review: заявки где текущий user — supervisor, header отдела, или hr+/admin+
     if (userLevel >= 2) {
       const { data: supervisorRequests } = await supabase
         .from('salary_raise_requests')
@@ -274,21 +284,26 @@ const getPending = async (req: AuthenticatedRequest, res: Response): Promise<voi
         .order('created_at', { ascending: false });
 
       if (supervisorRequests) {
-        for (const r of supervisorRequests) {
-          const supervisorId = await getSupervisorUserId(r.employee_id);
-          if (supervisorId === req.user.id) {
-            results.push(r);
-            continue;
-          }
-          // Или header того же отдела
-          if (req.user.position_type === 'header' && req.user.department_id) {
-            const { data: emp } = await supabase
-              .from('employees')
-              .select('org_department_id')
-              .eq('id', r.employee_id)
-              .single();
-            if (emp?.org_department_id === req.user.department_id) {
+        // HR+ и admin+ видят все заявки на этапе supervisor_review
+        if (userLevel >= 3) {
+          results.push(...supervisorRequests);
+        } else {
+          for (const r of supervisorRequests) {
+            const supervisorId = await getSupervisorUserId(r.employee_id);
+            if (supervisorId === req.user.id) {
               results.push(r);
+              continue;
+            }
+            // Header того же отдела (или если supervisor не назначен)
+            if (req.user.department_id) {
+              const { data: emp } = await supabase
+                .from('employees')
+                .select('org_department_id')
+                .eq('id', r.employee_id)
+                .single();
+              if (emp?.org_department_id === req.user.department_id) {
+                results.push(r);
+              }
             }
           }
         }

@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import type { FC, ReactNode } from 'react';
 import { EmployeeSidebar } from './EmployeeSidebar';
 import styles from './EmployeeLayout.module.css';
@@ -5,6 +6,9 @@ import { useMobileMenu } from '../../hooks/useMobileMenu';
 import { useSwipe } from '../../hooks/useSwipe';
 import { useTheme } from '../../hooks/useTheme';
 import { useMyPresence } from '../../hooks/useMyPresence';
+import { useNotifications } from '../../hooks/useNotifications';
+import { NotificationDropdown } from '../ui/NotificationDropdown';
+import dropdownStyles from '../ui/NotificationDropdown.module.css';
 
 interface IEmployeeLayoutProps {
   children: ReactNode;
@@ -16,6 +20,8 @@ export const EmployeeLayout: FC<IEmployeeLayoutProps> = ({ children, title }) =>
   const { theme, toggleTheme } = useTheme();
   const { status: presenceStatus } = useMyPresence();
   const swipeHandlers = useSwipe({ isOpen, onOpen: open, onClose: close });
+  const [bellOpen, setBellOpen] = useState(false);
+  const { notifications, unreadCount, loading, loadNotifications, markRead, markAllRead } = useNotifications();
 
   return (
     <div className={styles.app} {...swipeHandlers}>
@@ -59,13 +65,29 @@ export const EmployeeLayout: FC<IEmployeeLayoutProps> = ({ children, title }) =>
                 </svg>
               )}
             </button>
-            <button className={styles.headerBtn}>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
-                <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
-              </svg>
-              <span className={styles.notificationIndicator}></span>
-            </button>
+            <div className={dropdownStyles.wrapper}>
+              <button className={styles.headerBtn} onClick={() => setBellOpen(!bellOpen)} title="Уведомления">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+                  <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+                </svg>
+                {unreadCount > 0 && (
+                  <span className={dropdownStyles.badge}>
+                    {unreadCount > 99 ? '99+' : unreadCount}
+                  </span>
+                )}
+              </button>
+              {bellOpen && (
+                <NotificationDropdown
+                  notifications={notifications}
+                  loading={loading}
+                  onLoad={loadNotifications}
+                  onMarkRead={markRead}
+                  onMarkAllRead={markAllRead}
+                  onClose={() => setBellOpen(false)}
+                />
+              )}
+            </div>
           </div>
         </header>
         {children}

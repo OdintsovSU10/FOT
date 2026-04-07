@@ -13,6 +13,7 @@ export interface PaginatedParams {
   status?: 'active' | 'fired';
   departmentId?: string;
   archived?: boolean;
+  view?: 'list' | 'staff';
 }
 
 export interface PaginatedMeta {
@@ -47,7 +48,7 @@ export const employeeService = {
   async getPaginated(params: PaginatedParams): Promise<PaginatedResponse> {
     const qs = new URLSearchParams();
     qs.set('page', String(params.page));
-    qs.set('view', 'list');
+    qs.set('view', params.view || 'list');
     if (params.pageSize) qs.set('pageSize', String(params.pageSize));
     if (params.search) qs.set('search', params.search);
     if (params.status) qs.set('status', params.status);

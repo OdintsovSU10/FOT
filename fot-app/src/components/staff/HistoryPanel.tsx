@@ -1,4 +1,4 @@
-import { useState, memo, type FC } from 'react';
+import { useState, useMemo, useCallback, memo, type FC } from 'react';
 import { Pencil, X, TrendingUp, Briefcase, Trash2, Check } from 'lucide-react';
 import { employeeService } from '../../services/employeeService';
 import type { Employee, EmployeeHistoryEvent } from '../../types';
@@ -30,29 +30,36 @@ export const HistoryPanel: FC<IHistoryPanelProps> = memo(({ employee, history, l
   const [addDate, setAddDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [addReason, setAddReason] = useState('');
 
-  const salaryEvents = history
-    .filter(e => e.event_type === 'salary')
-    .sort((a, b) => a.event_date.localeCompare(b.event_date));
+  const salaryEvents = useMemo(
+    () => history.filter(e => e.event_type === 'salary').sort((a, b) => a.event_date.localeCompare(b.event_date)),
+    [history],
+  );
 
-  const salaryDeltas = new Map<string, number>();
-  for (let i = 1; i < salaryEvents.length; i++) {
-    const prev = (salaryEvents[i - 1].event_data as Record<string, unknown>).salary as number;
-    const curr = (salaryEvents[i].event_data as Record<string, unknown>).salary as number;
-    if (prev && curr) salaryDeltas.set(salaryEvents[i].event_id, curr - prev);
-  }
+  const salaryDeltas = useMemo(() => {
+    const map = new Map<string, number>();
+    for (let i = 1; i < salaryEvents.length; i++) {
+      const prev = (salaryEvents[i - 1].event_data as Record<string, unknown>).salary as number;
+      const curr = (salaryEvents[i].event_data as Record<string, unknown>).salary as number;
+      if (prev && curr) map.set(salaryEvents[i].event_id, curr - prev);
+    }
+    return map;
+  }, [salaryEvents]);
 
-  const sorted = [...history].sort((a, b) => b.event_date.localeCompare(a.event_date));
+  const sorted = useMemo(
+    () => [...history].sort((a, b) => b.event_date.localeCompare(a.event_date)),
+    [history],
+  );
 
-  const startEdit = (ev: EmployeeHistoryEvent) => {
+  const startEdit = useCallback((ev: EmployeeHistoryEvent) => {
     const data = ev.event_data as Record<string, unknown>;
     setEditingId(ev.event_id);
     setEditDate(ev.event_date);
     setEditReason(String(data.reason || data.change_reason || ''));
     if (ev.event_type === 'salary') setEditSalary(String(data.salary || ''));
     setAddMode(null);
-  };
+  }, []);
 
-  const saveEdit = async (ev: EmployeeHistoryEvent) => {
+  const saveEdit = useCallback(async (ev: EmployeeHistoryEvent) => {
     setSaving(true);
     const body: Record<string, unknown> = { effective_date: editDate, change_reason: editReason };
     if (ev.event_type === 'salary') body.salary = Number(editSalary);
@@ -61,16 +68,16 @@ export const HistoryPanel: FC<IHistoryPanelProps> = memo(({ employee, history, l
     setSaving(false);
     onRefresh();
     onDataChanged();
-  };
+  }, [employee.id, editDate, editReason, editSalary, onRefresh, onDataChanged]);
 
-  const handleDelete = async (ev: EmployeeHistoryEvent) => {
+  const handleDelete = useCallback(async (ev: EmployeeHistoryEvent) => {
     if (!confirm('Удалить запись?')) return;
     await employeeService.deleteHistoryEvent(employee.id, ev.event_id);
     onRefresh();
     onDataChanged();
-  };
+  }, [employee.id, onRefresh, onDataChanged]);
 
-  const handleAdd = async () => {
+  const handleAdd = useCallback(async () => {
     if (!addVal) return;
     setSaving(true);
     if (addMode === 'salary') {
@@ -85,15 +92,15 @@ export const HistoryPanel: FC<IHistoryPanelProps> = memo(({ employee, history, l
     setSaving(false);
     onRefresh();
     onDataChanged();
-  };
+  }, [employee.id, addMode, addVal, addReason, addDate, onRefresh, onDataChanged]);
 
-  const openAdd = (mode: 'salary' | 'position') => {
+  const openAdd = useCallback((mode: 'salary' | 'position') => {
     setAddMode(mode);
     setAddVal('');
     setAddDate(new Date().toISOString().slice(0, 10));
     setAddReason('');
     setEditingId(null);
-  };
+  }, []);
 
   return (
     <div className="sc-panel-overlay" onClick={onClose}>

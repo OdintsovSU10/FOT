@@ -284,6 +284,23 @@ export const timesheetController = {
         manualEntries.push(...(data || []));
       }
 
+      // Resolve corrected_by names
+      const correctorIds = [...new Set(
+        manualEntries
+          .map(m => m.corrected_by as number | null)
+          .filter((id): id is number => id != null)
+      )];
+      const correctorNames = new Map<number, string>();
+      if (correctorIds.length > 0) {
+        const { data: correctors } = await supabase
+          .from('employees')
+          .select('id, full_name')
+          .in('id', correctorIds);
+        for (const c of correctors || []) {
+          correctorNames.set(c.id as number, c.full_name as string);
+        }
+      }
+
       // Merge: manual corrections take priority over SKUD
       const entries: Array<Record<string, unknown>> = [];
       const seenKeys = new Set<string>();
@@ -291,6 +308,9 @@ export const timesheetController = {
       for (const m of manualEntries) {
         const key = `${m.employee_id}_${m.work_date}`;
         seenKeys.add(key);
+        if (m.corrected_by) {
+          m.corrected_by_name = correctorNames.get(m.corrected_by as number) || null;
+        }
         entries.push(m);
       }
 
@@ -465,6 +485,8 @@ export const timesheetController = {
         .update({
           ...parsed,
           is_correction: true,
+          corrected_by: req.user.employee_id ?? null,
+          corrected_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
         })
         .eq('id', id)

@@ -19,11 +19,13 @@ import leaveRequestsRoutes from './routes/leave-requests.routes.js';
 import documentsRoutes from './routes/documents.routes.js';
 import payslipsRoutes from './routes/payslips.routes.js';
 import paymentsRoutes from './routes/payments.routes.js';
+import productionCalendarRoutes from './routes/production-calendar.routes.js';
 import timesheetApprovalRoutes from './routes/timesheet-approval.routes.js';
 import scheduleRoutes from './routes/schedule.routes.js';
 import rolesRoutes from './routes/roles.routes.js';
 import salaryRaiseRoutes from './routes/salary-raise.routes.js';
 import settingsRoutes from './routes/settings.routes.js';
+import notificationRoutes from './routes/notification.routes.js';
 
 const app = express();
 
@@ -64,11 +66,13 @@ app.use('/api/leave-requests', leaveRequestsRoutes);
 app.use('/api/documents', documentsRoutes);
 app.use('/api/payslips', payslipsRoutes);
 app.use('/api/payments', paymentsRoutes);
+app.use('/api/production-calendar', productionCalendarRoutes);
 app.use('/api/timesheet-approvals', timesheetApprovalRoutes);
 app.use('/api/schedules', scheduleRoutes);
 app.use('/api/roles', rolesRoutes);
 app.use('/api/salary-raise', salaryRaiseRoutes);
 app.use('/api/settings', settingsRoutes);
+app.use('/api/notifications', notificationRoutes);
 
 // 404 handler
 app.use((_req, res) => {

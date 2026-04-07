@@ -13,6 +13,7 @@ import {
   isToday,
   isFutureDay,
 } from '../../utils/calendarUtils';
+import { getWorkHoursForDay } from '../../utils/scheduleUtils';
 import type {
   TimesheetEntry,
   TimesheetEmployee,
@@ -150,14 +151,16 @@ export const EmployeeTimesheetPage: FC = () => {
     const sched = employeeId ? schedules[employeeId] : undefined;
 
     let normDays = 0;
+    let normHours = 0;
     for (let d = 1; d <= daysCount; d++) {
-      if (!isScheduleDayOff(sched, year, month, d)) normDays++;
+      if (!isScheduleDayOff(sched, year, month, d)) {
+        normDays++;
+        normHours += getWorkHoursForDay(sched, year, month, d);
+      }
     }
 
     const workedDays = entries.filter(e => WORKED_STATUSES.has(e.status)).length;
     const actualHours = entries.reduce((sum, e) => sum + (e.hours_worked || 0), 0);
-    const workHoursPerDay = sched?.work_hours ?? 8;
-    const normHours = normDays * workHoursPerDay;
     const dailyRate = normDays > 0 ? salary / normDays : 0;
     const accrued = dailyRate * workedDays;
 
@@ -205,7 +208,7 @@ export const EmployeeTimesheetPage: FC = () => {
       return classes.join(' ');
     }
 
-    const workHoursNorm = sched?.work_hours ?? 8;
+    const workHoursNorm = getWorkHoursForDay(sched, year, month, day);
     switch (entry.status) {
       case 'work':
       case 'manual':

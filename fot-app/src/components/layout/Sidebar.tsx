@@ -14,6 +14,7 @@ import {
   UserIcon,
   BarChartIcon,
   ShieldIcon,
+  DollarIcon,
 } from '../ui/Icons';
 
 interface INavItem {
@@ -41,6 +42,7 @@ const navGroups: INavGroup[] = [
       { id: 'employees', path: '/tender', label: 'Сотрудники', icon: UsersIcon, requiredPosition: 'admin' },
       { id: 'timesheet', path: '/timesheet', label: 'Табель', icon: CalendarIcon },
       { id: 'leave-requests', path: '/leave-requests', label: 'Заявления', icon: ClipboardCheckIcon, requiredPosition: 'header' },
+      { id: 'salary-raise-review', path: '/salary-raise-review', label: 'Повышение оклада', icon: DollarIcon, requiredPosition: 'header' },
     ]
   },
   {
@@ -61,6 +63,8 @@ const navGroups: INavGroup[] = [
       { id: 'admin-audit', path: '/admin/audit', label: 'Аудит данных', icon: ClipboardCheckIcon, requiredPosition: 'super_admin' },
       { id: 'admin-roles', path: '/admin/roles', label: 'Роли', icon: ShieldIcon, requiredPosition: 'super_admin' },
       { id: 'admin-settings', path: '/admin/settings', label: 'Настройки', icon: SettingsIcon, requiredPosition: 'super_admin' },
+      { id: 'admin-calendar', path: '/admin/production-calendar', label: 'Произв. календарь', icon: CalendarIcon, requiredPosition: 'admin' },
+      { id: 'admin-payslips', path: '/admin/payslips', label: 'Расчётные листки', icon: FileTextIcon, requiredPosition: 'admin' },
     ]
   }
 ];

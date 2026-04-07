@@ -161,6 +161,7 @@
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: var(--surface);
+  contain: layout style;
 }
 
 .sc-table {
@@ -173,6 +174,7 @@
   position: sticky;
   top: 0;
   z-index: 2;
+  will-change: transform;
 }
 
 .sc-table th {
@@ -309,6 +311,7 @@
   inset: 0;
   background: rgba(0, 0, 0, 0.35);
   z-index: 100;
+  contain: layout style;
 }
 
 .sc-panel {
@@ -661,6 +664,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
+  contain: layout style;
 }
 
 .sc-modal {
@@ -778,6 +782,23 @@
 .sc-btn.apply:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+/* ── Pagination ── */
+
+.sc-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 8px 0;
+  flex-shrink: 0;
+}
+
+.sc-pagination-info {
+  font-size: 13px;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
 }
 
 /* ── Mobile cards ── */

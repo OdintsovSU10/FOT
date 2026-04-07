@@ -4,6 +4,9 @@ import styles from './Header.module.css';
 import { IconButton } from '../ui/Button';
 import { Tabs } from '../ui/Tabs';
 import { MoonIcon, SunIcon, BellIcon } from '../ui/Icons';
+import { NotificationDropdown } from '../ui/NotificationDropdown';
+import { useNotifications } from '../../hooks/useNotifications';
+import dropdownStyles from '../ui/NotificationDropdown.module.css';
 
 interface IHeaderProps {
   title: string;
@@ -17,6 +20,8 @@ const periodTabs = ['Сегодня', 'Неделя', 'Месяц'];
 
 export const Header: FC<IHeaderProps> = ({ title, theme, onToggleTheme, onMenuOpen, showPeriodTabs = false }) => {
   const [activeTab, setActiveTab] = useState(0);
+  const [bellOpen, setBellOpen] = useState(false);
+  const { notifications, unreadCount, loading, loadNotifications, markRead, markAllRead } = useNotifications();
 
   return (
     <header className={styles.header}>
@@ -39,9 +44,26 @@ export const Header: FC<IHeaderProps> = ({ title, theme, onToggleTheme, onMenuOp
           {theme === 'dark' ? <MoonIcon /> : <SunIcon />}
         </IconButton>
 
-        <IconButton hasNotification>
-          <BellIcon />
-        </IconButton>
+        <div className={dropdownStyles.wrapper}>
+          <IconButton onClick={() => setBellOpen(!bellOpen)} title="Уведомления">
+            <BellIcon />
+            {unreadCount > 0 && (
+              <span className={dropdownStyles.badge}>
+                {unreadCount > 99 ? '99+' : unreadCount}
+              </span>
+            )}
+          </IconButton>
+          {bellOpen && (
+            <NotificationDropdown
+              notifications={notifications}
+              loading={loading}
+              onLoad={loadNotifications}
+              onMarkRead={markRead}
+              onMarkAllRead={markAllRead}
+              onClose={() => setBellOpen(false)}
+            />
+          )}
+        </div>
       </div>
     </header>
   );

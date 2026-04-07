@@ -8,6 +8,7 @@ import {
   isToday,
   isFutureDay,
 } from '../../utils/calendarUtils';
+import { getWorkHoursForDay } from '../../utils/scheduleUtils';
 
 interface ITimesheetGridProps {
   employees: TimesheetEmployee[];
@@ -106,6 +107,7 @@ const getDayCellClass = (entry: TimesheetEntry | null, weekend: boolean, today: 
       classes.push('ts-day--trip');
       break;
   }
+  if (entry.is_correction) classes.push('ts-day--corrected');
   return classes.join(' ');
 };
 
@@ -145,7 +147,7 @@ export const TimesheetGrid: FC<ITimesheetGridProps> = ({
       const sched = schedules[emp.id];
       const dayMap = new Map<number, TimesheetEntry>();
       let factHours = 0;
-      let empWorkDays = 0;
+      let normHours = 0;
 
       for (let d = 1; d <= dc; d++) {
         const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
@@ -155,14 +157,13 @@ export const TimesheetGrid: FC<ITimesheetGridProps> = ({
           if (entry.hours_worked) factHours += entry.hours_worked;
         }
 
-        // Считаем рабочие дни до сегодня
+        // Считаем норму часов до сегодня с учётом day_overrides
         const dayOff = isScheduleDayOff(sched, year, month, d);
         const isPast = !isCurrentMonth || d <= todayDate;
-        if (!dayOff && isPast) empWorkDays++;
+        if (!dayOff && isPast) {
+          normHours += getWorkHoursForDay(sched, year, month, d);
+        }
       }
-
-      const workHours = sched ? sched.work_hours : 8;
-      const normHours = empWorkDays * workHours;
 
       return { employee: emp, days: dayMap, factHours, normHours };
     });
@@ -193,6 +194,9 @@ export const TimesheetGrid: FC<ITimesheetGridProps> = ({
           </div>
           <div className="ts-legend-item">
             <span className="ts-legend-dot ts-legend-dot--weekend">—</span>Выходной
+          </div>
+          <div className="ts-legend-item">
+            <span className="ts-legend-dot ts-legend-dot--corrected">К</span>Корректировка
           </div>
         </div>
       </div>
@@ -242,7 +246,7 @@ export const TimesheetGrid: FC<ITimesheetGridProps> = ({
                     const today = isToday(year, month, d);
                     const future = isFutureDay(year, month, d);
                     const entry = row.days.get(d) || null;
-                    const workHoursNorm = sched ? sched.work_hours : 8;
+                    const workHoursNorm = getWorkHoursForDay(sched, year, month, d);
                     const cls = getDayCellClass(entry, dayOff, today, future, workHoursNorm);
                     const text = getDayCellText(entry, dayOff);
 

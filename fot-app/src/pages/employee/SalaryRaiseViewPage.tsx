@@ -1,5 +1,5 @@
 import { type FC, useState, useEffect, useCallback } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import {
   salaryRaiseService,
@@ -43,8 +43,11 @@ const EMPTY_FINANCE: IFinanceReview = {
 
 export const SalaryRaiseViewPage: FC = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const { id } = useParams<{ id: string }>();
   const { user, canAccess } = useAuth();
+  const isReviewContext = location.pathname.startsWith('/salary-raise-review');
+  const backPath = isReviewContext ? '/salary-raise-review' : '/employee/salary-raise';
 
   const [request, setRequest] = useState<ISalaryRaiseRequest | null>(null);
   const [loading, setLoading] = useState(true);
@@ -64,7 +67,7 @@ export const SalaryRaiseViewPage: FC = () => {
       if (data.hr_review) setHrReview(data.hr_review as IHrReview);
       if (data.finance_review) setFinReview(data.finance_review as IFinanceReview);
     } catch {
-      navigate('/employee/salary-raise');
+      navigate(backPath);
     } finally {
       setLoading(false);
     }
@@ -120,7 +123,7 @@ export const SalaryRaiseViewPage: FC = () => {
 
   return (
     <div className={styles.page}>
-      <span className={styles.backLink} onClick={() => navigate('/employee/salary-raise')}>
+      <span className={styles.backLink} onClick={() => navigate(backPath)}>
         ← Назад к заявкам
       </span>
 
@@ -173,7 +176,7 @@ export const SalaryRaiseViewPage: FC = () => {
         </h3>
         <div className={styles.infoGrid}>
           <div className={styles.infoItem}><span className={styles.infoLabel}>Тип</span><span className={styles.infoValue}>{REQUEST_TYPE_LABELS[request.request_type]}</span></div>
-          <div className={styles.infoItem}><span className={styles.infoLabel}>Запрашиваемый оклад</span><span className={styles.infoValue}>{formatSalary(request.requested_salary)} (+{request.raise_percentage}%)</span></div>
+          <div className={styles.infoItem}><span className={styles.infoLabel}>Запрашиваемый оклад</span><span className={styles.infoValue}>{formatSalary(request.requested_salary)} (+{(() => { const cur = snapshot.salary_actual ?? snapshot.current_salary; return cur && cur > 0 ? (((request.requested_salary - cur) / cur) * 100).toFixed(1) : request.raise_percentage ?? 0; })()}%)</span></div>
           <div className={styles.infoItem}><span className={styles.infoLabel}>Желаемая дата</span><span className={styles.infoValue}>{formatDate(request.desired_effective_date)}</span></div>
           <div className={styles.infoItem}><span className={styles.infoLabel}>Дата найма</span><span className={styles.infoValue}>{formatDate(snapshot.hire_date)}</span></div>
           <div className={styles.infoValueFull}><span className={styles.infoLabel}>Причина</span><p>{request.reason_brief}</p></div>

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, memo, type FC } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback, memo, type FC } from 'react';
 import { ChevronDown } from 'lucide-react';
 import type { OrgDepartmentNode } from '../../types/organization';
 
@@ -13,27 +13,37 @@ export const DeptSelect: FC<IDeptSelectProps> = memo(({ departments, value, onCh
   const [q, setQ] = useState('');
   const ref = useRef<HTMLDivElement>(null);
 
-  const selected = departments.find(d => d.id === value);
-  const qLower = q.toLowerCase();
-  const filtered = q ? departments.filter(d => d.name.toLowerCase().includes(qLower)) : departments;
+  const selected = useMemo(() => departments.find(d => d.id === value), [departments, value]);
+
+  const filtered = useMemo(() => {
+    if (!q) return departments;
+    const qLower = q.toLowerCase();
+    return departments.filter(d => d.name.toLowerCase().includes(qLower));
+  }, [departments, q]);
 
   useEffect(() => {
+    if (!open) return;
     const handler = (e: MouseEvent) => {
       if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
-  }, []);
+  }, [open]);
 
-  const pick = (id: string) => {
+  const pick = useCallback((id: string) => {
     onChange(id);
     setOpen(false);
     setQ('');
-  };
+  }, [onChange]);
+
+  const toggle = useCallback(() => {
+    setOpen(prev => !prev);
+    setQ('');
+  }, []);
 
   return (
     <div className="sc-dept-select" ref={ref}>
-      <button className="sc-dept-trigger" onClick={() => { setOpen(!open); setQ(''); }}>
+      <button className="sc-dept-trigger" onClick={toggle}>
         <span className="sc-dept-trigger-text">{selected ? selected.name : 'Все отделы'}</span>
         <ChevronDown size={14} />
       </button>

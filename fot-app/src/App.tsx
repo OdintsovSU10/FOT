@@ -40,6 +40,8 @@ const UserManagementPage = lazy(() => import('./pages/super-admin/UserManagement
 const DataAuditPage = lazy(() => import('./pages/super-admin/DataAuditPage').then(m => ({ default: m.DataAuditPage })));
 const RoleManagementPage = lazy(() => import('./pages/super-admin/RoleManagementPage').then(m => ({ default: m.RoleManagementPage })));
 const SystemSettingsPage = lazy(() => import('./pages/super-admin/SystemSettingsPage').then(m => ({ default: m.SystemSettingsPage })));
+const ProductionCalendarPage = lazy(() => import('./pages/super-admin/ProductionCalendarPage').then(m => ({ default: m.ProductionCalendarPage })));
+const PayslipManagePage = lazy(() => import('./pages/super-admin/PayslipManagePage').then(m => ({ default: m.PayslipManagePage })));
 
 // Employees & SKUD
 const EmployeesPage = lazy(() => import('./pages/employees/EmployeesPage').then(m => ({ default: m.EmployeesPage })));
@@ -76,6 +78,9 @@ const SalaryRaiseViewPage = lazy(() => import('./pages/employee/SalaryRaiseViewP
 
 // Leave requests management (header/hr)
 const LeaveRequestsManagePage = lazy(() => import('./pages/LeaveRequestsManagePage').then(m => ({ default: m.LeaveRequestsManagePage })));
+
+// Salary raise review (header/hr/admin)
+const SalaryRaiseReviewPage = lazy(() => import('./pages/SalaryRaiseReviewPage').then(m => ({ default: m.SalaryRaiseReviewPage })));
 
 // Компонент для умного редиректа на основе должности
 const PositionBasedRedirect = () => {
@@ -276,6 +281,22 @@ const AppRoutes = () => {
             }
           />
           <Route
+            path="/salary-raise-review"
+            element={
+              <Layout title="Повышение оклада" theme={theme} onToggleTheme={toggleTheme}>
+                <SalaryRaiseReviewPage />
+              </Layout>
+            }
+          />
+          <Route
+            path="/salary-raise-review/:id"
+            element={
+              <Layout title="Заявка на повышение" theme={theme} onToggleTheme={toggleTheme}>
+                <SalaryRaiseViewPage />
+              </Layout>
+            }
+          />
+          <Route
             path="/tender/:id"
             element={
               <Layout title="Карточка сотрудника" theme={theme} onToggleTheme={toggleTheme}>
@@ -393,6 +414,22 @@ const AppRoutes = () => {
             element={
               <Layout title="Системные настройки" theme={theme} onToggleTheme={toggleTheme}>
                 <SystemSettingsPage />
+              </Layout>
+            }
+          />
+          <Route
+            path="/admin/production-calendar"
+            element={
+              <Layout title="Производственный календарь" theme={theme} onToggleTheme={toggleTheme}>
+                <ProductionCalendarPage />
+              </Layout>
+            }
+          />
+          <Route
+            path="/admin/payslips"
+            element={
+              <Layout title="Расчётные листки" theme={theme} onToggleTheme={toggleTheme}>
+                <PayslipManagePage />
               </Layout>
             }
           />

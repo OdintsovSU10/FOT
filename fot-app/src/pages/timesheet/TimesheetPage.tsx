@@ -370,6 +370,11 @@ export const TimesheetPage: FC = () => {
         employeeName={modalEmployee?.full_name}
         employeeId={modalEmployee?.id}
         workDate={`${year}-${String(month).padStart(2, '0')}-${String(modalDay).padStart(2, '0')}`}
+        correctionInfo={modalEntry?.is_correction ? {
+          is_correction: true,
+          corrected_at: modalEntry.corrected_at,
+          corrected_by_name: modalEntry.corrected_by_name,
+        } : null}
       />
     </div>
   );
