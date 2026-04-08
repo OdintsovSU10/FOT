@@ -13,6 +13,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Внешняя интеграция: Sigur REST API (СКУД — система контроля доступа). Настройки подключения в `.env`.
 
+Файловое хранилище: Cloudflare R2 (S3-совместимый SDK). Конфиг из `.env` или динамически из БД. Подписанные URL (1 час).
+
 ## Команды разработки
 
 ```bash
@@ -31,6 +33,9 @@ cd fot-server && npm run build   # TypeScript compilation
 
 # Линтинг
 cd fot-app && npm run lint
+
+# Тесты (бэкенд, vitest)
+cd fot-server && npm run test
 ```
 
 При изменении файлов в `fot-server/src/` — перезапустить сервер. Фронтенд перезапускать не нужно.
@@ -40,15 +45,43 @@ cd fot-app && npm run lint
 - **Авторизация**: JWT + 2FA (TOTP). Роли через `position_type` + `system_role_id` (таблица `system_roles`). Проверка в middleware (`auth.ts`), на фронте — `<ProtectedRoute>`. Иерархия ролей через `level` из `system_roles`.
 - **ФИО сотрудников**: хранятся plain-text (`full_name`, `last_name`, `first_name`, `middle_name`). `encryption.service.ts` используется только для TOTP и чата, не для ФИО.
 - **Supabase**: используется service role key (RLS отключён), авторизация проверяется в middleware бэкенда. Фронтенд к PostgREST напрямую не обращается.
-- **API роуты**: все под префиксом `/api/` — auth, employees, admin, skud, sigur, structure, timesheet, audit, chat.
+- **API роуты**: все под префиксом `/api/` — auth, employees, admin, skud, sigur, structure, timesheet, audit, chat, push, leave-requests, documents, payslips, payments, production-calendar, timesheet-approvals, schedules, roles, salary-raise, settings, notifications.
 - **Фронтенд роуты**: по ролям — `worker` видит `/employee/*`, `header`+ видит `/dashboard`, `admin`+ видит `/tender`, `super_admin` видит `/skud-settings`, `/admin/*`.
 
 ## Структура бэкенда
 
-- **Контроллеры** (22 файла в `fot-server/src/controllers/`): декомпозированы по доменам — `admin-*`, `auth-*`, `employee-*`, `sigur-*`, `skud-*`, `timesheet-*`.
-- **Сервисы** (20 файлов в `fot-server/src/services/`): `sigur-sync-*` (employees, events, structure, shared), `skud-*` (backfill, dashboard, discipline, import, presence, shared), `employee-mapper.service.ts` (кэш структуры + маппинг полей).
+- **Контроллеры** (`fot-server/src/controllers/`): декомпозированы по доменам — `admin-*`, `auth-*`, `employee-*`, `sigur-*`, `skud-*`, `timesheet-*`.
+- **Сервисы** (`fot-server/src/services/`): `sigur-sync-*` (employees, events, structure, shared), `skud-*` (backfill, dashboard, discipline, import, presence, shared), `employee-mapper.service.ts` (кэш структуры + маппинг полей).
 - **Feature flags**: `fot-server/src/config/features.ts` — `LOGIN_2FA_ENABLED`, `CRITICAL_2FA_ENABLED`, `IS_PRODUCTION`.
 - **Типы Express**: `fot-server/src/types/express.d.ts` — расширение `req.user` с типизацией.
+- **Rate limiting** (`fot-server/src/middleware/rateLimit.ts`): разные лимитеры — `apiLimiter` (500/15мин), `authLimiter` (10/15мин), `twoFactorLimiter` (5/5мин), `importLimiter` (5/1ч). В dev-режиме лимиты выше.
+
+## Фоновые сервисы
+
+Запускаются в `src/index.ts` при старте сервера:
+- **Presence polling** (`presence-polling.service.ts`): опрос СКУД-событий каждые 60 сек, кэш сотрудников с TTL 10 мин, дедупликация, lock для синхронизации.
+- **Structure sync** (`sigur-structure-scheduler.service.ts`): синхронизация отделов/должностей/сотрудников из Sigur каждый час, задержка 30 сек при старте.
+
+## Socket.IO
+
+Синглтон: `src/socket/io-instance.ts` (`setIo` / `getIo`).
+
+Обработчик чата (`src/socket/chatHandler.ts`):
+- Авторизация по JWT при handshake
+- Комнаты: `user:${userId}` (личные уведомления), `conv:${conversationId}` (сообщения)
+- События: `join_conversation`, `leave_conversation`, `send_message`, `typing`, `mark_read`
+- При отправке сообщения: сохранение в БД → emit в комнату → Web Push → уведомление в БД
+
+## Структура фронтенда
+
+- **API клиент** (`fot-app/src/api/client.ts`): кастомный `apiClient` с методами `get/post/put/patch/delete`, авто-подстановка Bearer токена, `ApiError` класс. Base URL: `VITE_API_URL` или `http://localhost:3000/api`.
+- **Стейт**: React Context для UI (Auth, Toast, Chat) + TanStack React Query для серверных данных (`staleTime: 30s`, `gcTime: 5min`, `retry: 1`).
+- **Стили**: CSS Modules + CSS Variables (тёмная/светлая тема через `data-theme`). Дизайн-токены в `src/index.css`.
+- **Код-сплиттинг**: `vite.config.ts` — `manualChunks` по роутам и вендорам.
+
+## Валидация
+
+- **Zod** используется и на фронте (v4.x), и на бэкенде (v3.x) — API разный, учитывать при написании схем.
 
 ## Общие правила
 
@@ -101,6 +134,11 @@ export const Button: FC<IButtonProps> = ({ label, onClick, disabled = false }) =
 - **iPad** (768 × 1024 px и больше)
 
 CSS media queries для всех целевых устройств.
+
+## Документация
+
+- `DEPLOY.md` — инструкции по деплою на прод (PM2, nginx, Ubuntu)
+- `docs/` — 2FA, шифрование, миграции БД, Sigur API, бэклог
 
 ## КРАТКОСТЬ
 

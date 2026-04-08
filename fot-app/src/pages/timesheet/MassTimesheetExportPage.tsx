@@ -6,10 +6,6 @@ import { getMonthLabel } from '../../utils/calendarUtils';
 import type { OrgDepartmentNode } from '../../types';
 import './MassTimesheetExportPage.css';
 
-interface ICheckedState {
-  checkedIds: Set<string>;
-}
-
 const collectAllIds = (nodes: OrgDepartmentNode[]): string[] => {
   const ids: string[] = [];
   for (const n of nodes) {
