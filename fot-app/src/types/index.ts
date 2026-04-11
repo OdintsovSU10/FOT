@@ -4,3 +4,4 @@ export * from './skud';
 export * from './organization';
 export * from './timesheet';
 export * from './dashboard';
+export * from './travel';

@@ -9,6 +9,12 @@ export interface TimesheetEntry {
   work_date: string;
   status: TimesheetStatus;
   hours_worked: number | null;
+  base_hours_worked?: number | null;
+  travel_minutes_credited?: number;
+  travel_hours_credited?: number;
+  travel_delay_minutes?: number;
+  travel_segments_count?: number;
+  travel_problematic_segments?: number;
   is_correction: boolean;
   notes?: string | null;
   first_entry?: string | null;
