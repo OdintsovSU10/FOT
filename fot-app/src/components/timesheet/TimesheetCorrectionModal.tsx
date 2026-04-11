@@ -281,9 +281,9 @@ const ModalContent: FC<Omit<ICorrectionModalProps, 'open'>> = ({
       {correctionInfo?.is_correction && (
         <div className="ts-correction-info">
           <span className="ts-correction-info-icon">✎</span>
-          Скорректировано
-          {correctionInfo.corrected_at && `: ${formatCorrectionDate(correctionInfo.corrected_at)}`}
-          {correctionInfo.corrected_by_name && ` — ${correctionInfo.corrected_by_name}`}
+          Корректировка
+          {correctionInfo.corrected_by_name && `: ${correctionInfo.corrected_by_name}`}
+          {correctionInfo.corrected_at && `${correctionInfo.corrected_by_name ? ', ' : ': '}${formatCorrectionDate(correctionInfo.corrected_at)}`}
         </div>
       )}
 

@@ -45,6 +45,10 @@ temp/
 
 # Data exports
 *.xlsx
+*.xls
+
+# Local agent scratch
+.codex-skill-build/
 
 # Unused Go modules (future migration)
 fot-core/

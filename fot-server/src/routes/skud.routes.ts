@@ -96,6 +96,76 @@ router.get(
   skudController.getAccessPointSettings
 );
 
+// GET /api/skud/travel-objects - объекты для группировки точек доступа (header+)
+router.get(
+  '/travel-objects',
+  requireMinPosition('header'),
+  skudController.getTravelObjects
+);
+
+// POST /api/skud/travel-objects - создать объект (admin+)
+router.post(
+  '/travel-objects',
+  requireMinPosition('admin'),
+  skudController.createTravelObject
+);
+
+// PUT /api/skud/travel-objects/:id - обновить объект и его точки доступа (admin+)
+router.put(
+  '/travel-objects/:id',
+  requireMinPosition('admin'),
+  skudController.updateTravelObject
+);
+
+// DELETE /api/skud/travel-objects/:id - удалить объект (admin+)
+router.delete(
+  '/travel-objects/:id',
+  requireMinPosition('admin'),
+  skudController.deleteTravelObject
+);
+
+// GET /api/skud/travel-routes - маршруты между объектами (header+)
+router.get(
+  '/travel-routes',
+  requireMinPosition('header'),
+  skudController.getTravelRoutes
+);
+
+// POST /api/skud/travel-routes - создать маршрут (admin+)
+router.post(
+  '/travel-routes',
+  requireMinPosition('admin'),
+  skudController.createTravelRoute
+);
+
+// PUT /api/skud/travel-routes/:id - обновить маршрут (admin+)
+router.put(
+  '/travel-routes/:id',
+  requireMinPosition('admin'),
+  skudController.updateTravelRoute
+);
+
+// DELETE /api/skud/travel-routes/:id - удалить маршрут (admin+)
+router.delete(
+  '/travel-routes/:id',
+  requireMinPosition('admin'),
+  skudController.deleteTravelRoute
+);
+
+// GET /api/skud/travel-segments - предрасчитанные передвижения сотрудников (header+)
+router.get(
+  '/travel-segments',
+  requireMinPosition('header'),
+  skudController.getTravelSegments
+);
+
+// POST /api/skud/travel-segments/rebuild - принудительный пересчёт передвижений (header+)
+router.post(
+  '/travel-segments/rebuild',
+  requireMinPosition('header'),
+  skudController.rebuildTravelSegments
+);
+
 // PUT /api/skud/access-point-settings - сохранение настроек точек доступа (admin+)
 router.put(
   '/access-point-settings',

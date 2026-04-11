@@ -57,6 +57,33 @@ export const employeeService = {
     return { data: response.data || [], meta: response.meta || { page: 1, pageSize: 50, total: 0, totalPages: 0 } };
   },
 
+  async getFilteredIds(params: Omit<PaginatedParams, 'page' | 'pageSize'>): Promise<number[]> {
+    const pageSize = 200;
+    const firstPage = await this.getPaginated({
+      ...params,
+      page: 1,
+      pageSize,
+    });
+
+    const ids = firstPage.data.map(employee => employee.id);
+    const totalPages = Math.max(1, firstPage.meta.totalPages || 1);
+    if (totalPages === 1) return ids;
+
+    const restPages = await Promise.all(
+      Array.from({ length: totalPages - 1 }, (_, index) => this.getPaginated({
+        ...params,
+        page: index + 2,
+        pageSize,
+      })),
+    );
+
+    for (const page of restPages) {
+      ids.push(...page.data.map(employee => employee.id));
+    }
+
+    return Array.from(new Set(ids));
+  },
+
   /** Счётчики сотрудников — дешёвый отдельный эндпоинт, серверный кэш 60с */
   async getCounts(archived = false): Promise<EmployeeCounts> {
     const qs = archived ? '?archived=true' : '';

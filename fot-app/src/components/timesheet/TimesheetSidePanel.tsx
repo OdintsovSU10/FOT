@@ -1,15 +1,20 @@
 import { type FC, useMemo, useState, useEffect, useCallback } from 'react';
 import { X, ChevronDown, ChevronRight, LogIn, LogOut, Timer } from 'lucide-react';
-import type { TimesheetEntry, TimesheetEmployee, SkudEvent } from '../../types';
+import type { TimesheetEntry, TimesheetEmployee, SkudEvent, IProductionCalendarMonth } from '../../types';
+import type { IResolvedSchedule } from '../../types/schedule';
 import { skudService } from '../../services/skudService';
 import {
   getDaysInMonth,
-  isWeekend,
   formatDateRu,
   getWeekdayFull,
   isToday,
-  getWorkingDaysUpToToday,
 } from '../../utils/calendarUtils';
+import {
+  getEffectiveLateThresholdForDay,
+  getScheduleForTimesheetDay,
+  getWorkHoursForDay,
+  isScheduleDayOff,
+} from '../../utils/scheduleUtils';
 
 interface ISidePanelProps {
   open: boolean;
@@ -18,6 +23,9 @@ interface ISidePanelProps {
   entries: TimesheetEntry[];
   year: number;
   month: number;
+  schedules?: Record<number, IResolvedSchedule>;
+  dailySchedules?: Record<number, Record<string, IResolvedSchedule>>;
+  calendar?: IProductionCalendarMonth | null;
 }
 
 interface IDayEvents {
@@ -120,6 +128,9 @@ export const TimesheetSidePanel: FC<ISidePanelProps> = ({
   entries,
   year,
   month,
+  schedules = {},
+  dailySchedules = {},
+  calendar = null,
 }) => {
   const [expandedDays, setExpandedDays] = useState<Set<number>>(new Set());
   const [skudEvents, setSkudEvents] = useState<Map<string, IDayEvents>>(new Map());
@@ -175,25 +186,41 @@ export const TimesheetSidePanel: FC<ISidePanelProps> = ({
     }> = [];
 
     for (let d = 1; d <= daysCount; d++) {
-      const weekend = isWeekend(year, month, d);
-      if (weekend) continue;
-
       const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
       const entry = entries.find(e => e.work_date === dateStr) || null;
+      const sched = getScheduleForTimesheetDay(schedules, dailySchedules, employee.id, year, month, d);
+      const dayOff = isScheduleDayOff(sched, calendar, year, month, d);
+      if (dayOff && !entry) continue;
 
       const dayDate = new Date(year, month - 1, d);
       const today = new Date();
       today.setHours(23, 59, 59, 999);
       if (dayDate > today) continue;
 
-      details.push({ day: d, entry, isWeekend: weekend });
+      details.push({ day: d, entry, isWeekend: dayOff });
     }
 
     return details;
-  }, [employee, entries, year, month]);
+  }, [employee, entries, year, month, schedules, dailySchedules, calendar]);
 
   const stats = useMemo(() => {
-    const normHours = getWorkingDaysUpToToday(year, month) * 8;
+    const normHours = employee ? (() => {
+      const daysCount = getDaysInMonth(year, month);
+      let total = 0;
+      const now = new Date();
+      now.setHours(23, 59, 59, 999);
+
+      for (let d = 1; d <= daysCount; d++) {
+        const dayDate = new Date(year, month - 1, d);
+        if (dayDate > now) continue;
+
+        const sched = getScheduleForTimesheetDay(schedules, dailySchedules, employee.id, year, month, d);
+        if (isScheduleDayOff(sched, calendar, year, month, d)) continue;
+        total += getWorkHoursForDay(sched, year, month, d);
+      }
+
+      return total;
+    })() : 0;
     let factHours = 0;
     let lateCount = 0;
     let absentCount = 0;
@@ -201,11 +228,17 @@ export const TimesheetSidePanel: FC<ISidePanelProps> = ({
     for (const entry of entries) {
       if (entry.hours_worked) factHours += entry.hours_worked;
       if (entry.status === 'absent') absentCount++;
-      if (entry.status === 'work' && entry.first_entry && entry.first_entry > '09:00:00') lateCount++;
+      if (entry.status === 'work' && entry.first_entry) {
+        const [entryYear, entryMonth, entryDay] = entry.work_date.split('-').map(Number);
+        const sched = getScheduleForTimesheetDay(schedules, dailySchedules, entry.employee_id, entryYear, entryMonth, entryDay);
+        const threshold = getEffectiveLateThresholdForDay(sched, entryYear, entryMonth, entryDay);
+        const firstEntry = entry.first_entry.length === 5 ? `${entry.first_entry}:00` : entry.first_entry;
+        if (firstEntry > threshold) lateCount++;
+      }
     }
 
     return { factHours, normHours, lateCount, absentCount };
-  }, [entries, year, month]);
+  }, [entries, year, month, employee, schedules, dailySchedules, calendar]);
 
   const getHoursClass = (entry: TimesheetEntry | null): string => {
     if (!entry) return 'ts-day-detail-hours--absent';

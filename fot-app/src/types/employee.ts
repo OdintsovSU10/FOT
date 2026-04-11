@@ -37,6 +37,9 @@ export interface Employee {
   created_at: string;
   updated_at: string;
   work_category: string | null;
+  schedule_override_id?: string | null;
+  schedule_override_name?: string | null;
+  schedule_override_effective_from?: string | null;
 }
 
 // Типы для обогащения сотрудников из Excel

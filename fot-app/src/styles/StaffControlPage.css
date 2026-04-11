@@ -125,6 +125,28 @@
   gap: 8px;
 }
 
+.sc-bulk-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  border: 1px solid rgba(var(--primary-rgb, 59, 130, 246), 0.24);
+  border-radius: var(--radius-md);
+  background: rgba(var(--primary-rgb, 59, 130, 246), 0.08);
+}
+
+.sc-bulk-info {
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.sc-bulk-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .sc-btn.secondary {
   background: var(--surface);
   color: var(--text-secondary);
@@ -195,6 +217,12 @@
   text-align: center;
 }
 
+.sc-th-check,
+.sc-td-check {
+  width: 44px;
+  text-align: center;
+}
+
 .sc-th-hist {
   width: 42px;
 }
@@ -206,6 +234,12 @@
 
 .sc-table tbody tr:hover {
   background: var(--bg-secondary);
+}
+
+.sc-row--selected,
+.sc-row--selected:nth-child(even),
+.sc-row--selected:hover {
+  background: rgba(var(--primary-rgb, 59, 130, 246), 0.12) !important;
 }
 
 .sc-table tbody tr:nth-child(even) {
@@ -226,6 +260,13 @@
   text-align: center;
   color: var(--text-muted);
   font-size: 12px;
+}
+
+.sc-check {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+  accent-color: var(--primary);
 }
 
 .sc-td-name {
@@ -280,6 +321,53 @@
   opacity: 1 !important;
   background: var(--primary);
   color: #fff;
+}
+
+.sc-schedule-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.sc-schedule-name {
+  min-width: 0;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sc-schedule-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border: 1px solid transparent;
+  flex-shrink: 0;
+}
+
+.sc-schedule-badge.employee {
+  background: rgba(14, 165, 233, 0.14);
+  border-color: rgba(14, 165, 233, 0.28);
+  color: #38bdf8;
+}
+
+.sc-schedule-badge.category {
+  background: rgba(34, 197, 94, 0.14);
+  border-color: rgba(34, 197, 94, 0.28);
+  color: #4ade80;
+}
+
+.sc-schedule-badge.default {
+  background: rgba(148, 163, 184, 0.14);
+  border-color: rgba(148, 163, 184, 0.28);
+  color: #cbd5e1;
 }
 
 /* ── History button ── */
@@ -742,6 +830,23 @@
   box-shadow: 0 0 0 2px rgba(var(--primary-rgb, 59, 130, 246), 0.15);
 }
 
+.sc-schedule-help {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.sc-schedule-help strong {
+  color: var(--text-primary);
+}
+
 .sc-modal-footer {
   display: flex;
   justify-content: flex-end;
@@ -758,6 +863,11 @@
   cursor: pointer;
   border: 1px solid var(--border);
   transition: all var(--transition);
+}
+
+.sc-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .sc-btn.cancel {
@@ -781,7 +891,6 @@
 
 .sc-btn.apply:disabled {
   opacity: 0.5;
-  cursor: not-allowed;
 }
 
 /* ── Pagination ── */
@@ -821,8 +930,20 @@
   transition: background var(--transition);
 }
 
+.sc-card--selected {
+  border-color: rgba(var(--primary-rgb, 59, 130, 246), 0.45);
+  box-shadow: 0 0 0 1px rgba(var(--primary-rgb, 59, 130, 246), 0.18);
+}
+
 .sc-card:active {
   background: var(--bg-secondary);
+}
+
+.sc-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
 }
 
 .sc-card-name {
@@ -832,9 +953,15 @@
   margin-bottom: 8px;
 }
 
+.sc-card-check {
+  flex-shrink: 0;
+}
+
 .sc-card-row {
   display: flex;
   justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
   font-size: 13px;
   padding: 3px 0;
   color: var(--text-primary);
@@ -842,6 +969,21 @@
 
 .sc-card-label {
   color: var(--text-muted);
+}
+
+.sc-card-row > span:last-child {
+  min-width: 0;
+  text-align: right;
+}
+
+.sc-card-row .sc-schedule-cell {
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.sc-card-row .sc-schedule-name {
+  max-width: 160px;
+  white-space: normal;
 }
 
 .sc-card-actions {
@@ -858,6 +1000,15 @@
   .sc-filters {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .sc-bulk-bar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .sc-bulk-actions {
+    justify-content: flex-end;
   }
 
   .sc-filter-dept select {

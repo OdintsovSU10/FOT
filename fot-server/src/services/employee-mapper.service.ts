@@ -50,6 +50,12 @@ export async function loadStructureCache(): Promise<StructureCache> {
   return cache;
 }
 
+const parseOptionalNumber = (value: string | number | null | undefined): number | null => {
+  if (value === null || value === undefined || value === '') return null;
+  const parsed = typeof value === 'number' ? value : parseFloat(value);
+  return Number.isNaN(parsed) ? null : parsed;
+};
+
 /**
  * Лёгкая расшифровка для списка — только full_name + lookup из кэша
  */
@@ -62,12 +68,12 @@ export function decryptEmployeeList(encrypted: EmployeeEncrypted, structureCache
     middle_name: null,
     position_name: encrypted.position_id ? structureCache.positions.get(encrypted.position_id) || null : null,
     position_id: encrypted.position_id,
-    current_salary: null,
-    salary_actual: null,
-    salary_calculated: null,
-    staff_units: null,
+    current_salary: parseOptionalNumber(encrypted.current_salary),
+    salary_actual: parseOptionalNumber(encrypted.salary_actual),
+    salary_calculated: parseOptionalNumber(encrypted.salary_calculated),
+    staff_units: parseOptionalNumber(encrypted.staff_units),
     birth_date: null,
-    hire_date: '',
+    hire_date: encrypted.hire_date || '',
     country: null,
     pension_number: null,
     patent_issue_date: null,
@@ -104,10 +110,10 @@ export function decryptEmployee(encrypted: EmployeeEncrypted, structureCache: St
     middle_name: encrypted.middle_name || null,
     position_name: encrypted.position_id ? structureCache.positions.get(encrypted.position_id) || null : null,
     position_id: encrypted.position_id,
-    current_salary: encrypted.current_salary ? parseFloat(encrypted.current_salary) : null,
-    salary_actual: encrypted.salary_actual ? parseFloat(encrypted.salary_actual) : null,
-    salary_calculated: encrypted.salary_calculated ? parseFloat(encrypted.salary_calculated) : null,
-    staff_units: encrypted.staff_units ? parseFloat(encrypted.staff_units) : null,
+    current_salary: parseOptionalNumber(encrypted.current_salary),
+    salary_actual: parseOptionalNumber(encrypted.salary_actual),
+    salary_calculated: parseOptionalNumber(encrypted.salary_calculated),
+    staff_units: parseOptionalNumber(encrypted.staff_units),
     birth_date: encrypted.birth_date || null,
     hire_date: encrypted.hire_date || '',
     country: encrypted.country || null,

@@ -51,5 +51,6 @@ export interface TimesheetResponse {
   entries: TimesheetEntry[];
   stats: TimesheetStats;
   schedules?: Record<number, IResolvedSchedule>;
+  daily_schedules?: Record<number, Record<string, IResolvedSchedule>>;
   calendar?: IProductionCalendarMonth | null;
 }

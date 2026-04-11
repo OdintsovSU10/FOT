@@ -1,6 +1,7 @@
 import { type FC, useMemo } from 'react';
 import type { TimesheetEntry, TimesheetEmployee, TimesheetStatus } from '../../types';
 import type { IResolvedSchedule } from '../../types/schedule';
+import type { IProductionCalendarMonth } from '../../types/timesheet';
 import {
   getDaysInMonth,
   isWeekend,
@@ -8,7 +9,12 @@ import {
   isToday,
   isFutureDay,
 } from '../../utils/calendarUtils';
-import { getWorkHoursForDay } from '../../utils/scheduleUtils';
+import {
+  getScheduleForTimesheetDay,
+  getWorkHoursForDay,
+  getFullDayThresholdHoursForDay,
+  isScheduleDayOff,
+} from '../../utils/scheduleUtils';
 
 interface ITimesheetGridProps {
   employees: TimesheetEmployee[];
@@ -16,21 +22,12 @@ interface ITimesheetGridProps {
   year: number;
   month: number;
   schedules?: Record<number, IResolvedSchedule>;
+  dailySchedules?: Record<number, Record<string, IResolvedSchedule>>;
+  calendar?: IProductionCalendarMonth | null;
   compact?: boolean;
   onEmployeeClick: (employee: TimesheetEmployee) => void;
   onDayClick: (employee: TimesheetEmployee, day: number, entry: TimesheetEntry | null) => void;
 }
-
-/** ISO day-of-week: 1=Пн..7=Вс */
-const getISODow = (date: Date): number => {
-  const d = date.getDay();
-  return d === 0 ? 7 : d;
-};
-
-const isScheduleDayOff = (sched: IResolvedSchedule | undefined, year: number, month: number, day: number): boolean => {
-  if (!sched) return isWeekend(year, month, day);
-  return !sched.work_days.includes(getISODow(new Date(year, month - 1, day)));
-};
 
 interface IRowData {
   employee: TimesheetEmployee;
@@ -73,10 +70,10 @@ const abbreviateName = (fullName: string): string => {
   return `${parts[0]} ${parts.slice(1).map(p => p[0] ? p[0] + '.' : '').join('')}`;
 };
 
-const getDayCellClass = (entry: TimesheetEntry | null, weekend: boolean, today: boolean, future: boolean, workHoursNorm = 8): string => {
+const getDayCellClass = (entry: TimesheetEntry | null, weekend: boolean, today: boolean, future: boolean, thresholdHours = 8): string => {
   const classes = ['ts-day'];
   if (today) classes.push('ts-day--today');
-  if (weekend) {
+  if (weekend && !entry) {
     classes.push('ts-day--weekend');
     return classes.join(' ');
   }
@@ -87,7 +84,7 @@ const getDayCellClass = (entry: TimesheetEntry | null, weekend: boolean, today: 
   switch (entry.status) {
     case 'work':
     case 'manual':
-      if (entry.hours_worked && entry.hours_worked >= workHoursNorm) classes.push('ts-day--full');
+      if (entry.hours_worked && entry.hours_worked >= thresholdHours) classes.push('ts-day--full');
       else classes.push('ts-day--partial');
       break;
     case 'remote':
@@ -112,7 +109,7 @@ const getDayCellClass = (entry: TimesheetEntry | null, weekend: boolean, today: 
 };
 
 const getDayCellText = (entry: TimesheetEntry | null, weekend: boolean): string => {
-  if (weekend) return '—';
+  if (weekend && !entry) return '—';
   if (!entry) return '';
   const special = STATUS_CELL_TEXT[entry.status];
   if (special) return special;
@@ -126,6 +123,8 @@ export const TimesheetGrid: FC<ITimesheetGridProps> = ({
   year,
   month,
   schedules = {},
+  dailySchedules = {},
+  calendar = null,
   compact = false,
   onEmployeeClick,
   onDayClick,
@@ -144,7 +143,6 @@ export const TimesheetGrid: FC<ITimesheetGridProps> = ({
     const isCurrentMonth = now.getFullYear() === year && now.getMonth() + 1 === month;
 
     return employees.map(emp => {
-      const sched = schedules[emp.id];
       const dayMap = new Map<number, TimesheetEntry>();
       let factHours = 0;
       let normHours = 0;
@@ -158,7 +156,8 @@ export const TimesheetGrid: FC<ITimesheetGridProps> = ({
         }
 
         // Считаем норму часов до сегодня с учётом day_overrides
-        const dayOff = isScheduleDayOff(sched, year, month, d);
+        const sched = getScheduleForTimesheetDay(schedules, dailySchedules, emp.id, year, month, d);
+        const dayOff = isScheduleDayOff(sched, calendar, year, month, d);
         const isPast = !isCurrentMonth || d <= todayDate;
         if (!dayOff && isPast) {
           normHours += getWorkHoursForDay(sched, year, month, d);
@@ -167,7 +166,7 @@ export const TimesheetGrid: FC<ITimesheetGridProps> = ({
 
       return { employee: emp, days: dayMap, factHours, normHours };
     });
-  }, [employees, entries, year, month, schedules]);
+  }, [employees, entries, year, month, schedules, dailySchedules, calendar]);
 
   return (
     <div className="ts-table-container">
@@ -241,22 +240,20 @@ export const TimesheetGrid: FC<ITimesheetGridProps> = ({
                     {!compact && <div className="ts-employee-role">{row.employee.position_name || '—'}</div>}
                   </td>
                   {days.map(d => {
-                    const sched = schedules[row.employee.id];
-                    const dayOff = isScheduleDayOff(sched, year, month, d);
+                    const sched = getScheduleForTimesheetDay(schedules, dailySchedules, row.employee.id, year, month, d);
+                    const dayOff = isScheduleDayOff(sched, calendar, year, month, d);
                     const today = isToday(year, month, d);
                     const future = isFutureDay(year, month, d);
                     const entry = row.days.get(d) || null;
-                    const workHoursNorm = getWorkHoursForDay(sched, year, month, d);
-                    const cls = getDayCellClass(entry, dayOff, today, future, workHoursNorm);
+                    const thresholdHours = getFullDayThresholdHoursForDay(sched, calendar, year, month, d);
+                    const cls = getDayCellClass(entry, dayOff, today, future, thresholdHours);
                     const text = getDayCellText(entry, dayOff);
 
                     return (
                       <td
                         key={d}
                         className={cls}
-                        onClick={() => {
-                          if (!dayOff) onDayClick(row.employee, d, entry);
-                        }}
+                        onClick={() => onDayClick(row.employee, d, entry)}
                       >
                         {text}
                       </td>

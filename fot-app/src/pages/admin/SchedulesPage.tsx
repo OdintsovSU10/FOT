@@ -3,6 +3,7 @@ import { scheduleService } from '../../services/scheduleService';
 import { workCategoryService } from '../../services/workCategoryService';
 import { ProductionCalendarPage } from '../super-admin/ProductionCalendarPage';
 import type {
+  IDayOverride,
   IWorkSchedule,
   ICategorySchedule,
   IWorkCategory,
@@ -14,6 +15,7 @@ import {
   SCHEDULE_TYPE_LABELS,
   WEEKDAY_LABELS,
 } from '../../types/schedule';
+import { parseHMToMinutes, minutesToHM } from '../../utils/scheduleUtils';
 import styles from './SchedulesPage.module.css';
 
 type TabKey = 'templates' | 'category-assignments' | 'category-manage' | 'production-calendar';
@@ -26,10 +28,13 @@ interface IFormState {
   work_start: string;
   work_end: string;
   work_days: number[];
+  day_overrides: Partial<Record<number, Pick<IDayOverride, 'work_start' | 'work_end'>>>;
   lunch_minutes: number;
   respects_holidays: boolean;
   expected_saturdays_per_month: number;
   late_threshold_minutes: number;
+  full_day_threshold: string;          // "HH:MM", "" = авто (чистое время)
+  weekend_full_day_threshold: string;  // "HH:MM", "" = авто (= full_day_threshold)
 }
 
 const EMPTY_FORM: IFormState = {
@@ -40,11 +45,20 @@ const EMPTY_FORM: IFormState = {
   work_start: '09:00',
   work_end: '18:00',
   work_days: [1, 2, 3, 4, 5],
+  day_overrides: {},
   lunch_minutes: 35,
   respects_holidays: true,
   expected_saturdays_per_month: 0,
   late_threshold_minutes: 0,
+  full_day_threshold: '',
+  weekend_full_day_threshold: '',
 };
+
+const createEmptyForm = (): IFormState => ({
+  ...EMPTY_FORM,
+  work_days: [...EMPTY_FORM.work_days],
+  day_overrides: {},
+});
 
 const formatHours = (decimalHours: number): string => {
   const total = Math.max(0, Math.round(decimalHours * 60));
@@ -52,6 +66,22 @@ const formatHours = (decimalHours: number): string => {
   const m = total % 60;
   return `${h}:${String(m).padStart(2, '0')}`;
 };
+
+const formatMinutes = (minutes: number): string => {
+  const total = Math.max(0, Math.round(minutes));
+  const h = Math.floor(total / 60);
+  const m = total % 60;
+  return `${h}:${String(m).padStart(2, '0')}`;
+};
+
+const getLocalISODate = (): string => {
+  const now = new Date();
+  const offsetMs = now.getTimezoneOffset() * 60_000;
+  return new Date(now.getTime() - offsetMs).toISOString().slice(0, 10);
+};
+
+const isActiveScheduleAssignment = (effectiveFrom: string, effectiveTo: string | null, date: string): boolean =>
+  effectiveFrom <= date && (effectiveTo === null || effectiveTo > date);
 
 /** Длина смены по началу/концу (с учётом ночной смены) в десятичных часах */
 const computeShiftHours = (start: string, end: string): number => {
@@ -63,6 +93,29 @@ const computeShiftHours = (start: string, end: string): number => {
   return minutes / 60;
 };
 
+const buildDayOverrideDrafts = (
+  overrides: IWorkSchedule['day_overrides'],
+): Partial<Record<number, Pick<IDayOverride, 'work_start' | 'work_end'>>> => {
+  if (!overrides) return {};
+  return Object.fromEntries(
+    Object.entries(overrides).map(([day, override]) => [
+      Number(day),
+      {
+        work_start: override.work_start.slice(0, 5),
+        work_end: override.work_end.slice(0, 5),
+      },
+    ]),
+  ) as Partial<Record<number, Pick<IDayOverride, 'work_start' | 'work_end'>>>;
+};
+
+const formatDayOverridesSummary = (overrides: IWorkSchedule['day_overrides']): string => {
+  if (!overrides) return '';
+  return Object.entries(overrides)
+    .sort(([dayA], [dayB]) => Number(dayA) - Number(dayB))
+    .map(([day, override]) => `${WEEKDAY_LABELS[Number(day) - 1]} ${override.work_start.slice(0, 5)}-${override.work_end.slice(0, 5)}`)
+    .join(', ');
+};
+
 const PATTERN_PRESETS: Record<PatternType, Partial<IFormState>> = {
   '5+0': { work_days: [1, 2, 3, 4, 5], expected_saturdays_per_month: 0 },
   '5+2': { work_days: [1, 2, 3, 4, 5], expected_saturdays_per_month: 2 },
@@ -71,6 +124,7 @@ const PATTERN_PRESETS: Record<PatternType, Partial<IFormState>> = {
 };
 
 export const SchedulesPage: FC = () => {
+  const today = getLocalISODate();
   const [tab, setTab] = useState<TabKey>('templates');
   const [templates, setTemplates] = useState<IWorkSchedule[]>([]);
   const [assignments, setAssignments] = useState<ICategorySchedule[]>([]);
@@ -79,7 +133,7 @@ export const SchedulesPage: FC = () => {
   const [error, setError] = useState('');
 
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState<IFormState>(EMPTY_FORM);
+  const [form, setForm] = useState<IFormState>(createEmptyForm());
 
   // Форма категории
   const [showCategoryForm, setShowCategoryForm] = useState(false);
@@ -132,30 +186,71 @@ export const SchedulesPage: FC = () => {
       work_start: tpl.work_start.slice(0, 5),
       work_end: tpl.work_end.slice(0, 5),
       work_days: tpl.work_days,
+      day_overrides: buildDayOverrideDrafts(tpl.day_overrides),
       lunch_minutes: tpl.lunch_minutes,
       respects_holidays: tpl.respects_holidays,
       expected_saturdays_per_month: tpl.expected_saturdays_per_month,
       late_threshold_minutes: tpl.late_threshold_minutes,
+      full_day_threshold: minutesToHM(tpl.full_day_threshold_minutes),
+      weekend_full_day_threshold: minutesToHM(tpl.weekend_full_day_threshold_minutes),
     });
     setShowForm(true);
   };
 
   const handleStartCreate = () => {
-    setForm(EMPTY_FORM);
+    setForm(createEmptyForm());
     setShowForm(true);
   };
 
   const handlePatternChange = (pattern: PatternType) => {
-    const preset = PATTERN_PRESETS[pattern];
-    setForm(f => ({ ...f, pattern_type: pattern, ...preset }));
+    setForm(f => {
+      const preset = PATTERN_PRESETS[pattern];
+      const nextWorkDays = preset.work_days ?? f.work_days;
+      const nextDayOverrides = Object.fromEntries(
+        Object.entries(f.day_overrides).filter(([day]) => nextWorkDays.includes(Number(day))),
+      ) as Partial<Record<number, Pick<IDayOverride, 'work_start' | 'work_end'>>>;
+      return { ...f, pattern_type: pattern, ...preset, work_days: nextWorkDays, day_overrides: nextDayOverrides };
+    });
   };
 
   const toggleWorkDay = (day: number) => {
     setForm(f => {
       const has = f.work_days.includes(day);
       const next = has ? f.work_days.filter(d => d !== day) : [...f.work_days, day].sort();
-      return { ...f, work_days: next.length > 0 ? next : f.work_days };
+      if (next.length === 0) return f;
+      const nextDayOverrides = { ...f.day_overrides };
+      if (has) delete nextDayOverrides[day];
+      return { ...f, work_days: next, day_overrides: nextDayOverrides };
     });
+  };
+
+  const toggleDayOverride = (day: number) => {
+    setForm(f => {
+      const nextDayOverrides = { ...f.day_overrides };
+      if (nextDayOverrides[day]) {
+        delete nextDayOverrides[day];
+      } else {
+        nextDayOverrides[day] = {
+          work_start: f.work_start,
+          work_end: f.work_end,
+        };
+      }
+      return { ...f, day_overrides: nextDayOverrides };
+    });
+  };
+
+  const updateDayOverride = (day: number, field: 'work_start' | 'work_end', value: string) => {
+    setForm(f => ({
+      ...f,
+      day_overrides: {
+        ...f.day_overrides,
+        [day]: {
+          work_start: f.day_overrides[day]?.work_start ?? f.work_start,
+          work_end: f.day_overrides[day]?.work_end ?? f.work_end,
+          [field]: value,
+        },
+      },
+    }));
   };
 
   const handleSave = async () => {
@@ -166,6 +261,36 @@ export const SchedulesPage: FC = () => {
         setError('Некорректное время начала/конца смены');
         return;
       }
+      const fullDayMin = form.full_day_threshold ? parseHMToMinutes(form.full_day_threshold) : null;
+      if (form.full_day_threshold && fullDayMin === null) {
+        setError('Порог полного дня: формат ЧЧ:ММ');
+        return;
+      }
+      const weekendFullDayMin = form.weekend_full_day_threshold
+        ? parseHMToMinutes(form.weekend_full_day_threshold)
+        : null;
+      if (form.weekend_full_day_threshold && weekendFullDayMin === null) {
+        setError('Порог полного дня (выходной): формат ЧЧ:ММ');
+        return;
+      }
+      const dayOverridesPayload: Record<string, IDayOverride> = {};
+      for (const day of form.work_days) {
+        const override = form.day_overrides[day];
+        if (!override) continue;
+        const overrideHours = computeShiftHours(override.work_start, override.work_end);
+        if (overrideHours <= 0) {
+          setError(`Некорректное время для дня ${WEEKDAY_LABELS[day - 1]}`);
+          return;
+        }
+        if (override.work_start === form.work_start && override.work_end === form.work_end) {
+          continue;
+        }
+        dayOverridesPayload[String(day)] = {
+          work_start: override.work_start,
+          work_end: override.work_end,
+          work_hours: Number(overrideHours.toFixed(4)),
+        };
+      }
       const payload = {
         name: form.name.trim(),
         schedule_type: form.schedule_type,
@@ -175,11 +300,13 @@ export const SchedulesPage: FC = () => {
         work_hours: Number(computedHours.toFixed(4)),
         work_days: form.work_days,
         office_days: null,
-        day_overrides: null,
+        day_overrides: Object.keys(dayOverridesPayload).length > 0 ? dayOverridesPayload : null,
         lunch_minutes: form.lunch_minutes,
         respects_holidays: form.respects_holidays,
         expected_saturdays_per_month: form.expected_saturdays_per_month,
         late_threshold_minutes: form.late_threshold_minutes,
+        full_day_threshold_minutes: fullDayMin,
+        weekend_full_day_threshold_minutes: weekendFullDayMin,
       };
       if (!payload.name) {
         setError('Название обязательно');
@@ -191,7 +318,7 @@ export const SchedulesPage: FC = () => {
         await scheduleService.create(payload);
       }
       setShowForm(false);
-      setForm(EMPTY_FORM);
+      setForm(createEmptyForm());
       await loadAll();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Ошибка сохранения');
@@ -209,15 +336,15 @@ export const SchedulesPage: FC = () => {
     }
   };
 
-  // Для каждой активной категории — текущее назначение (effective_to=null)
+  // Для каждой активной категории — текущее назначение на сегодня
   const activeAssignments = useMemo(() => {
     const map = new Map<string, ICategorySchedule | null>();
     for (const cat of workCategories.filter(c => c.is_active)) {
-      const active = assignments.find(a => a.category === cat.code && a.effective_to === null) || null;
+      const active = assignments.find(a => a.category === cat.code && isActiveScheduleAssignment(a.effective_from, a.effective_to, today)) || null;
       map.set(cat.code, active);
     }
     return map;
-  }, [workCategories, assignments]);
+  }, [workCategories, assignments, today]);
 
   const handleAssignCategory = async (category: string, scheduleId: string) => {
     setError('');
@@ -227,7 +354,7 @@ export const SchedulesPage: FC = () => {
       } else {
         await scheduleService.assignCategory(category, {
           schedule_id: scheduleId,
-          effective_from: new Date().toISOString().slice(0, 10),
+          effective_from: today,
         });
       }
       await loadAll();
@@ -438,6 +565,24 @@ export const SchedulesPage: FC = () => {
                   }
                 />
               </label>
+              <label title="Ниже этого значения день считается недоработкой (жёлтый), выше — полный день (зелёный). Пусто = чистое время смены (без обеда).">
+                Порог полного дня (ЧЧ:ММ)
+                <input
+                  type="time"
+                  value={form.full_day_threshold}
+                  onChange={e => setForm({ ...form, full_day_threshold: e.target.value })}
+                  placeholder="авто"
+                />
+              </label>
+              <label title="Порог для дней, когда сотрудник вышел в выходной. Пусто = использовать обычный порог.">
+                Порог полного дня, выходной (ЧЧ:ММ)
+                <input
+                  type="time"
+                  value={form.weekend_full_day_threshold}
+                  onChange={e => setForm({ ...form, weekend_full_day_threshold: e.target.value })}
+                  placeholder="авто"
+                />
+              </label>
               <div style={{ gridColumn: '1 / -1' }}>
                 <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 6 }}>
                   Рабочие дни
@@ -455,6 +600,75 @@ export const SchedulesPage: FC = () => {
                       >
                         {label}
                       </button>
+                    );
+                  })}
+                </div>
+              </div>
+              <div className={styles.dayOverridesSection}>
+                <div className={styles.sectionTitle}>Детальная настройка по дням</div>
+                <div className={styles.sectionHint}>
+                  Если, например, в пятницу короткий день, включите для пятницы своё время и задайте
+                  отдельное окончание смены.
+                </div>
+                <div className={styles.dayOverridesGrid}>
+                  {form.work_days.map(day => {
+                    const override = form.day_overrides[day];
+                    const dayStart = override?.work_start ?? form.work_start;
+                    const dayEnd = override?.work_end ?? form.work_end;
+                    const dayShiftHours = computeShiftHours(dayStart, dayEnd);
+                    const dayNetHours = formatMinutes(dayShiftHours * 60 - form.lunch_minutes);
+                    return (
+                      <div key={day} className={styles.dayOverrideCard}>
+                        <div className={styles.dayOverrideHeader}>
+                          <div>
+                            <div className={styles.dayOverrideTitle}>{WEEKDAY_LABELS[day - 1]}</div>
+                            <div className={styles.dayOverrideMeta}>
+                              {override ? 'Индивидуальное расписание' : `Общий график ${form.work_start}-${form.work_end}`}
+                            </div>
+                          </div>
+                          <label className={styles.dayOverrideToggle}>
+                            <input
+                              type="checkbox"
+                              checked={Boolean(override)}
+                              onChange={() => toggleDayOverride(day)}
+                            />
+                            Своё время
+                          </label>
+                        </div>
+
+                        {override ? (
+                          <div className={styles.dayOverrideFields}>
+                            <label>
+                              Начало
+                              <input
+                                type="time"
+                                value={dayStart}
+                                onChange={e => updateDayOverride(day, 'work_start', e.target.value)}
+                              />
+                            </label>
+                            <label>
+                              Конец
+                              <input
+                                type="time"
+                                value={dayEnd}
+                                onChange={e => updateDayOverride(day, 'work_end', e.target.value)}
+                              />
+                            </label>
+                            <label>
+                              Длина смены
+                              <input type="text" value={formatHours(dayShiftHours)} readOnly />
+                            </label>
+                          </div>
+                        ) : (
+                          <div className={styles.dayOverrideSummary}>
+                            Наследует общий график: {form.work_start}-{form.work_end}, смена {shiftLabel}
+                          </div>
+                        )}
+
+                        <div className={styles.dayOverrideSummary}>
+                          Чистое рабочее время: <strong>{dayNetHours}</strong>
+                        </div>
+                      </div>
                     );
                   })}
                 </div>
@@ -506,6 +720,11 @@ export const SchedulesPage: FC = () => {
                     <td>{PATTERN_TYPE_LABELS[t.pattern_type]}</td>
                     <td>
                       {t.work_start.slice(0, 5)}–{t.work_end.slice(0, 5)} ({formatHours(Number(t.work_hours))})
+                      {t.day_overrides && (
+                        <div className={styles.cellHint}>
+                          Особые дни: {formatDayOverridesSummary(t.day_overrides)}
+                        </div>
+                      )}
                     </td>
                     <td>{t.lunch_minutes} мин</td>
                     <td>{t.expected_saturdays_per_month}</td>

@@ -2,6 +2,7 @@ import { type FC, useState, useMemo } from 'react';
 import { X, ChevronDown, ChevronRight, Clock } from 'lucide-react';
 import type { TimesheetEntry, TimesheetEmployee } from '../../types';
 import type { IResolvedSchedule } from '../../types/schedule';
+import { getEffectiveLateThresholdForDay, getScheduleForTimesheetDay } from '../../utils/scheduleUtils';
 
 interface ILateRatingModalProps {
   open: boolean;
@@ -9,6 +10,7 @@ interface ILateRatingModalProps {
   employees: TimesheetEmployee[];
   entries: TimesheetEntry[];
   schedules?: Record<number, IResolvedSchedule>;
+  dailySchedules?: Record<number, Record<string, IResolvedSchedule>>;
 }
 
 interface ILateDay {
@@ -24,14 +26,6 @@ interface ILateEmployee {
 
 const DEFAULT_LATE_THRESHOLD = '09:00:00';
 
-const getEffectiveLateThreshold = (schedule: IResolvedSchedule): string => {
-  const [h, m, s] = schedule.work_start.split(':').map(Number);
-  const totalMin = h * 60 + m + schedule.late_threshold_minutes;
-  const hh = Math.floor(totalMin / 60);
-  const mm = totalMin % 60;
-  return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}:${String(s || 0).padStart(2, '0')}`;
-};
-
 const formatTime = (val: string | null): string => {
   if (!val) return '—';
   // Could be "HH:MM:SS" or "HH:MM" or full ISO
@@ -45,7 +39,7 @@ const formatDate = (dateStr: string): string => {
   return d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' });
 };
 
-export const LateRatingModal: FC<ILateRatingModalProps> = ({ open, onClose, employees, entries, schedules }) => {
+export const LateRatingModal: FC<ILateRatingModalProps> = ({ open, onClose, employees, entries, schedules, dailySchedules }) => {
   const [expandedId, setExpandedId] = useState<number | null>(null);
 
   const rating = useMemo<ILateEmployee[]>(() => {
@@ -54,8 +48,9 @@ export const LateRatingModal: FC<ILateRatingModalProps> = ({ open, onClose, empl
     for (const e of entries) {
       if (e.status !== 'work' || !e.first_entry) continue;
 
-      const sched = schedules?.[e.employee_id];
-      const lateThreshold = sched ? getEffectiveLateThreshold(sched) : DEFAULT_LATE_THRESHOLD;
+      const [year, month, day] = e.work_date.split('-').map(Number);
+      const sched = getScheduleForTimesheetDay(schedules, dailySchedules, e.employee_id, year, month, day);
+      const lateThreshold = sched ? getEffectiveLateThresholdForDay(sched, year, month, day) : DEFAULT_LATE_THRESHOLD;
 
       // Нормализуем first_entry до формата HH:MM:SS для корректного сравнения
       const firstEntry = e.first_entry.length === 5 ? e.first_entry + ':00' : e.first_entry;
@@ -80,7 +75,7 @@ export const LateRatingModal: FC<ILateRatingModalProps> = ({ open, onClose, empl
     }
     result.sort((a, b) => b.days.length - a.days.length);
     return result;
-  }, [entries, employees, schedules]);
+  }, [entries, employees, schedules, dailySchedules]);
 
   const toggle = (id: number) => setExpandedId(prev => (prev === id ? null : id));
 

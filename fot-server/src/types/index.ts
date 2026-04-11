@@ -435,6 +435,8 @@ export interface WorkSchedule {
   respects_holidays: boolean;
   pattern_type: PatternType;
   expected_saturdays_per_month: number;
+  full_day_threshold_minutes: number | null;
+  weekend_full_day_threshold_minutes: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -447,6 +449,17 @@ export interface ICategorySchedule {
   effective_to: string | null;
   created_by: number | null;
   created_at: string;
+}
+
+export interface IEmployeeScheduleAssignment {
+  id: string;
+  employee_id: number;
+  schedule_id: string;
+  effective_from: string;
+  effective_to: string | null;
+  created_by: number | null;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface IResolvedSchedule {
@@ -463,7 +476,9 @@ export interface IResolvedSchedule {
   respects_holidays: boolean;
   pattern_type: PatternType;
   expected_saturdays_per_month: number;
-  source: 'category' | 'default';
+  full_day_threshold_minutes: number | null;
+  weekend_full_day_threshold_minutes: number | null;
+  source: 'employee' | 'category' | 'default';
 }
 
 export interface IProductionCalendarMonth {

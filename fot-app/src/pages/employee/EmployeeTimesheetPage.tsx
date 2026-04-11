@@ -13,7 +13,11 @@ import {
   isToday,
   isFutureDay,
 } from '../../utils/calendarUtils';
-import { getWorkHoursForDay } from '../../utils/scheduleUtils';
+import {
+  getWorkHoursForDay,
+  getFullDayThresholdHoursForDay,
+  isScheduleDayOff,
+} from '../../utils/scheduleUtils';
 import type {
   TimesheetEntry,
   TimesheetEmployee,
@@ -50,48 +54,6 @@ const STATUS_CSS: Record<string, string> = {
 };
 
 const WORKED_STATUSES = new Set(['work', 'manual', 'remote', 'business_trip']);
-
-const getISODow = (date: Date): number => {
-  const d = date.getDay();
-  return d === 0 ? 7 : d;
-};
-
-const toISODate = (year: number, month: number, day: number): string => {
-  const m = String(month).padStart(2, '0');
-  const d = String(day).padStart(2, '0');
-  return `${year}-${m}-${d}`;
-};
-
-const isHolidayForSchedule = (
-  sched: IResolvedSchedule | undefined,
-  calendar: IProductionCalendarMonth | null,
-  year: number,
-  month: number,
-  day: number,
-): boolean => {
-  if (!calendar) return false;
-  const iso = toISODate(year, month, day);
-  if (calendar.mandatory_holidays?.includes(iso)) return true;
-  // Если график не резолвится — по умолчанию respects_holidays = true
-  const respects = sched ? sched.respects_holidays !== false : true;
-  if (respects && calendar.holidays?.includes(iso)) return true;
-  return false;
-};
-
-const isScheduleDayOff = (
-  sched: IResolvedSchedule | undefined,
-  calendar: IProductionCalendarMonth | null,
-  year: number,
-  month: number,
-  day: number,
-): boolean => {
-  if (isHolidayForSchedule(sched, calendar, year, month, day)) return true;
-  if (!sched) {
-    const dow = new Date(year, month - 1, day).getDay();
-    return dow === 0 || dow === 6;
-  }
-  return !sched.work_days.includes(getISODow(new Date(year, month - 1, day)));
-};
 
 const formatHM = (decimal: number): string => {
   const h = Math.floor(decimal);
@@ -230,7 +192,7 @@ export const EmployeeTimesheetPage: FC = () => {
 
     if (today) classes.push(s.dayCellToday);
 
-    if (dayOff) {
+    if (dayOff && !entry) {
       classes.push(s.dayCellWeekend);
       return classes.join(' ');
     }
@@ -241,11 +203,11 @@ export const EmployeeTimesheetPage: FC = () => {
       return classes.join(' ');
     }
 
-    const workHoursNorm = getWorkHoursForDay(sched, year, month, day);
+    const thresholdHours = getFullDayThresholdHoursForDay(sched, calendar, year, month, day);
     switch (entry.status) {
       case 'work':
       case 'manual':
-        classes.push(entry.hours_worked && entry.hours_worked >= workHoursNorm ? s.dayCellFull : s.dayCellPartial);
+        classes.push(entry.hours_worked && entry.hours_worked >= thresholdHours ? s.dayCellFull : s.dayCellPartial);
         break;
       case 'remote':
         classes.push(s.dayCellRemote);
@@ -416,17 +378,22 @@ export const EmployeeTimesheetPage: FC = () => {
               <th>День</th>
               <th>Статус</th>
               <th>Часы</th>
-              <th style={{ textAlign: 'right' }}>Начислено</th>
+              <th>Начислено</th>
               <th className={s.cellFormula}>Формула</th>
             </tr>
           </thead>
           <tbody>
             {breakdownRows.map(row => {
               const dateLabel = `${String(row.day).padStart(2, '0')}.${String(month).padStart(2, '0')}`;
-              const status = row.dayOff ? 'Выходной' : (row.entry ? STATUS_LABELS[row.entry.status] || '—' : '—');
-              const statusCls = row.dayOff ? 'statusDayoff' : (row.entry ? STATUS_CSS[row.entry.status] : '');
+              const showAsDayOff = row.dayOff && !row.entry;
+              const status = showAsDayOff
+                ? 'Выходной'
+                : (row.entry ? STATUS_LABELS[row.entry.status] || '—' : '—');
+              const statusCls = showAsDayOff
+                ? 'statusDayoff'
+                : (row.entry ? STATUS_CSS[row.entry.status] : '');
               const hours = row.entry?.hours_worked ? formatHM(row.entry.hours_worked) : '—';
-              const rowCls = row.dayOff ? s.rowWeekend : (row.future && !row.entry ? s.rowFuture : '');
+              const rowCls = showAsDayOff ? s.rowWeekend : (row.future && !row.entry ? s.rowFuture : '');
 
               return (
                 <tr key={row.day} className={rowCls}>
@@ -437,9 +404,9 @@ export const EmployeeTimesheetPage: FC = () => {
                       <span className={`${s.statusBadge} ${s[statusCls] || ''}`}>{status}</span>
                     ) : status}
                   </td>
-                  <td className={s.cellHours}>{row.dayOff ? '—' : hours}</td>
+                  <td className={s.cellHours}>{showAsDayOff ? '—' : hours}</td>
                   <td className={s.cellMoney}>
-                    {row.dayOff ? '—' : (row.isWorked ? `${formatMoney(row.dailyAccrual)} ₽` : '0,00 ₽')}
+                    {showAsDayOff ? '—' : (row.isWorked ? `${formatMoney(row.dailyAccrual)} ₽` : '0,00 ₽')}
                   </td>
                   <td className={s.cellFormula}>
                     {row.isWorked
@@ -466,11 +433,16 @@ export const EmployeeTimesheetPage: FC = () => {
         onClose={() => setModalOpen(false)}
         onSave={async () => { setModalOpen(false); }}
         initialStatus={modalEntry?.status || 'work'}
-        initialHours={modalEntry?.hours_worked}
+        initialHours={modalEntry?.hours_worked ?? getWorkHoursForDay(employeeId ? schedules[employeeId] : undefined, year, month, modalDay)}
         dayLabel={`${formatDateRu(modalDay, month)}`}
         employeeName={modalEmployee?.full_name}
         employeeId={modalEmployee?.id}
         workDate={`${year}-${String(month).padStart(2, '0')}-${String(modalDay).padStart(2, '0')}`}
+        correctionInfo={modalEntry?.is_correction ? {
+          is_correction: true,
+          corrected_at: modalEntry.corrected_at,
+          corrected_by_name: modalEntry.corrected_by_name,
+        } : null}
         hideCorrectionTab
       />
     </div>

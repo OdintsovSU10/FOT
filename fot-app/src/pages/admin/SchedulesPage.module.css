@@ -145,6 +145,80 @@
   flex-wrap: wrap;
 }
 
+.dayOverridesSection {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-top: 4px;
+}
+
+.sectionTitle {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.sectionHint {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.dayOverridesGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.dayOverrideCard {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-primary);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.dayOverrideHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.dayOverrideTitle {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.dayOverrideMeta {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-top: 2px;
+}
+
+.dayOverrideToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+
+.dayOverrideFields {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.dayOverrideSummary {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
 .dayBtn {
   padding: 6px 10px;
   border: 1px solid var(--border);
@@ -175,6 +249,12 @@
   color: var(--text-secondary);
 }
 
+.cellHint {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
 .error {
   padding: 10px;
   background: #fdecea;
@@ -201,5 +281,15 @@
 @media (max-width: 768px) {
   .form {
     grid-template-columns: 1fr;
+  }
+
+  .dayOverridesGrid,
+  .dayOverrideFields {
+    grid-template-columns: 1fr;
+  }
+
+  .dayOverrideHeader {
+    flex-direction: column;
+    align-items: stretch;
   }
 }

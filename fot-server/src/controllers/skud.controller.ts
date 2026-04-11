@@ -15,6 +15,7 @@ import {
   setAccessPointCacheEntry,
 } from '../services/skud-shared.service.js';
 import { skudWriteController } from './skud-write.controller.js';
+import { skudTravelController } from './skud-travel.controller.js';
 
 const skudReadController = {
   /**
@@ -385,4 +386,5 @@ const skudReadController = {
 export const skudController = {
   ...skudReadController,
   ...skudWriteController,
+  ...skudTravelController,
 };

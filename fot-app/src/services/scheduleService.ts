@@ -1,5 +1,11 @@
 import { apiClient } from '../api/client';
-import type { IWorkSchedule, IResolvedSchedule, ICategorySchedule, WorkCategory } from '../types/schedule';
+import type {
+  IWorkSchedule,
+  IResolvedSchedule,
+  ICategorySchedule,
+  IEmployeeScheduleAssignment,
+  WorkCategory,
+} from '../types/schedule';
 
 interface ApiResponse<T> {
   data?: T;
@@ -50,6 +56,16 @@ export const scheduleService = {
     return res.data;
   },
 
+  /** Активные персональные графики сотрудников */
+  async listEmployeeAssignments(employeeIds: number[]): Promise<IEmployeeScheduleAssignment[]> {
+    if (employeeIds.length === 0) return [];
+    const params = new URLSearchParams();
+    params.set('employee_ids', employeeIds.join(','));
+    const res = await apiClient.get<ApiResponse<IEmployeeScheduleAssignment[]>>(`/schedules/employees?${params.toString()}`);
+    if (!res.data) throw new Error(res.error || 'Ошибка загрузки графиков сотрудников');
+    return res.data;
+  },
+
   /** Назначить график категории труда */
   async assignCategory(
     category: WorkCategory,
@@ -63,6 +79,23 @@ export const scheduleService = {
   /** Снять привязку категории */
   async removeCategoryAssignment(category: WorkCategory): Promise<void> {
     const res = await apiClient.delete<ApiResponse<null>>(`/schedules/category/${category}`);
+    if (res.error) throw new Error(res.error);
+  },
+
+  /** Назначить персональный график сотруднику */
+  async assignEmployee(
+    employeeId: number,
+    data: { schedule_id: string; effective_from: string; effective_to?: string | null },
+  ): Promise<IEmployeeScheduleAssignment> {
+    const res = await apiClient.put<ApiResponse<IEmployeeScheduleAssignment>>(`/schedules/employee/${employeeId}`, data);
+    if (!res.data) throw new Error(res.error || 'Ошибка назначения графика сотруднику');
+    return res.data;
+  },
+
+  /** Снять персональный график сотрудника */
+  async removeEmployeeAssignment(employeeId: number, effectiveTo?: string): Promise<void> {
+    const query = effectiveTo ? `?effective_to=${encodeURIComponent(effectiveTo)}` : '';
+    const res = await apiClient.delete<ApiResponse<null>>(`/schedules/employee/${employeeId}${query}`);
     if (res.error) throw new Error(res.error);
   },
 };

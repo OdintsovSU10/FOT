@@ -14,9 +14,11 @@ import type {
   TimesheetEmployee,
   TimesheetStats as ITimesheetStats,
   TimesheetStatus,
+  IProductionCalendarMonth,
 } from '../../types';
 import type { IResolvedSchedule } from '../../types/schedule';
 import { TimesheetApprovalBar } from '../../components/timesheet/TimesheetApprovalBar';
+import { getScheduleForTimesheetDay, getWorkHoursForDay } from '../../utils/scheduleUtils';
 import './TimesheetPage.css';
 
 interface IDeptOption {
@@ -30,6 +32,13 @@ interface IDbDepartment {
   children: IDbDepartment[];
 }
 
+const DEPARTMENT_TYPE_PRIORITY = ['ТО', 'ОСП'] as const;
+const departmentNameCollator = new Intl.Collator('ru', {
+  sensitivity: 'base',
+  ignorePunctuation: true,
+  numeric: true,
+});
+
 const flattenTree = (nodes: IDbDepartment[]): IDeptOption[] => {
   const result: IDeptOption[] = [];
   for (const node of nodes) {
@@ -40,6 +49,47 @@ const flattenTree = (nodes: IDbDepartment[]): IDeptOption[] => {
   }
   return result;
 };
+
+const getDepartmentType = (name: string): string | null => {
+  const match = name.trim().match(/\(([^()]+)\)\s*$/u);
+  return match ? match[1].trim().toUpperCase() : null;
+};
+
+const getDepartmentBaseName = (name: string): string => (
+  name.replace(/\s*\([^()]+\)\s*$/u, '').trim()
+);
+
+const getDepartmentPriority = (type: string | null): number => {
+  if (!type) return DEPARTMENT_TYPE_PRIORITY.length + 1;
+  const index = DEPARTMENT_TYPE_PRIORITY.findIndex(marker => marker === type);
+  return index === -1 ? DEPARTMENT_TYPE_PRIORITY.length : index;
+};
+
+const sortDepartments = (departments: IDeptOption[]): IDeptOption[] => (
+  [...departments].sort((a, b) => {
+    const aType = getDepartmentType(a.name);
+    const bType = getDepartmentType(b.name);
+
+    const priorityDiff = getDepartmentPriority(aType) - getDepartmentPriority(bType);
+    if (priorityDiff !== 0) return priorityDiff;
+
+    if (aType && bType) {
+      const typeDiff = departmentNameCollator.compare(aType, bType);
+      if (typeDiff !== 0) return typeDiff;
+    }
+
+    const baseNameDiff = departmentNameCollator.compare(
+      getDepartmentBaseName(a.name),
+      getDepartmentBaseName(b.name),
+    );
+    if (baseNameDiff !== 0) return baseNameDiff;
+
+    const nameDiff = departmentNameCollator.compare(a.name.trim(), b.name.trim());
+    if (nameDiff !== 0) return nameDiff;
+
+    return a.id.localeCompare(b.id, 'ru');
+  })
+);
 
 const DEFAULT_STATS: ITimesheetStats = {
   employeeCount: 0,
@@ -60,6 +110,8 @@ export const TimesheetPage: FC = () => {
   const [entries, setEntries] = useState<TimesheetEntry[]>([]);
   const [stats, setStats] = useState<ITimesheetStats>(DEFAULT_STATS);
   const [schedules, setSchedules] = useState<Record<number, IResolvedSchedule>>({});
+  const [dailySchedules, setDailySchedules] = useState<Record<number, Record<string, IResolvedSchedule>>>({});
+  const [calendar, setCalendar] = useState<IProductionCalendarMonth | null>(null);
   const [loading, setLoading] = useState(false);
 
   // Mobile compact mode
@@ -98,7 +150,7 @@ export const TimesheetPage: FC = () => {
     apiClient.get<{ success: boolean; data: { departments: IDbDepartment[] } }>('/structure')
       .then(res => {
         const deps = res.data?.departments || [];
-        const flat = flattenTree(deps);
+        const flat = sortDepartments(flattenTree(deps));
         setDeptOptions(flat);
 
         // Для header: автоматически выбрать свой отдел
@@ -133,10 +185,15 @@ export const TimesheetPage: FC = () => {
       setEntries(res.entries || []);
       setStats(res.stats || DEFAULT_STATS);
       setSchedules(res.schedules || {});
+      setDailySchedules(res.daily_schedules || {});
+      setCalendar(res.calendar || null);
     } catch {
       setEmployees([]);
       setEntries([]);
       setStats(DEFAULT_STATS);
+      setSchedules({});
+      setDailySchedules({});
+      setCalendar(null);
     } finally {
       setLoading(false);
     }
@@ -233,6 +290,13 @@ export const TimesheetPage: FC = () => {
     ? deptOptions.find(d => d.id === selectedDeptId)?.name || 'Отдел'
     : 'Все отделы';
 
+  const modalDefaultHours = useMemo(() => {
+    if (modalEntry?.hours_worked != null) return modalEntry.hours_worked;
+    if (!modalEmployee) return 8;
+    const sched = getScheduleForTimesheetDay(schedules, dailySchedules, modalEmployee.id, year, month, modalDay);
+    return getWorkHoursForDay(sched, year, month, modalDay);
+  }, [modalEntry, modalEmployee, schedules, dailySchedules, year, month, modalDay]);
+
   return (
     <div className="ts-page">
       {/* Header */}
@@ -320,6 +384,8 @@ export const TimesheetPage: FC = () => {
           year={year}
           month={month}
           schedules={schedules}
+          dailySchedules={dailySchedules}
+          calendar={calendar}
           compact={isMobile}
           onEmployeeClick={handleEmployeeClick}
           onDayClick={handleDayClick}
@@ -334,6 +400,9 @@ export const TimesheetPage: FC = () => {
         entries={panelEntries}
         year={year}
         month={month}
+        schedules={schedules}
+        dailySchedules={dailySchedules}
+        calendar={calendar}
       />
 
       {/* Late Rating Modal */}
@@ -343,6 +412,7 @@ export const TimesheetPage: FC = () => {
         employees={employees}
         entries={entries}
         schedules={schedules}
+        dailySchedules={dailySchedules}
       />
 
       {/* Correction Modal */}
@@ -351,7 +421,7 @@ export const TimesheetPage: FC = () => {
         onClose={() => setModalOpen(false)}
         onSave={handleSaveCorrection}
         initialStatus={modalEntry?.status || 'work'}
-        initialHours={modalEntry?.hours_worked}
+        initialHours={modalDefaultHours}
         dayLabel={`${formatDateRu(modalDay, month)}`}
         employeeName={modalEmployee?.full_name}
         employeeId={modalEmployee?.id}

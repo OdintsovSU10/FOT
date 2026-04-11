@@ -5,8 +5,9 @@ import { auditService } from '../services/audit.service.js';
 import type { AuthenticatedRequest, TimeStatus, IResolvedSchedule } from '../types/index.js';
 import { exportTimesheet } from './timesheet-export.controller.js';
 import { exportTimesheetMass } from './timesheet-mass-export.controller.js';
-import { resolveSchedulesBulk, isWorkingDay, needsSkudCheck, countWorkingDaysUpToToday as schedWorkingDaysUpToToday, countNormHoursUpToToday, getScheduleForDate, getEffectiveLateThreshold, loadCalendarMonth } from '../services/schedule.service.js';
+import { resolveSchedulesForPeriod, isWorkingDay, needsSkudCheck, getScheduleForDate, getEffectiveLateThreshold, loadCalendarMonth } from '../services/schedule.service.js';
 import { getInternalAccessPoints } from '../services/skud-shared.service.js';
+import { getTravelHoursSummaryForRange, travelMinutesToHours } from '../services/skud-travel.service.js';
 
 const validStatuses: TimeStatus[] = ['work', 'vacation', 'dayoff', 'remote', 'unpaid', 'absent', 'sick', 'business_trip', 'manual'];
 
@@ -73,6 +74,8 @@ export const timesheetController = {
       const mon = parseInt(monthStr);
       const startDate = `${month}-01`;
       const endDate = `${month}-${new Date(year, mon, 0).getDate()}`;
+      const today = new Date();
+      const todayStr = today.toISOString().slice(0, 10);
 
       const hasDeptFilter = department_id && typeof department_id === 'string';
 
@@ -104,15 +107,21 @@ export const timesheetController = {
 
       const employeeIds = (employees || []).map(e => e.id);
 
-      // Resolve графики для всех сотрудников (по категории труда) + производственный календарь месяца
+      // Resolve графики для всех сотрудников по каждому дню месяца + производственный календарь
       const empList = (employees || []).map(e => ({
         id: e.id as number,
         work_category: (e.work_category as string | null) || null,
       }));
-      const [schedulesMap, calendarMonth] = await Promise.all([
-        resolveSchedulesBulk(empList, startDate),
+      const [dailySchedulesMap, calendarMonth] = await Promise.all([
+        resolveSchedulesForPeriod(empList, startDate, endDate),
         loadCalendarMonth(year, mon),
       ]);
+      const referenceDate = todayStr < startDate ? startDate : (todayStr > endDate ? endDate : todayStr);
+      const schedulesMap = new Map<number, IResolvedSchedule>();
+      for (const [employeeId, dailyMap] of dailySchedulesMap) {
+        const schedule = dailyMap.get(referenceDate) || dailyMap.get(startDate);
+        if (schedule) schedulesMap.set(employeeId, schedule);
+      }
 
       // Fetch position names
       const positionIds = [...new Set((employees || []).map(e => e.position_id).filter(Boolean))];
@@ -291,6 +300,22 @@ export const timesheetController = {
         manualEntries.push(...(data || []));
       }
 
+      let travelSummaries = new Map<string, {
+        creditedMinutes: number;
+        delayMinutes: number;
+        segmentsCount: number;
+        problematicSegmentsCount: number;
+      }>();
+      try {
+        travelSummaries = await getTravelHoursSummaryForRange({
+          employeeIds,
+          startDate,
+          endDate,
+        });
+      } catch (travelError) {
+        console.warn('[timesheet] failed to calculate travel summaries:', travelError);
+      }
+
       // Resolve corrected_by names
       const correctorIds = [...new Set(
         manualEntries
@@ -315,23 +340,45 @@ export const timesheetController = {
       for (const m of manualEntries) {
         const key = `${m.employee_id}_${m.work_date}`;
         seenKeys.add(key);
-        if (m.corrected_by) {
-          m.corrected_by_name = correctorNames.get(m.corrected_by as number) || null;
-        }
-        entries.push(m);
+        const correctedBy = (m.corrected_by as number | null) ?? null;
+        const travelSummary = travelSummaries.get(key);
+        const travelMinutes = travelSummary?.creditedMinutes || 0;
+        const normalized = {
+          ...m,
+          is_correction: true,
+          corrected_at: (m.corrected_at as string | null) || (m.updated_at as string | null) || (m.created_at as string | null) || null,
+          corrected_by_name: correctedBy ? correctorNames.get(correctedBy) || null : null,
+          base_hours_worked: typeof m.hours_worked === 'number' ? m.hours_worked : null,
+          travel_minutes_credited: travelMinutes,
+          travel_hours_credited: travelMinutesToHours(travelMinutes),
+          travel_delay_minutes: travelSummary?.delayMinutes || 0,
+          travel_segments_count: travelSummary?.segmentsCount || 0,
+          travel_problematic_segments: travelSummary?.problematicSegmentsCount || 0,
+        };
+        entries.push(normalized);
       }
 
       for (const [key, s] of skudMap) {
         if (seenKeys.has(key)) continue;
         seenKeys.add(key);
 
-        const isPresent = s.total_hours > 0 || s.first_entry !== null;
+        const travelSummary = travelSummaries.get(key);
+        const travelMinutes = travelSummary?.creditedMinutes || 0;
+        const travelHours = travelMinutesToHours(travelMinutes);
+        const adjustedHours = Math.round(((s.total_hours || 0) + travelHours) * 100) / 100;
+        const isPresent = s.total_hours > 0 || s.first_entry !== null || travelMinutes > 0;
         entries.push({
           id: null,
           employee_id: s.employee_id,
           work_date: s.date,
           status: isPresent ? 'work' : 'absent',
-          hours_worked: isPresent ? s.total_hours : 0,
+          hours_worked: isPresent ? adjustedHours : 0,
+          base_hours_worked: s.total_hours,
+          travel_minutes_credited: travelMinutes,
+          travel_hours_credited: travelHours,
+          travel_delay_minutes: travelSummary?.delayMinutes || 0,
+          travel_segments_count: travelSummary?.segmentsCount || 0,
+          travel_problematic_segments: travelSummary?.problematicSegmentsCount || 0,
           is_correction: false,
           first_entry: s.first_entry,
           last_exit: s.last_exit,
@@ -339,35 +386,39 @@ export const timesheetController = {
       }
 
       // Автозаполнение для remote/hybrid-remote дней
-      const today = new Date();
-      const todayStr = today.toISOString().slice(0, 10);
       const daysInMonth = new Date(year, mon, 0).getDate();
 
       for (const empId of employeeIds) {
-        const sched = schedulesMap.get(empId);
-        if (!sched) continue;
-
         for (let d = 1; d <= daysInMonth; d++) {
           const dateObj = new Date(year, mon - 1, d);
           const dateStr = `${month}-${String(d).padStart(2, '0')}`;
           const key = `${empId}_${dateStr}`;
+          const sched = dailySchedulesMap.get(empId)?.get(dateStr);
 
           // Пропускаем будущие дни и дни с уже имеющимися записями
           if (dateStr > todayStr) continue;
           if (seenKeys.has(key)) continue;
+          if (!sched) continue;
 
           // Проверяем рабочий ли день по графику
           if (!isWorkingDay(sched, dateObj, calendarMonth)) continue;
 
           // Если не нужен СКУД-контроль (remote или hybrid на remote-день) — автозаполнение
           if (!needsSkudCheck(sched, dateObj, calendarMonth)) {
+            const workHours = getScheduleForDate(sched, dateObj).work_hours;
             seenKeys.add(key);
             entries.push({
               id: null,
               employee_id: empId,
               work_date: dateStr,
               status: 'remote',
-              hours_worked: getScheduleForDate(sched, dateObj).work_hours,
+              hours_worked: workHours,
+              base_hours_worked: workHours,
+              travel_minutes_credited: 0,
+              travel_hours_credited: 0,
+              travel_delay_minutes: 0,
+              travel_segments_count: 0,
+              travel_problematic_segments: 0,
               is_correction: false,
               first_entry: null,
               last_exit: null,
@@ -380,13 +431,22 @@ export const timesheetController = {
       let normHours = 0;
       let totalWorkingDays = 0;
       for (const empId of employeeIds) {
-        const sched = schedulesMap.get(empId);
-        const empWorkDays = sched
-          ? schedWorkingDaysUpToToday(year, mon, sched, calendarMonth)
-          : getWorkingDaysUpToToday(year, mon);
-        normHours += sched
-          ? countNormHoursUpToToday(year, mon, sched, calendarMonth)
-          : empWorkDays * 8;
+        let empWorkDays = 0;
+        let empNormHours = 0;
+        for (let d = 1; d <= daysInMonth; d++) {
+          const dateObj = new Date(year, mon - 1, d);
+          const dateStr = `${month}-${String(d).padStart(2, '0')}`;
+          if (dateStr > todayStr) continue;
+
+          const sched = dailySchedulesMap.get(empId)?.get(dateStr);
+          if (!sched) continue;
+          if (!isWorkingDay(sched, dateObj, calendarMonth)) continue;
+
+          empWorkDays++;
+          empNormHours += getScheduleForDate(sched, dateObj).work_hours;
+        }
+
+        normHours += empNormHours;
         totalWorkingDays = Math.max(totalWorkingDays, empWorkDays);
       }
 
@@ -401,8 +461,10 @@ export const timesheetController = {
         if (entry.status === 'sick') deviations.sick++;
 
         // Проверка опоздания по времени прихода
-        const empSched = schedulesMap.get(entry.employee_id as number);
-        const lateThreshold = empSched ? getEffectiveLateThreshold(empSched) : '09:00:00';
+        const workDate = entry.work_date as string;
+        const entryDate = new Date(`${workDate}T00:00:00`);
+        const empSched = dailySchedulesMap.get(entry.employee_id as number)?.get(workDate) || schedulesMap.get(entry.employee_id as number);
+        const lateThreshold = empSched ? getEffectiveLateThreshold(empSched, entryDate) : '09:00:00';
         if (entry.status === 'work' && entry.first_entry && entry.first_entry > lateThreshold) {
           deviations.late++;
         }
@@ -418,6 +480,13 @@ export const timesheetController = {
       for (const [id, sched] of schedulesMap) {
         schedulesObj[id] = sched;
       }
+      const dailySchedulesObj: Record<number, Record<string, IResolvedSchedule>> = {};
+      for (const [employeeId, dailyMap] of dailySchedulesMap) {
+        dailySchedulesObj[employeeId] = {};
+        for (const [date, sched] of dailyMap) {
+          dailySchedulesObj[employeeId][date] = sched;
+        }
+      }
 
       res.json({
         success: true,
@@ -425,6 +494,7 @@ export const timesheetController = {
           employees: employeesWithNames,
           entries,
           schedules: schedulesObj,
+          daily_schedules: dailySchedulesObj,
           calendar: calendarMonth,
           stats: {
             employeeCount: employeeIds.length,
@@ -453,7 +523,11 @@ export const timesheetController = {
           work_date: parsed.work_date,
           status: parsed.status,
           hours_worked: parsed.hours_worked ?? null,
-          is_correction: false,
+          notes: parsed.notes ?? null,
+          is_correction: true,
+          corrected_by: req.user.employee_id ?? null,
+          corrected_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
         }, { onConflict: 'employee_id,work_date' })
         .select()
         .single();

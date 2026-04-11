@@ -1,7 +1,8 @@
 import { supabase } from '../config/database.js';
-import { resolveSchedulesBulk, isWorkingDay, needsSkudCheck, getScheduleForDate } from './schedule.service.js';
+import { resolveSchedulesForPeriod, isWorkingDay, needsSkudCheck, getScheduleForDate } from './schedule.service.js';
 import { getInternalAccessPoints } from './skud-shared.service.js';
 import type { IResolvedSchedule } from '../types/index.js';
+import { getTravelHoursSummaryForRange, travelMinutesToHours } from './skud-travel.service.js';
 
 interface IRawEvent {
   employee_id: number;
@@ -26,6 +27,7 @@ export interface IDepartmentTimesheetData {
   isBrigade: boolean;
   employees: IExportEmployee[];
   schedulesMap: Map<number, IResolvedSchedule>;
+  dailySchedulesMap: Map<number, Map<string, IResolvedSchedule>>;
   dataMap: Map<number, Map<string, { status: string; hours: number; corrected?: boolean }>>;
   skudMap: Map<number, Map<string, { hours: number; corrected: boolean }>>;
   posMap: Map<string, string>;
@@ -62,6 +64,8 @@ export async function fetchTimesheetDataForDepartment(
   const startDate = `${month}-01`;
   const daysInMonth = new Date(year, mon, 0).getDate();
   const endDate = `${month}-${daysInMonth}`;
+  const today = new Date();
+  const todayStr = today.toISOString().slice(0, 10);
 
   // Имя отдела
   let departmentName = 'Все отделы';
@@ -99,7 +103,13 @@ export async function fetchTimesheetDataForDepartment(
 
   // Графики
   const empList = empArr.map(e => ({ id: e.id, work_category: e.work_category }));
-  const schedulesMap = await resolveSchedulesBulk(empList, startDate);
+  const dailySchedulesMap = await resolveSchedulesForPeriod(empList, startDate, endDate);
+  const referenceDate = todayStr < startDate ? startDate : (todayStr > endDate ? endDate : todayStr);
+  const schedulesMap = new Map<number, IResolvedSchedule>();
+  for (const [employeeId, dailyMap] of dailySchedulesMap) {
+    const schedule = dailyMap.get(referenceDate) || dailyMap.get(startDate);
+    if (schedule) schedulesMap.set(employeeId, schedule);
+  }
 
   // Internal access points
   const internalPoints = await getInternalAccessPoints();
@@ -192,6 +202,46 @@ export async function fetchTimesheetDataForDepartment(
     }
   }
 
+  let travelSummaries = new Map<string, {
+    creditedMinutes: number;
+    delayMinutes: number;
+    segmentsCount: number;
+    problematicSegmentsCount: number;
+  }>();
+  try {
+    travelSummaries = await getTravelHoursSummaryForRange({
+      employeeIds,
+      startDate,
+      endDate,
+    });
+  } catch (travelError) {
+    console.warn('[timesheet-export] failed to calculate travel summaries:', travelError);
+  }
+
+  for (const [key, summary] of travelSummaries) {
+    const [employeeIdRaw, date] = key.split('_');
+    const empId = Number(employeeIdRaw);
+    const travelHours = travelMinutesToHours(summary.creditedMinutes);
+    if (!dataMap.has(empId)) dataMap.set(empId, new Map());
+
+    const current = dataMap.get(empId)!.get(date);
+    if (current?.corrected) continue;
+
+    if (!current) {
+      dataMap.get(empId)!.set(date, {
+        status: summary.creditedMinutes > 0 ? 'work' : 'absent',
+        hours: travelHours,
+      });
+      continue;
+    }
+
+    dataMap.get(empId)!.set(date, {
+      ...current,
+      status: current.status === 'absent' && summary.creditedMinutes > 0 ? 'work' : current.status,
+      hours: Math.round((current.hours + travelHours) * 100) / 100,
+    });
+  }
+
   // Manual corrections override SKUD
   let manualEntries: Array<Record<string, unknown>> = [];
   for (let i = 0; i < employeeIds.length; i += BATCH) {
@@ -224,18 +274,16 @@ export async function fetchTimesheetDataForDepartment(
   }
 
   // Автозаполнение remote/hybrid-remote дней
-  const today = new Date();
-  const todayStr = today.toISOString().slice(0, 10);
   for (const empId of employeeIds) {
-    const sched = schedulesMap.get(empId);
-    if (!sched) continue;
     if (!dataMap.has(empId)) dataMap.set(empId, new Map());
     const empData = dataMap.get(empId)!;
 
     for (let d = 1; d <= daysInMonth; d++) {
       const dateStr = `${year}-${String(mon).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+      const sched = dailySchedulesMap.get(empId)?.get(dateStr);
       if (dateStr > todayStr) continue;
       if (empData.has(dateStr)) continue;
+      if (!sched) continue;
 
       const dateObj = new Date(year, mon - 1, d);
       if (!isWorkingDay(sched, dateObj)) continue;
@@ -259,6 +307,7 @@ export async function fetchTimesheetDataForDepartment(
     isBrigade: departmentName.toLowerCase().startsWith('бр.'),
     employees: empArr,
     schedulesMap,
+    dailySchedulesMap,
     dataMap,
     skudMap,
     posMap,

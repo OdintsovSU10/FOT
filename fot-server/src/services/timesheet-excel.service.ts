@@ -50,7 +50,7 @@ export function buildTimesheetSheet(
   sheetName: string,
   data: IDepartmentTimesheetData,
 ): void {
-  const { employees, schedulesMap, dataMap, skudMap, year, mon, daysInMonth, departmentName } = data;
+  const { employees, schedulesMap, dailySchedulesMap, dataMap, skudMap, year, mon, daysInMonth, departmentName } = data;
 
   const colDays = COL_DAY_START + daysInMonth;       // first "Дней" col
   const colHours = colDays + 2;                        // first "Часов" col
@@ -232,6 +232,7 @@ export function buildTimesheetSheet(
     for (let d = 1; d <= daysInMonth; d++) {
       const dateStr = `${year}-${pad2(mon)}-${pad2(d)}`;
       const dateObj = new Date(year, mon - 1, d);
+      const daySched = dailySchedulesMap.get(emp.id)?.get(dateStr) || sched;
       const col = COL_DAY_START + d - 1;
 
       const docCell = ws.getCell(docRow, col);
@@ -241,7 +242,7 @@ export function buildTimesheetSheet(
       docCell.font = { size: 8 };
       skCell.font = { size: 8 };
 
-      const isDayOff = sched ? !isWorkingDay(sched, dateObj) : (dateObj.getDay() === 0 || dateObj.getDay() === 6);
+      const isDayOff = daySched ? !isWorkingDay(daySched, dateObj) : (dateObj.getDay() === 0 || dateObj.getDay() === 6);
 
       if (isDayOff) {
         docCell.value = '';
@@ -262,7 +263,7 @@ export function buildTimesheetSheet(
             docHoursSum += entry.hours;
           }
         } else {
-          const schedHours = sched ? getScheduleForDate(sched, dateObj).work_hours : 8;
+          const schedHours = daySched ? getScheduleForDate(daySched, dateObj).work_hours : 8;
           docCell.value = schedHours;
           docDaysCount++;
           docHoursSum += schedHours;
@@ -278,7 +279,7 @@ export function buildTimesheetSheet(
         const timeStr = ` ${formatHHMM(skudEntry.hours)}`;
         skCell.value = skudEntry.corrected ? `${timeStr}Кор` : timeStr;
         // Подсветка недоработок: часы ниже нормы расписания
-        const normHours = sched ? getScheduleForDate(sched, dateObj).work_hours : 8;
+        const normHours = daySched ? getScheduleForDate(daySched, dateObj).work_hours : 8;
         if (skudEntry.hours < normHours) {
           skCell.fill = underworkFill;
         }

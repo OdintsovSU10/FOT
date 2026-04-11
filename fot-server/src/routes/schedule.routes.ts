@@ -8,6 +8,9 @@ router.use(authenticate);
 
 // Шаблоны графиков
 router.get('/', requirePosition('header', 'hr', 'admin', 'super_admin'), scheduleController.list);
+router.get('/employees', requirePosition('header', 'hr', 'admin', 'super_admin'), scheduleController.listEmployeeAssignments);
+router.put('/employee/:employeeId', requirePosition('header', 'hr', 'admin', 'super_admin'), scheduleController.assignEmployee);
+router.delete('/employee/:employeeId', requirePosition('header', 'hr', 'admin', 'super_admin'), scheduleController.removeEmployeeAssignment);
 router.post('/', requirePosition('admin', 'super_admin'), scheduleController.create);
 router.put('/:id', requirePosition('admin', 'super_admin'), scheduleController.update);
 router.delete('/:id', requirePosition('admin', 'super_admin'), scheduleController.remove);
