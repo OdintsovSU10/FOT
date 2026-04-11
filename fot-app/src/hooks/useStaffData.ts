@@ -39,17 +39,20 @@ export const useStaffData = (params: IUseStaffDataParams) => {
 
   const loadEmployees = useCallback(async () => {
     setLoading(true);
-    const result = await employeeService.getPaginated({
-      page,
-      pageSize,
-      search: search || undefined,
-      departmentId: departmentId || undefined,
-      status: 'active',
-      view: 'staff',
-    });
+    const [result, counts] = await Promise.all([
+      employeeService.getPaginated({
+        page,
+        pageSize,
+        search: search || undefined,
+        departmentId: departmentId || undefined,
+        status: 'active',
+        view: 'staff',
+      }),
+      employeeService.getCounts(false).catch(() => ({ byDepartment: {}, byStatus: { active: 0, fired: 0 } })),
+    ]);
     setEmployees(result.data);
     setMeta(result.meta);
-    setTotalActive(result.counts.byStatus.active);
+    setTotalActive(counts.byStatus.active);
     setLoading(false);
   }, [page, pageSize, search, departmentId]);
 

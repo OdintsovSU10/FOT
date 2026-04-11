@@ -1,0 +1,702 @@
+import { type FC, useState, useEffect, useCallback, useMemo } from 'react';
+import { scheduleService } from '../../services/scheduleService';
+import { workCategoryService } from '../../services/workCategoryService';
+import { ProductionCalendarPage } from '../super-admin/ProductionCalendarPage';
+import type {
+  IWorkSchedule,
+  ICategorySchedule,
+  IWorkCategory,
+  ScheduleType,
+  PatternType,
+} from '../../types/schedule';
+import {
+  PATTERN_TYPE_LABELS,
+  SCHEDULE_TYPE_LABELS,
+  WEEKDAY_LABELS,
+} from '../../types/schedule';
+import styles from './SchedulesPage.module.css';
+
+type TabKey = 'templates' | 'category-assignments' | 'category-manage' | 'production-calendar';
+
+interface IFormState {
+  id: string | null;
+  name: string;
+  schedule_type: ScheduleType;
+  pattern_type: PatternType;
+  work_start: string;
+  work_end: string;
+  work_days: number[];
+  lunch_minutes: number;
+  respects_holidays: boolean;
+  expected_saturdays_per_month: number;
+  late_threshold_minutes: number;
+}
+
+const EMPTY_FORM: IFormState = {
+  id: null,
+  name: '',
+  schedule_type: 'office',
+  pattern_type: '5+0',
+  work_start: '09:00',
+  work_end: '18:00',
+  work_days: [1, 2, 3, 4, 5],
+  lunch_minutes: 35,
+  respects_holidays: true,
+  expected_saturdays_per_month: 0,
+  late_threshold_minutes: 0,
+};
+
+const formatHours = (decimalHours: number): string => {
+  const total = Math.max(0, Math.round(decimalHours * 60));
+  const h = Math.floor(total / 60);
+  const m = total % 60;
+  return `${h}:${String(m).padStart(2, '0')}`;
+};
+
+/** Длина смены по началу/концу (с учётом ночной смены) в десятичных часах */
+const computeShiftHours = (start: string, end: string): number => {
+  const [sh, sm] = start.split(':').map(Number);
+  const [eh, em] = end.split(':').map(Number);
+  if ([sh, sm, eh, em].some(n => Number.isNaN(n))) return 0;
+  let minutes = eh * 60 + em - (sh * 60 + sm);
+  if (minutes <= 0) minutes += 24 * 60;
+  return minutes / 60;
+};
+
+const PATTERN_PRESETS: Record<PatternType, Partial<IFormState>> = {
+  '5+0': { work_days: [1, 2, 3, 4, 5], expected_saturdays_per_month: 0 },
+  '5+2': { work_days: [1, 2, 3, 4, 5], expected_saturdays_per_month: 2 },
+  '6+0': { work_days: [1, 2, 3, 4, 5, 6], expected_saturdays_per_month: 0 },
+  'custom': {},
+};
+
+export const SchedulesPage: FC = () => {
+  const [tab, setTab] = useState<TabKey>('templates');
+  const [templates, setTemplates] = useState<IWorkSchedule[]>([]);
+  const [assignments, setAssignments] = useState<ICategorySchedule[]>([]);
+  const [workCategories, setWorkCategories] = useState<IWorkCategory[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  const [showForm, setShowForm] = useState(false);
+  const [form, setForm] = useState<IFormState>(EMPTY_FORM);
+
+  // Форма категории
+  const [showCategoryForm, setShowCategoryForm] = useState(false);
+  const [editingCategoryCode, setEditingCategoryCode] = useState<string | null>(null);
+  const [categoryForm, setCategoryForm] = useState({ code: '', name: '', description: '', sort_order: 0 });
+
+  const loadAll = useCallback(async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const [tpls, asgn, cats] = await Promise.all([
+        scheduleService.list(),
+        scheduleService.listCategories(),
+        workCategoryService.list(),
+      ]);
+      setTemplates(tpls);
+      setAssignments(asgn);
+      setWorkCategories(cats);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Ошибка загрузки');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadAll();
+  }, [loadAll]);
+
+  const shiftHours = useMemo(
+    () => computeShiftHours(form.work_start, form.work_end),
+    [form.work_start, form.work_end],
+  );
+
+  const shiftLabel = useMemo(() => formatHours(shiftHours), [shiftHours]);
+
+  const netHoursLabel = useMemo(() => {
+    const totalMinutes = Math.max(0, Math.round(shiftHours * 60 - form.lunch_minutes));
+    const h = Math.floor(totalMinutes / 60);
+    const m = totalMinutes % 60;
+    return `${h}:${String(m).padStart(2, '0')}`;
+  }, [shiftHours, form.lunch_minutes]);
+
+  const handleStartEdit = (tpl: IWorkSchedule) => {
+    setForm({
+      id: tpl.id,
+      name: tpl.name,
+      schedule_type: tpl.schedule_type,
+      pattern_type: tpl.pattern_type,
+      work_start: tpl.work_start.slice(0, 5),
+      work_end: tpl.work_end.slice(0, 5),
+      work_days: tpl.work_days,
+      lunch_minutes: tpl.lunch_minutes,
+      respects_holidays: tpl.respects_holidays,
+      expected_saturdays_per_month: tpl.expected_saturdays_per_month,
+      late_threshold_minutes: tpl.late_threshold_minutes,
+    });
+    setShowForm(true);
+  };
+
+  const handleStartCreate = () => {
+    setForm(EMPTY_FORM);
+    setShowForm(true);
+  };
+
+  const handlePatternChange = (pattern: PatternType) => {
+    const preset = PATTERN_PRESETS[pattern];
+    setForm(f => ({ ...f, pattern_type: pattern, ...preset }));
+  };
+
+  const toggleWorkDay = (day: number) => {
+    setForm(f => {
+      const has = f.work_days.includes(day);
+      const next = has ? f.work_days.filter(d => d !== day) : [...f.work_days, day].sort();
+      return { ...f, work_days: next.length > 0 ? next : f.work_days };
+    });
+  };
+
+  const handleSave = async () => {
+    setError('');
+    try {
+      const computedHours = computeShiftHours(form.work_start, form.work_end);
+      if (computedHours <= 0) {
+        setError('Некорректное время начала/конца смены');
+        return;
+      }
+      const payload = {
+        name: form.name.trim(),
+        schedule_type: form.schedule_type,
+        pattern_type: form.pattern_type,
+        work_start: form.work_start,
+        work_end: form.work_end,
+        work_hours: Number(computedHours.toFixed(4)),
+        work_days: form.work_days,
+        office_days: null,
+        day_overrides: null,
+        lunch_minutes: form.lunch_minutes,
+        respects_holidays: form.respects_holidays,
+        expected_saturdays_per_month: form.expected_saturdays_per_month,
+        late_threshold_minutes: form.late_threshold_minutes,
+      };
+      if (!payload.name) {
+        setError('Название обязательно');
+        return;
+      }
+      if (form.id) {
+        await scheduleService.update(form.id, payload);
+      } else {
+        await scheduleService.create(payload);
+      }
+      setShowForm(false);
+      setForm(EMPTY_FORM);
+      await loadAll();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Ошибка сохранения');
+    }
+  };
+
+  const handleDelete = async (id: string) => {
+    if (!confirm('Удалить шаблон?')) return;
+    setError('');
+    try {
+      await scheduleService.remove(id);
+      await loadAll();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Ошибка удаления');
+    }
+  };
+
+  // Для каждой активной категории — текущее назначение (effective_to=null)
+  const activeAssignments = useMemo(() => {
+    const map = new Map<string, ICategorySchedule | null>();
+    for (const cat of workCategories.filter(c => c.is_active)) {
+      const active = assignments.find(a => a.category === cat.code && a.effective_to === null) || null;
+      map.set(cat.code, active);
+    }
+    return map;
+  }, [workCategories, assignments]);
+
+  const handleAssignCategory = async (category: string, scheduleId: string) => {
+    setError('');
+    try {
+      if (!scheduleId) {
+        await scheduleService.removeCategoryAssignment(category);
+      } else {
+        await scheduleService.assignCategory(category, {
+          schedule_id: scheduleId,
+          effective_from: new Date().toISOString().slice(0, 10),
+        });
+      }
+      await loadAll();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Ошибка назначения');
+    }
+  };
+
+  /* ─── CRUD категорий ─── */
+
+  const handleStartCreateCategory = () => {
+    setEditingCategoryCode(null);
+    setCategoryForm({ code: '', name: '', description: '', sort_order: workCategories.length * 10 + 10 });
+    setShowCategoryForm(true);
+  };
+
+  const handleStartEditCategory = (cat: IWorkCategory) => {
+    setEditingCategoryCode(cat.code);
+    setCategoryForm({
+      code: cat.code,
+      name: cat.name,
+      description: cat.description || '',
+      sort_order: cat.sort_order,
+    });
+    setShowCategoryForm(true);
+  };
+
+  const handleSaveCategory = async () => {
+    setError('');
+    try {
+      const code = categoryForm.code.trim().toLowerCase();
+      const name = categoryForm.name.trim();
+      if (!name) {
+        setError('Название обязательно');
+        return;
+      }
+      if (!/^[a-z0-9_]+$/.test(code)) {
+        setError('Код: только a-z, 0-9, _');
+        return;
+      }
+      if (editingCategoryCode) {
+        const payload: { code?: string; name: string; description: string | null; sort_order: number } = {
+          name,
+          description: categoryForm.description || null,
+          sort_order: categoryForm.sort_order,
+        };
+        if (code !== editingCategoryCode) payload.code = code;
+        await workCategoryService.update(editingCategoryCode, payload);
+      } else {
+        await workCategoryService.create({
+          code,
+          name,
+          description: categoryForm.description || null,
+          sort_order: categoryForm.sort_order,
+        });
+      }
+      setShowCategoryForm(false);
+      setEditingCategoryCode(null);
+      await loadAll();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Ошибка сохранения');
+    }
+  };
+
+  const handleDeleteCategory = async (code: string) => {
+    if (!confirm('Удалить категорию?')) return;
+    setError('');
+    try {
+      await workCategoryService.remove(code);
+      await loadAll();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Ошибка удаления');
+    }
+  };
+
+  return (
+    <div className={styles.page}>
+      <div className={styles.header}>
+        <h2 className={styles.title}>Графики работы</h2>
+      </div>
+
+      <div className={styles.tabs}>
+        <button
+          className={`${styles.tab} ${tab === 'templates' ? styles.tabActive : ''}`}
+          onClick={() => setTab('templates')}
+        >
+          Шаблоны графиков
+        </button>
+        <button
+          className={`${styles.tab} ${tab === 'category-manage' ? styles.tabActive : ''}`}
+          onClick={() => setTab('category-manage')}
+        >
+          Категории труда
+        </button>
+        <button
+          className={`${styles.tab} ${tab === 'category-assignments' ? styles.tabActive : ''}`}
+          onClick={() => setTab('category-assignments')}
+        >
+          Привязка графиков к категориям
+        </button>
+        <button
+          className={`${styles.tab} ${tab === 'production-calendar' ? styles.tabActive : ''}`}
+          onClick={() => setTab('production-calendar')}
+        >
+          Производственный календарь
+        </button>
+      </div>
+
+      {error && <div className={styles.error}>{error}</div>}
+
+      {tab === 'templates' && (
+        <>
+          <div className={styles.toolbar}>
+            <button className={styles.btn} onClick={handleStartCreate}>
+              + Новый шаблон
+            </button>
+          </div>
+
+          {showForm && (
+            <div className={styles.form}>
+              <label>
+                Название
+                <input
+                  type="text"
+                  value={form.name}
+                  onChange={e => setForm({ ...form, name: e.target.value })}
+                  placeholder="ИТР 5+2"
+                />
+              </label>
+              <label>
+                Паттерн
+                <select
+                  value={form.pattern_type}
+                  onChange={e => handlePatternChange(e.target.value as PatternType)}
+                >
+                  {(Object.keys(PATTERN_TYPE_LABELS) as PatternType[]).map(p => (
+                    <option key={p} value={p}>
+                      {PATTERN_TYPE_LABELS[p]}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Тип работы
+                <select
+                  value={form.schedule_type}
+                  onChange={e => setForm({ ...form, schedule_type: e.target.value as ScheduleType })}
+                >
+                  {(Object.keys(SCHEDULE_TYPE_LABELS) as ScheduleType[]).map(t => (
+                    <option key={t} value={t}>
+                      {SCHEDULE_TYPE_LABELS[t]}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Начало смены
+                <input
+                  type="time"
+                  value={form.work_start}
+                  onChange={e => setForm({ ...form, work_start: e.target.value })}
+                />
+              </label>
+              <label>
+                Конец смены
+                <input
+                  type="time"
+                  value={form.work_end}
+                  onChange={e => setForm({ ...form, work_end: e.target.value })}
+                />
+              </label>
+              <label>
+                Длина смены (с обедом)
+                <input type="text" value={shiftLabel} readOnly />
+              </label>
+              <label>
+                Обед (минут)
+                <input
+                  type="number"
+                  min={0}
+                  max={240}
+                  value={form.lunch_minutes}
+                  onChange={e => setForm({ ...form, lunch_minutes: parseInt(e.target.value) || 0 })}
+                />
+              </label>
+              <label>
+                Ожидаемые рабочие субботы в месяц
+                <input
+                  type="number"
+                  min={0}
+                  max={5}
+                  value={form.expected_saturdays_per_month}
+                  onChange={e =>
+                    setForm({ ...form, expected_saturdays_per_month: parseInt(e.target.value) || 0 })
+                  }
+                  disabled={form.pattern_type !== '5+2' && form.pattern_type !== 'custom'}
+                />
+              </label>
+              <label>
+                Порог опоздания (минут)
+                <input
+                  type="number"
+                  min={0}
+                  max={120}
+                  value={form.late_threshold_minutes}
+                  onChange={e =>
+                    setForm({ ...form, late_threshold_minutes: parseInt(e.target.value) || 0 })
+                  }
+                />
+              </label>
+              <div style={{ gridColumn: '1 / -1' }}>
+                <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 6 }}>
+                  Рабочие дни
+                </div>
+                <div className={styles.daysRow}>
+                  {WEEKDAY_LABELS.map((label, idx) => {
+                    const day = idx + 1;
+                    const active = form.work_days.includes(day);
+                    return (
+                      <button
+                        key={day}
+                        type="button"
+                        className={`${styles.dayBtn} ${active ? styles.dayBtnActive : ''}`}
+                        onClick={() => toggleWorkDay(day)}
+                      >
+                        {label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+              <label className={styles.checkboxRow} style={{ gridColumn: '1 / -1' }}>
+                <input
+                  type="checkbox"
+                  checked={form.respects_holidays}
+                  onChange={e => setForm({ ...form, respects_holidays: e.target.checked })}
+                />
+                Учитывать праздники РФ (из производственного календаря)
+              </label>
+              <div className={styles.hint}>
+                Чистое рабочее время: <strong>{netHoursLabel}</strong> (длина смены − обед)
+              </div>
+              <div className={styles.actions}>
+                <button className={`${styles.btn} ${styles.btnSecondary}`} onClick={() => setShowForm(false)}>
+                  Отмена
+                </button>
+                <button className={styles.btn} onClick={handleSave}>
+                  Сохранить
+                </button>
+              </div>
+            </div>
+          )}
+
+          {loading ? (
+            <div>Загрузка...</div>
+          ) : (
+            <table className={styles.table}>
+              <thead>
+                <tr>
+                  <th>Название</th>
+                  <th>Паттерн</th>
+                  <th>Смена</th>
+                  <th>Обед</th>
+                  <th>Субботы</th>
+                  <th>Праздники</th>
+                  <th />
+                </tr>
+              </thead>
+              <tbody>
+                {templates.map(t => (
+                  <tr key={t.id}>
+                    <td>
+                      {t.name}
+                      {t.is_default && <span className={`${styles.badge} ${styles.badgeDefault}`} style={{ marginLeft: 8 }}>дефолт</span>}
+                    </td>
+                    <td>{PATTERN_TYPE_LABELS[t.pattern_type]}</td>
+                    <td>
+                      {t.work_start.slice(0, 5)}–{t.work_end.slice(0, 5)} ({formatHours(Number(t.work_hours))})
+                    </td>
+                    <td>{t.lunch_minutes} мин</td>
+                    <td>{t.expected_saturdays_per_month}</td>
+                    <td>{t.respects_holidays ? 'учитывает' : 'игнорирует'}</td>
+                    <td>
+                      <button className={`${styles.btn} ${styles.btnSecondary}`} onClick={() => handleStartEdit(t)}>
+                        Ред.
+                      </button>{' '}
+                      <button
+                        className={`${styles.btn} ${styles.btnDanger}`}
+                        onClick={() => handleDelete(t.id)}
+                        disabled={t.is_default}
+                      >
+                        Удалить
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </>
+      )}
+
+      {tab === 'category-assignments' && (
+        <>
+          <div style={{ marginBottom: 12, color: 'var(--text-secondary)', fontSize: 13 }}>
+            Сотруднику без индивидуального графика и без графика отдела автоматически назначается
+            график его категории труда. Категорию ставит администратор на странице «Управление
+            кадрами», а сами категории создаются на вкладке «Категории труда».
+          </div>
+          {workCategories.filter(c => c.is_active).length === 0 ? (
+            <div style={{ padding: 16, color: 'var(--text-secondary)' }}>
+              Нет активных категорий труда. Создайте их на вкладке «Категории труда».
+            </div>
+          ) : (
+            <table className={styles.table}>
+              <thead>
+                <tr>
+                  <th>Категория</th>
+                  <th>Текущий график</th>
+                  <th>Действует с</th>
+                  <th>Изменить</th>
+                </tr>
+              </thead>
+              <tbody>
+                {workCategories
+                  .filter(c => c.is_active)
+                  .map(cat => {
+                    const assigned = activeAssignments.get(cat.code) || null;
+                    const assignedSchedId = assigned?.schedule_id || '';
+                    return (
+                      <tr key={cat.code}>
+                        <td>{cat.name}</td>
+                        <td>
+                          {assigned?.work_schedules?.name || (
+                            <span style={{ color: 'var(--text-secondary)' }}>— не назначен —</span>
+                          )}
+                        </td>
+                        <td>{assigned?.effective_from || '—'}</td>
+                        <td>
+                          <select
+                            value={assignedSchedId}
+                            onChange={e => handleAssignCategory(cat.code, e.target.value)}
+                          >
+                            <option value="">— снять —</option>
+                            {templates.map(t => (
+                              <option key={t.id} value={t.id}>
+                                {t.name}
+                              </option>
+                            ))}
+                          </select>
+                        </td>
+                      </tr>
+                    );
+                  })}
+              </tbody>
+            </table>
+          )}
+        </>
+      )}
+
+      {tab === 'category-manage' && (
+        <>
+          <div className={styles.toolbar}>
+            <button className={styles.btn} onClick={handleStartCreateCategory}>
+              + Новая категория
+            </button>
+          </div>
+
+          {showCategoryForm && (
+            <div className={styles.form}>
+              <label>
+                Код (латиница, без пробелов)
+                <input
+                  type="text"
+                  value={categoryForm.code}
+                  onChange={e => setCategoryForm({ ...categoryForm, code: e.target.value.toLowerCase() })}
+                  placeholder="office_manager"
+                />
+              </label>
+              <label>
+                Название
+                <input
+                  type="text"
+                  value={categoryForm.name}
+                  onChange={e => setCategoryForm({ ...categoryForm, name: e.target.value })}
+                  placeholder="Руководитель (офис)"
+                />
+              </label>
+              <label style={{ gridColumn: '1 / -1' }}>
+                Описание
+                <input
+                  type="text"
+                  value={categoryForm.description}
+                  onChange={e => setCategoryForm({ ...categoryForm, description: e.target.value })}
+                  placeholder="Необязательно"
+                />
+              </label>
+              <label>
+                Сортировка
+                <input
+                  type="number"
+                  value={categoryForm.sort_order}
+                  onChange={e =>
+                    setCategoryForm({ ...categoryForm, sort_order: parseInt(e.target.value) || 0 })
+                  }
+                />
+              </label>
+              <div className={styles.actions}>
+                <button
+                  className={`${styles.btn} ${styles.btnSecondary}`}
+                  onClick={() => {
+                    setShowCategoryForm(false);
+                    setEditingCategoryCode(null);
+                  }}
+                >
+                  Отмена
+                </button>
+                <button className={styles.btn} onClick={handleSaveCategory}>
+                  Сохранить
+                </button>
+              </div>
+            </div>
+          )}
+
+          <table className={styles.table}>
+            <thead>
+              <tr>
+                <th>Код</th>
+                <th>Название</th>
+                <th>Описание</th>
+                <th>Сортировка</th>
+                <th>Активна</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {workCategories.map(cat => (
+                <tr key={cat.code}>
+                  <td>
+                    <code>{cat.code}</code>
+                  </td>
+                  <td>{cat.name}</td>
+                  <td style={{ color: 'var(--text-secondary)', fontSize: 12 }}>
+                    {cat.description || '—'}
+                  </td>
+                  <td>{cat.sort_order}</td>
+                  <td>{cat.is_active ? 'да' : 'нет'}</td>
+                  <td>
+                    <button
+                      className={`${styles.btn} ${styles.btnSecondary}`}
+                      onClick={() => handleStartEditCategory(cat)}
+                    >
+                      Ред.
+                    </button>{' '}
+                    <button
+                      className={`${styles.btn} ${styles.btnDanger}`}
+                      onClick={() => handleDeleteCategory(cat.code)}
+                    >
+                      Удалить
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      )}
+
+      {tab === 'production-calendar' && <ProductionCalendarPage />}
+    </div>
+  );
+};

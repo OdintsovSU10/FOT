@@ -233,7 +233,7 @@ export async function queryEventsByEmployeeId(
 ): Promise<Record<string, unknown>[]> {
   let query = supabase
     .from('skud_events')
-    .select('*')
+    .select('id, physical_person, card_number, event_date, event_time, access_point, direction, employee_id')
     .eq('employee_id', employeeId)
     .order('event_date', { ascending: false })
     .order('event_time', { ascending: false })
@@ -273,7 +273,7 @@ export async function searchAndBackfillByName(
   while (offset < MAX_SCAN) {
     let query = supabase
       .from('skud_events')
-      .select('*')
+      .select('id, physical_person, card_number, event_date, event_time, access_point, direction, employee_id')
       .is('employee_id', null)
       .order('event_date')
       .range(offset, offset + PAGE_SIZE - 1);

@@ -9,6 +9,7 @@ import {
   type ISyncContext,
 } from './sigur-sync-shared.js';
 import { employeeChangesService } from './employee-changes.service.js';
+import { employeeCache } from './employee-cache.service.js';
 
 // ─── Типы результатов ───
 
@@ -405,6 +406,7 @@ export async function syncEmployeesLogic(
             const { error } = await supabase.from('employees').update(u.fields).eq('id', u.id);
             if (error) return { error };
           }
+          employeeCache.invalidate(u.id);
           return { error: null };
         } catch (err) {
           return { error: { message: err instanceof Error ? err.message : 'Unknown' } };

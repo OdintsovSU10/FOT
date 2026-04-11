@@ -9,6 +9,15 @@ export interface IProductionCalendarEntry {
   is_custom: boolean;
   updated_by: number | null;
   updated_at: string;
+  holidays: string[];
+  mandatory_holidays: string[];
+}
+
+export interface IProductionCalendarUpdate {
+  norm_days: number;
+  norm_hours: number;
+  holidays?: string[];
+  mandatory_holidays?: string[];
 }
 
 interface ApiResponse<T> {
@@ -21,7 +30,7 @@ const getByYear = async (year: number): Promise<IProductionCalendarEntry[]> => {
   return res.data || [];
 };
 
-const update = async (year: number, month: number, data: { norm_days: number; norm_hours: number }): Promise<IProductionCalendarEntry> => {
+const update = async (year: number, month: number, data: IProductionCalendarUpdate): Promise<IProductionCalendarEntry> => {
   const res = await apiClient.put<ApiResponse<IProductionCalendarEntry>>(`/production-calendar/${year}/${month}`, data);
   return res.data;
 };

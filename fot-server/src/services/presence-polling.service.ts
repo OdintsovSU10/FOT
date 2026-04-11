@@ -4,6 +4,8 @@ import { mapSigurEvent } from '../utils/sigur.mapper.js';
 import { computeDedupHash } from '../utils/dedup.utils.js';
 import { backfillUnmatchedEvents } from './skud-backfill.service.js';
 import { normalizePersonName } from './sigur-sync-shared.js';
+import { invalidatePresenceCache } from './skud-presence.service.js';
+import { invalidateDashboardCache } from './skud-dashboard.service.js';
 
 const POLL_INTERVAL = 60_000;
 const EMPLOYEE_CACHE_TTL = 10 * 60_000;
@@ -202,17 +204,11 @@ export async function pollEventsOnce(now = new Date()): Promise<void> {
 
     const { byName, bySigurId, byUniqueName } = await getEmployeeMaps();
 
-    const { data: existingEvents } = await supabase
-      .from('skud_events')
-      .select('dedup_hash')
-      .gte('event_date', window.startDate)
-      .lte('event_date', window.endDate)
-      .not('dedup_hash', 'is', null);
-
+    // Дедупликация выполняется на уровне БД через UNIQUE (dedup_hash, event_date)
+    // + upsert с ignoreDuplicates: true (ниже). Пред-проверка убрана, так как
+    // на горячих диапазонах дат она выкачивала тысячи hash-строк за цикл (60 сек).
+    // In-memory Set нужен только для дедупликации внутри текущей пачки событий.
     const existingSet = new Set<string>();
-    for (const evt of existingEvents || []) {
-      if (evt.dedup_hash) existingSet.add(evt.dedup_hash);
-    }
 
     const inserts: Array<{
       physical_person: string;
@@ -290,6 +286,13 @@ export async function pollEventsOnce(now = new Date()): Promise<void> {
         return { emp_id: parseInt(empId, 10), date };
       });
       await supabase.rpc('batch_recalculate_skud_daily_summary', { p_pairs: pairs });
+    }
+
+    // После успешного цикла сбрасываем кэши presence/dashboard, чтобы пользователи
+    // увидели актуальные входы/выходы. Без этого данные отстают до TTL.
+    if (totalInserted > 0 || summariesToUpdate.size > 0) {
+      invalidatePresenceCache();
+      invalidateDashboardCache();
     }
 
     lastSuccessfulPollAt = now;

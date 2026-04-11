@@ -71,7 +71,7 @@ export async function getDisciplineViolations(
 
   const empQuery = supabase
     .from('employees')
-    .select('id, full_name, position_id, org_department_id')
+    .select('id, full_name, position_id, org_department_id, work_category')
     .eq('is_archived', false)
     .eq('employment_status', 'active');
 
@@ -117,7 +117,10 @@ export async function getDisciplineViolations(
   }
 
   // Resolve графики для всех сотрудников
-  const empListForSched = employees.map(e => ({ id: e.id as number, org_department_id: (e.org_department_id as string | null) }));
+  const empListForSched = employees.map(e => ({
+    id: e.id as number,
+    work_category: (e.work_category as string | null) || null,
+  }));
   const schedulesMap = await resolveSchedulesBulk(empListForSched, normalizedStartMonth + '-01');
 
   const violations: IDisciplineViolation[] = [];

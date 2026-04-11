@@ -66,6 +66,7 @@ export const structureController = {
       // Строим рекурсивное дерево (корневые — parent_id = null)
       const departmentTree = buildDepartmentTree(departments, null);
 
+      res.setHeader('Cache-Control', 'private, max-age=120');
       res.json({
         success: true,
         data: {

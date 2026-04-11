@@ -3,7 +3,11 @@ import { supabase } from '../config/database.js';
 import { auditService } from '../services/audit.service.js';
 import { employeeChangesService } from '../services/employee-changes.service.js';
 import { loadStructureCache, decryptEmployee } from '../services/employee-mapper.service.js';
+import { employeeCache } from '../services/employee-cache.service.js';
 import type { AuthenticatedRequest, EmployeeEncrypted } from '../types/index.js';
+
+// Явный набор колонок для lifecycle-операций
+const EMPLOYEE_LIFECYCLE_COLUMNS = 'id, full_name, last_name, first_name, middle_name, current_salary, salary_actual, salary_calculated, staff_units, birth_date, hire_date, country, pension_number, patent_issue_date, patent_expiry_date, email, org_department_id, org_company_id, position_id, sigur_employee_id, tab_number, current_status, permit_expiry_date, registration_cat1, registration_cat4, doc_receipt_date, work_object, employment_status, department_locked, is_archived, archived_at, created_at, updated_at, work_category';
 
 /**
  * POST /api/employees/:id/archive
@@ -16,13 +20,15 @@ export async function archive(req: AuthenticatedRequest, res: Response): Promise
       .from('employees')
       .update({ is_archived: true, archived_at: new Date().toISOString() })
       .eq('id', id)
-      .select()
+      .select(EMPLOYEE_LIFECYCLE_COLUMNS)
       .single();
 
     if (error || !data) {
       res.status(404).json({ success: false, error: 'Employee not found' });
       return;
     }
+
+    employeeCache.invalidate(id);
 
     await auditService.logFromRequest(req, req.user.id, 'ARCHIVE_EMPLOYEE', {
       entityType: 'employee',
@@ -49,7 +55,7 @@ export async function restore(req: AuthenticatedRequest, res: Response): Promise
       .from('employees')
       .update({ is_archived: false, archived_at: null })
       .eq('id', id)
-      .select()
+      .select(EMPLOYEE_LIFECYCLE_COLUMNS)
       .single();
 
     if (error || !data) {
@@ -57,8 +63,10 @@ export async function restore(req: AuthenticatedRequest, res: Response): Promise
       return;
     }
 
+    employeeCache.invalidate(id);
+
     const structureCache = await loadStructureCache();
-    const employee = decryptEmployee(data as EmployeeEncrypted, structureCache);
+    const employee = decryptEmployee(data as unknown as EmployeeEncrypted, structureCache);
 
     await auditService.logFromRequest(req, req.user.id, 'RESTORE_EMPLOYEE', {
       entityType: 'employee',
@@ -83,13 +91,15 @@ export async function fire(req: AuthenticatedRequest, res: Response): Promise<vo
       .from('employees')
       .update({ employment_status: 'fired' })
       .eq('id', id)
-      .select()
+      .select(EMPLOYEE_LIFECYCLE_COLUMNS)
       .single();
 
     if (error || !data) {
       res.status(404).json({ success: false, error: 'Employee not found' });
       return;
     }
+
+    employeeCache.invalidate(id);
 
     // Закрываем все активные назначения при увольнении
     const today = new Date().toISOString().slice(0, 10);
@@ -105,7 +115,7 @@ export async function fire(req: AuthenticatedRequest, res: Response): Promise<vo
     });
 
     const structureCache = await loadStructureCache();
-    const employee = decryptEmployee(data as EmployeeEncrypted, structureCache);
+    const employee = decryptEmployee(data as unknown as EmployeeEncrypted, structureCache);
     res.json({ success: true, data: employee });
   } catch (error) {
     console.error('Fire employee error:', error);
@@ -124,13 +134,15 @@ export async function rehire(req: AuthenticatedRequest, res: Response): Promise<
       .from('employees')
       .update({ employment_status: 'active' })
       .eq('id', id)
-      .select()
+      .select(EMPLOYEE_LIFECYCLE_COLUMNS)
       .single();
 
     if (error || !data) {
       res.status(404).json({ success: false, error: 'Employee not found' });
       return;
     }
+
+    employeeCache.invalidate(id);
 
     // Создаём новое назначение при восстановлении
     const today = new Date().toISOString().slice(0, 10);
@@ -154,7 +166,7 @@ export async function rehire(req: AuthenticatedRequest, res: Response): Promise<
     });
 
     const structureCache = await loadStructureCache();
-    const employee = decryptEmployee(data as EmployeeEncrypted, structureCache);
+    const employee = decryptEmployee(data as unknown as EmployeeEncrypted, structureCache);
     res.json({ success: true, data: employee });
   } catch (error) {
     console.error('Rehire employee error:', error);
@@ -181,9 +193,11 @@ export async function moveDepartment(req: AuthenticatedRequest, res: Response): 
       createdBy: req.user.id,
     });
 
+    employeeCache.invalidate(id);
+
     const { data, error } = await supabase
       .from('employees')
-      .select('*')
+      .select(EMPLOYEE_LIFECYCLE_COLUMNS)
       .eq('id', id)
       .single();
 
@@ -199,7 +213,7 @@ export async function moveDepartment(req: AuthenticatedRequest, res: Response): 
     });
 
     const structureCache = await loadStructureCache();
-    const employee = decryptEmployee(data as EmployeeEncrypted, structureCache);
+    const employee = decryptEmployee(data as unknown as EmployeeEncrypted, structureCache);
     res.json({ success: true, data: employee });
   } catch (error) {
     console.error('Move department error:', error);

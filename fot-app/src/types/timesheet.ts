@@ -37,9 +37,19 @@ export interface TimesheetEmployee {
   employment_status: 'active' | 'fired';
 }
 
+export interface IProductionCalendarMonth {
+  year: number;
+  month: number;
+  norm_days: number;
+  norm_hours: number;
+  holidays: string[];
+  mandatory_holidays: string[];
+}
+
 export interface TimesheetResponse {
   employees: TimesheetEmployee[];
   entries: TimesheetEntry[];
   stats: TimesheetStats;
   schedules?: Record<number, IResolvedSchedule>;
+  calendar?: IProductionCalendarMonth | null;
 }

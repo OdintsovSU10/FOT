@@ -76,6 +76,13 @@ router.delete(
   employeesController.deleteAll
 );
 
+// GET /api/employees/counts - счётчики по отделам + статусам (worker+, кэш 60с)
+router.get(
+  '/counts',
+  requirePosition('worker', 'header', 'hr', 'admin', 'super_admin'),
+  employeesController.getCounts
+);
+
 // GET /api/employees/:id/history - история событий сотрудника (worker+)
 router.get(
   '/:id/history',
@@ -179,6 +186,13 @@ router.post(
   requirePosition('admin', 'super_admin'),
   requireCritical2FA,
   employeesController.changePosition
+);
+
+// POST /api/employees/:id/change-category - изменить категорию труда (header+)
+router.post(
+  '/:id/change-category',
+  requirePosition('header', 'hr', 'admin', 'super_admin'),
+  employeesController.changeCategory
 );
 
 export default router;

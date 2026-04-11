@@ -17,10 +17,26 @@ const WORK_END = '18:00:00';
 const LATE_THRESHOLD_DEFAULT = WORK_START;
 const SLIGHTLY_LATE_THRESHOLD_DEFAULT = '09:15:00';
 
+// In-memory кэш по ключу (deptId, period, month).
+// TTL 60с — фронт опрашивает раз в 120с, так что реальный egress падает в разы при
+// множественных пользователях смотрящих один отдел.
+const dashboardCache = new Map<string, { data: IDashboardStatsResult; expiresAt: number }>();
+const DASHBOARD_TTL_MS = 60_000;
+
+export function invalidateDashboardCache(): void {
+  dashboardCache.clear();
+}
+
 export async function getDashboardStats(
   params: IDashboardStatsParams,
 ): Promise<IDashboardStatsResult> {
   const { departmentId, period, month } = params;
+
+  const cacheKey = `${departmentId ?? 'all'}|${period ?? 'default'}|${month ?? 'current'}`;
+  const cached = dashboardCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.data;
+  }
 
   const deptIds = await collectDeptIds(departmentId);
 
@@ -28,7 +44,7 @@ export async function getDashboardStats(
   const [empResult, internalPoints] = await Promise.all([
     supabase
       .from('employees')
-      .select('id, full_name, org_department_id')
+      .select('id, full_name, org_department_id, work_category')
       .eq('is_archived', false)
       .eq('employment_status', 'active')
       .in('org_department_id', deptIds),
@@ -37,7 +53,7 @@ export async function getDashboardStats(
 
   const employees = empResult.data;
   if (!employees || employees.length === 0) {
-    return {
+    const empty: IDashboardStatsResult = {
       lateToday: 0, lateYesterday: 0,
       punctuality: { onTime: 0, slightlyLate: 0, veryLate: 0, absent: 0 },
       avgArrivalByDay: [], risks: [], hourlyActivity: [],
@@ -45,6 +61,8 @@ export async function getDashboardStats(
       earlyLeaveToday: 0, recentEvents: [],
       todayEntriesCount: 0, todayExitsCount: 0,
     };
+    dashboardCache.set(cacheKey, { data: empty, expiresAt: Date.now() + DASHBOARD_TTL_MS });
+    return empty;
   }
 
   const empIds = employees.map(e => e.id);
@@ -54,7 +72,10 @@ export async function getDashboardStats(
   }
 
   // Resolve графики — нужны для пороговых значений и исключения remote
-  const empListForSched = employees.map(e => ({ id: e.id as number, org_department_id: (e.org_department_id as string | null) }));
+  const empListForSched = employees.map(e => ({
+    id: e.id as number,
+    work_category: (e.work_category as string | null) || null,
+  }));
   const schedulesMap = await resolveSchedulesBulk(empListForSched, formatDateToISO(new Date()));
 
   // Множество сотрудников, которым не нужен СКУД-контроль сегодня
@@ -476,10 +497,13 @@ export async function getDashboardStats(
     isInternal: internalPoints.size > 0 && !!ev.access_point && internalPoints.has(ev.access_point.trim()),
   }));
 
-  return {
+  const result: IDashboardStatsResult = {
     lateToday, lateYesterday, punctuality, avgArrivalByDay, risks,
     hourlyActivity, weekComparison, topLate, periodStats,
     earlyLeaveToday, recentEvents,
     todayEntriesCount, todayExitsCount,
   };
+
+  dashboardCache.set(cacheKey, { data: result, expiresAt: Date.now() + DASHBOARD_TTL_MS });
+  return result;
 }

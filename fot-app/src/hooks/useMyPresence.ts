@@ -1,11 +1,9 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useMemo } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '../contexts/AuthContext';
 import { skudService } from '../services/skudService';
-import type { IAccessPointSetting } from '../types';
 
 type PresenceStatus = 'online' | 'offline' | 'unknown';
-
-const REFRESH_INTERVAL = 60_000;
 
 const toLocalISO = (d: Date): string => {
   const y = d.getFullYear();
@@ -16,46 +14,38 @@ const toLocalISO = (d: Date): string => {
 
 export const useMyPresence = (): { status: PresenceStatus; loading: boolean } => {
   const { profile } = useAuth();
-  const [status, setStatus] = useState<PresenceStatus>('unknown');
-  const [loading, setLoading] = useState(true);
-  const intervalRef = useRef<number | null>(null);
+  const empId = profile?.employee_id ?? null;
 
-  const check = useCallback(async () => {
-    const empId = profile?.employee_id;
-    if (!empId) { setStatus('unknown'); setLoading(false); return; }
+  // Настройки точек доступа — меняются редко, единый кэш 10 мин на всё приложение
+  const accessPointsQuery = useQuery({
+    queryKey: ['skud-access-point-settings'],
+    queryFn: () => skudService.getAccessPointSettings().catch(() => []),
+    staleTime: 10 * 60_000,
+  });
 
-    try {
-      const today = toLocalISO(new Date());
-      const [events, apSettings] = await Promise.all([
-        skudService.getEmployeeEvents(empId, today, today),
-        skudService.getAccessPointSettings().catch(() => [] as IAccessPointSetting[]),
-      ]);
+  // События сотрудника за сегодня — обновляются раз в 60с
+  const today = toLocalISO(new Date());
+  const eventsQuery = useQuery({
+    queryKey: ['skud-employee-events', empId, today, today],
+    queryFn: () => (empId ? skudService.getEmployeeEvents(empId, today, today) : Promise.resolve([])),
+    enabled: !!empId,
+    staleTime: 30_000,
+    refetchInterval: 60_000,
+  });
 
-      const internalPoints = new Set(apSettings.filter(s => s.is_internal).map(s => s.access_point_name));
-      const extEvents = events
-        .filter(e => !e.access_point || !internalPoints.has(e.access_point))
-        .sort((a, b) => b.event_time.localeCompare(a.event_time));
+  const status: PresenceStatus = useMemo(() => {
+    if (!empId) return 'unknown';
+    const events = eventsQuery.data ?? [];
+    const apSettings = accessPointsQuery.data ?? [];
+    const internalPoints = new Set(apSettings.filter(s => s.is_internal).map(s => s.access_point_name));
+    const extEvents = events
+      .filter(e => !e.access_point || !internalPoints.has(e.access_point))
+      .sort((a, b) => b.event_time.localeCompare(a.event_time));
+    const lastExt = extEvents[0];
+    if (!lastExt) return 'unknown';
+    return lastExt.direction === 'entry' ? 'online' : 'offline';
+  }, [empId, eventsQuery.data, accessPointsQuery.data]);
 
-      const lastExt = extEvents[0];
-      if (!lastExt) {
-        setStatus('unknown');
-      } else {
-        setStatus(lastExt.direction === 'entry' ? 'online' : 'offline');
-      }
-    } catch {
-      setStatus('unknown');
-    } finally {
-      setLoading(false);
-    }
-  }, [profile?.employee_id]);
-
-  useEffect(() => { check(); }, [check]);
-
-  useEffect(() => {
-    if (!profile?.employee_id) return;
-    intervalRef.current = window.setInterval(check, REFRESH_INTERVAL);
-    return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
-  }, [check, profile?.employee_id]);
-
+  const loading = !!empId && (eventsQuery.isLoading || accessPointsQuery.isLoading);
   return { status, loading };
 };

@@ -1,5 +1,6 @@
-import { useState, useEffect, useCallback, type FC } from 'react';
+import { useState, useEffect, useCallback, useMemo, type FC } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
 import { Search, ChevronLeft, ChevronRight } from 'lucide-react';
 import { employeeService } from '../../services/employeeService';
 import type { PaginatedMeta } from '../../services/employeeService';
@@ -16,13 +17,9 @@ export const HeaderEmployeesPage: FC = () => {
   const { profile } = useAuth();
   const departmentId = profile?.department_id || null;
 
-  const [employees, setEmployees] = useState<Employee[]>([]);
-  const [presenceMap, setPresenceMap] = useState<Map<number, IEmployeePresence>>(new Map());
-  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [page, setPage] = useState(1);
-  const [meta, setMeta] = useState<PaginatedMeta>({ page: 1, pageSize: PAGE_SIZE, total: 0, totalPages: 0 });
   const [activeTab, setActiveTab] = useState<'all' | 'fired'>('all');
   const [error, setError] = useState('');
 
@@ -34,40 +31,37 @@ export const HeaderEmployeesPage: FC = () => {
 
   useEffect(() => { setPage(1); }, [activeTab]);
 
-  const loadEmployees = useCallback(async () => {
-    setLoading(true);
-    try {
-      const res = await employeeService.getPaginated({
-        page,
-        pageSize: PAGE_SIZE,
-        search: debouncedSearch || undefined,
-        status: activeTab === 'fired' ? 'fired' : 'active',
-        departmentId: departmentId || undefined,
-      });
-      setEmployees(res.data);
-      setMeta(res.meta);
-    } catch {
-      setEmployees([]);
-    } finally {
-      setLoading(false);
-    }
-  }, [page, debouncedSearch, departmentId, activeTab]);
+  const employeesQuery = useQuery({
+    queryKey: ['header-employees', page, debouncedSearch, activeTab, departmentId],
+    queryFn: () => employeeService.getPaginated({
+      page,
+      pageSize: PAGE_SIZE,
+      search: debouncedSearch || undefined,
+      status: activeTab === 'fired' ? 'fired' : 'active',
+      departmentId: departmentId || undefined,
+    }),
+    staleTime: 60_000,
+  });
+  const employees = employeesQuery.data?.data ?? [];
+  const meta: PaginatedMeta = employeesQuery.data?.meta ?? { page: 1, pageSize: PAGE_SIZE, total: 0, totalPages: 0 };
+  const loading = employeesQuery.isLoading;
 
-  const loadPresence = useCallback(async () => {
-    try {
-      const data = await skudService.getPresence(departmentId ?? undefined);
-      const map = new Map<number, IEmployeePresence>();
-      data.forEach(p => map.set(p.employee_id, p));
-      setPresenceMap(map);
-    } catch { /* ignore */ }
-  }, [departmentId]);
+  // Presence — через React Query с refetchInterval 60с (было setInterval 30с)
+  const presenceQuery = useQuery({
+    queryKey: ['presence', departmentId],
+    queryFn: () => skudService.getPresence(departmentId ?? undefined),
+    staleTime: 30_000,
+    refetchInterval: 60_000,
+  });
+  const presenceMap = useMemo<Map<number, IEmployeePresence>>(() => {
+    const map = new Map<number, IEmployeePresence>();
+    (presenceQuery.data ?? []).forEach(p => map.set(p.employee_id, p));
+    return map;
+  }, [presenceQuery.data]);
 
-  useEffect(() => { loadEmployees(); }, [loadEmployees]);
-  useEffect(() => {
-    loadPresence();
-    const interval = setInterval(loadPresence, 30_000);
-    return () => clearInterval(interval);
-  }, [loadPresence]);
+  const loadEmployees = useCallback(() => {
+    employeesQuery.refetch();
+  }, [employeesQuery]);
 
   const handleEmpClick = (emp: Employee) => navigate(`/tender/${emp.id}`);
 

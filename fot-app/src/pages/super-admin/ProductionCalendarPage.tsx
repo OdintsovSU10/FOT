@@ -12,7 +12,18 @@ interface IEditingRow {
   month: number;
   norm_days: number;
   norm_hours: number;
+  holidays: string;
+  mandatory_holidays: string;
 }
+
+const datesToString = (arr: string[] | undefined): string =>
+  (arr || []).join(', ');
+
+const stringToDates = (str: string): string[] =>
+  str
+    .split(/[\s,;]+/)
+    .map(s => s.trim())
+    .filter(s => /^\d{4}-\d{2}-\d{2}$/.test(s));
 
 export const ProductionCalendarPage: FC = () => {
   const [year, setYear] = useState(new Date().getFullYear());
@@ -45,6 +56,8 @@ export const ProductionCalendarPage: FC = () => {
       month,
       norm_days: entry?.norm_days ?? 22,
       norm_hours: entry?.norm_hours ?? 176,
+      holidays: datesToString(entry?.holidays),
+      mandatory_holidays: datesToString(entry?.mandatory_holidays),
     });
   };
 
@@ -55,6 +68,8 @@ export const ProductionCalendarPage: FC = () => {
       await productionCalendarService.update(year, editing.month, {
         norm_days: editing.norm_days,
         norm_hours: editing.norm_hours,
+        holidays: stringToDates(editing.holidays),
+        mandatory_holidays: stringToDates(editing.mandatory_holidays),
       });
       setEditing(null);
       await load();
@@ -95,6 +110,8 @@ export const ProductionCalendarPage: FC = () => {
                 <th>Месяц</th>
                 <th>Рабочих дней</th>
                 <th>Рабочих часов</th>
+                <th>Праздники</th>
+                <th>Всегда-выходные</th>
                 <th>Изменено</th>
                 <th>Действия</th>
               </tr>
@@ -137,6 +154,32 @@ export const ProductionCalendarPage: FC = () => {
                         entry?.norm_hours ?? '—'
                       )}
                     </td>
+                    <td>
+                      {isEditing ? (
+                        <input
+                          type="text"
+                          className={styles.input}
+                          value={editing.holidays}
+                          onChange={e => setEditing({ ...editing, holidays: e.target.value })}
+                          placeholder="2026-05-01, 2026-05-09"
+                        />
+                      ) : (
+                        <span style={{ fontSize: 11 }}>{(entry?.holidays || []).length} дат</span>
+                      )}
+                    </td>
+                    <td>
+                      {isEditing ? (
+                        <input
+                          type="text"
+                          className={styles.input}
+                          value={editing.mandatory_holidays}
+                          onChange={e => setEditing({ ...editing, mandatory_holidays: e.target.value })}
+                          placeholder="2026-01-01, 2026-01-07"
+                        />
+                      ) : (
+                        <span style={{ fontSize: 11 }}>{(entry?.mandatory_holidays || []).length} дат</span>
+                      )}
+                    </td>
                     <td className={styles.customCell}>
                       {entry?.is_custom && (
                         <span className={styles.customBadge}>Изменено</span>
@@ -170,10 +213,15 @@ export const ProductionCalendarPage: FC = () => {
                 <td>Итого</td>
                 <td>{totalDays}</td>
                 <td>{totalHours}</td>
-                <td colSpan={2} />
+                <td colSpan={4} />
               </tr>
             </tbody>
           </table>
+          <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 8 }}>
+            Даты в формате YYYY-MM-DD через запятую. «Праздники» учитываются только графиками с
+            флагом «учитывать праздники РФ». «Всегда-выходные» (1 января, 7 января, 9 мая) — для
+            всех графиков.
+          </div>
         </div>
       )}
     </div>

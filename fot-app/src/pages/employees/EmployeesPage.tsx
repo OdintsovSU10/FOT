@@ -86,16 +86,20 @@ export const EmployeesPage: FC = () => {
     setLoading(true);
     setError('');
     try {
-      const result = await employeeService.getPaginated({
-        page,
-        pageSize: PAGE_SIZE,
-        search: (!matchesDept && debouncedSearch) ? debouncedSearch : undefined,
-        status: activeTab === 'fired' ? 'fired' : 'active',
-        departmentId: serverDeptId,
-      });
+      const [result, cnts] = await Promise.all([
+        employeeService.getPaginated({
+          page,
+          pageSize: PAGE_SIZE,
+          search: (!matchesDept && debouncedSearch) ? debouncedSearch : undefined,
+          status: activeTab === 'fired' ? 'fired' : 'active',
+          departmentId: serverDeptId,
+        }),
+        // Counts кэшируются на сервере (60с), поэтому этот запрос дешёвый
+        employeeService.getCounts(false).catch(() => ({ byDepartment: {}, byStatus: { active: 0, fired: 0 } })),
+      ]);
       setEmployees(result.data);
       setMeta(result.meta);
-      setCounts(result.counts);
+      setCounts(cnts);
     } catch {
       setError('Ошибка загрузки сотрудников');
     } finally {

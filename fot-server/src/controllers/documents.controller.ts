@@ -87,7 +87,7 @@ const getDownloadUrl = async (req: AuthenticatedRequest, res: Response): Promise
     const { id } = req.params;
     const { data: doc, error } = await supabase
       .from('documents')
-      .select('*')
+      .select('id, employee_id, leave_request_id, category, file_name, file_size, mime_type, r2_key, uploaded_by, created_at')
       .eq('id', id)
       .single();
 
@@ -121,7 +121,7 @@ const getMy = async (req: AuthenticatedRequest, res: Response): Promise<void> =>
 
     const { data, error } = await supabase
       .from('documents')
-      .select('*')
+      .select('id, employee_id, leave_request_id, category, file_name, file_size, mime_type, r2_key, uploaded_by, created_at')
       .eq('employee_id', employeeId)
       .order('created_at', { ascending: false });
 
@@ -140,7 +140,7 @@ const getByEmployee = async (req: AuthenticatedRequest, res: Response): Promise<
 
     const { data, error } = await supabase
       .from('documents')
-      .select('*')
+      .select('id, employee_id, leave_request_id, category, file_name, file_size, mime_type, r2_key, uploaded_by, created_at')
       .eq('employee_id', empId)
       .order('created_at', { ascending: false });
 

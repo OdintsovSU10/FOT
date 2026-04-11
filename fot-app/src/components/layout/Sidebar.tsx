@@ -34,38 +34,42 @@ interface INavGroup {
 
 const navGroups: INavGroup[] = [
   {
-    label: 'Основное',
+    label: 'Моё',
     items: [
       { id: 'my-cabinet', path: '/employee', label: 'Личный кабинет', icon: UserIcon, requiredPosition: 'header' },
       { id: 'overview', path: '/', label: 'Обзор', icon: GridIcon },
+      { id: 'leave-requests', path: '/leave-requests', label: 'Заявления', icon: ClipboardCheckIcon, requiredPosition: 'header' },
+    ]
+  },
+  {
+    label: 'Сотрудники и табель',
+    items: [
       { id: 'header-employees', path: '/my-employees', label: 'Сотрудники', icon: UsersIcon, exactPosition: 'header' },
       { id: 'employees', path: '/tender', label: 'Сотрудники', icon: UsersIcon, requiredPosition: 'admin' },
+      { id: 'staff-control', path: '/staff-control', label: 'Управление кадрами', icon: UsersIcon, requiredPosition: 'admin' },
       { id: 'timesheet', path: '/timesheet', label: 'Табель', icon: CalendarIcon },
-      { id: 'leave-requests', path: '/leave-requests', label: 'Заявления', icon: ClipboardCheckIcon, requiredPosition: 'header' },
+      { id: 'timesheet-hr', path: '/timesheet-hr', label: 'Табели HR', icon: CalendarIcon, requiredPosition: 'hr' },
+      { id: 'discipline', path: '/discipline', label: 'Аналитика', icon: BarChartIcon, requiredPosition: 'header' },
       { id: 'salary-raise-review', path: '/salary-raise-review', label: 'Повышение оклада', icon: DollarIcon, requiredPosition: 'header' },
     ]
   },
   {
-    label: 'Контроль',
+    label: 'СКУД',
     items: [
       { id: 'skud-raw', path: '/skud-raw', label: 'Просмотр СКУД', icon: FileTextIcon, requiredPosition: 'admin' },
       { id: 'skud-db', path: '/skud-db', label: 'СКУД (база)', icon: DatabaseIcon, requiredPosition: 'admin' },
-      { id: 'discipline', path: '/discipline', label: 'Аналитика', icon: BarChartIcon, requiredPosition: 'header' },
-      { id: 'staff-control', path: '/staff-control', label: 'Управление кадрами', icon: UsersIcon, requiredPosition: 'admin' },
-      { id: 'timesheet-review', path: '/timesheet-review', label: 'Проверка табелей', icon: CalendarIcon, requiredPosition: 'hr' },
-      { id: 'timesheet-export', path: '/timesheet-export', label: 'Экспорт табелей', icon: FileTextIcon, requiredPosition: 'hr' },
+      { id: 'sigur-settings', path: '/skud-settings', label: 'Настройки СКУД', icon: SettingsIcon, requiredPosition: 'super_admin' },
     ]
   },
   {
-    label: 'Система',
+    label: 'Администрирование',
     items: [
-      { id: 'sigur-settings', path: '/skud-settings', label: 'Настройки СКУД', icon: SettingsIcon, requiredPosition: 'super_admin' },
+      { id: 'admin-schedules', path: '/admin/schedules', label: 'Графики работы', icon: CalendarIcon, requiredPosition: 'admin' },
+      { id: 'admin-payslips', path: '/admin/payslips', label: 'Расчётные листки', icon: FileTextIcon, requiredPosition: 'admin' },
       { id: 'admin-users', path: '/admin/users', label: 'Пользователи', icon: SettingsIcon, requiredPosition: 'super_admin' },
-      { id: 'admin-audit', path: '/admin/audit', label: 'Аудит данных', icon: ClipboardCheckIcon, requiredPosition: 'super_admin' },
       { id: 'admin-roles', path: '/admin/roles', label: 'Роли', icon: ShieldIcon, requiredPosition: 'super_admin' },
       { id: 'admin-settings', path: '/admin/settings', label: 'Настройки', icon: SettingsIcon, requiredPosition: 'super_admin' },
-      { id: 'admin-calendar', path: '/admin/production-calendar', label: 'Произв. календарь', icon: CalendarIcon, requiredPosition: 'admin' },
-      { id: 'admin-payslips', path: '/admin/payslips', label: 'Расчётные листки', icon: FileTextIcon, requiredPosition: 'admin' },
+      { id: 'admin-audit', path: '/admin/audit', label: 'Аудит данных', icon: ClipboardCheckIcon, requiredPosition: 'super_admin' },
     ]
   }
 ];

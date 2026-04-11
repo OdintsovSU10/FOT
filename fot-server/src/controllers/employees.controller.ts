@@ -3,9 +3,18 @@ import { z } from 'zod';
 import { supabase } from '../config/database.js';
 import { auditService } from '../services/audit.service.js';
 import { loadStructureCache, decryptEmployee, decryptEmployeeList } from '../services/employee-mapper.service.js';
+import { employeeCache } from '../services/employee-cache.service.js';
 import { parseFIO } from '../utils/fio.utils.js';
 import { employeeChangesService } from '../services/employee-changes.service.js';
 import type { AuthenticatedRequest, EmployeeEncrypted } from '../types/index.js';
+
+// Полный список колонок employees для getById / lifecycle-хэндлеров
+const EMPLOYEE_FULL_COLUMNS = 'id, full_name, last_name, first_name, middle_name, current_salary, salary_actual, salary_calculated, staff_units, birth_date, hire_date, country, pension_number, patent_issue_date, patent_expiry_date, email, org_department_id, position_id, sigur_employee_id, tab_number, current_status, permit_expiry_date, registration_cat1, registration_cat4, doc_receipt_date, work_object, employment_status, department_locked, is_archived, archived_at, created_at, updated_at, work_category';
+
+// Кэш счётчиков /api/employees/counts (TTL 60с)
+interface ICountsPayload { byDepartment: Record<string, number>; byStatus: { active: number; fired: number } }
+const countsCache = new Map<string, { data: ICountsPayload; expiresAt: number }>();
+const COUNTS_TTL_MS = 60_000;
 
 // Импорт методов из подконтроллеров
 import { archive, restore, fire, rehire, moveDepartment, getHistory, updateHistoryEvent, deleteHistoryEvent } from './employee-lifecycle.controller.js';
@@ -46,7 +55,7 @@ export const employeesController = {
         ? req.user.department_id
         : req.query.department_id as string | undefined;
       const isListView = req.query.view === 'list';
-      const listColumns = 'id, full_name, position_id, email, org_department_id, employment_status, department_locked, is_archived, archived_at, created_at, updated_at';
+      const listColumns = 'id, full_name, position_id, email, org_department_id, employment_status, department_locked, is_archived, archived_at, created_at, updated_at, work_category';
       const staffColumns = listColumns + ', salary_actual, salary_calculated, current_salary';
 
       // --- Paginated mode ---
@@ -83,27 +92,6 @@ export const employeesController = {
         const employees = (data || []).map(emp => decryptEmployeeList(emp as unknown as EmployeeEncrypted, structureCache));
         const total = count ?? 0;
 
-        // Counts query: dept counts + status counts (lightweight, без search/dept/status фильтров)
-        let countsQuery = supabase
-          .from('employees')
-          .select('org_department_id, employment_status')
-          .eq('is_archived', showArchived);
-
-        const { data: countRows } = await countsQuery;
-        const byDepartment: Record<string, number> = {};
-        const byStatus = { active: 0, fired: 0 };
-        for (const row of countRows || []) {
-          const r = row as { org_department_id: string | null; employment_status: string };
-          if (r.employment_status === 'fired') {
-            byStatus.fired++;
-          } else {
-            byStatus.active++;
-            if (r.org_department_id) {
-              byDepartment[r.org_department_id] = (byDepartment[r.org_department_id] || 0) + 1;
-            }
-          }
-        }
-
         auditService.logFromRequest(req, req.user.id, 'VIEW_EMPLOYEES', {
           details: { count: employees.length, page, archived: showArchived },
         }).catch((err: unknown) => console.error('[audit] VIEW_EMPLOYEES log failed:', err));
@@ -113,7 +101,6 @@ export const employeesController = {
           success: true,
           data: employees,
           meta: { page, pageSize, total, totalPages: Math.ceil(total / pageSize) },
-          counts: { byDepartment, byStatus },
         });
         return;
       }
@@ -125,10 +112,12 @@ export const employeesController = {
       let from = 0;
       let hasMore = true;
 
+      const legacyColumns: string = isListView ? listColumns : EMPLOYEE_FULL_COLUMNS;
       while (hasMore) {
-        let q = supabase
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        let q: any = supabase
           .from('employees')
-          .select(isListView ? listColumns : '*')
+          .select(legacyColumns)
           .eq('is_archived', showArchived)
           .order('id')
           .range(from, from + INTERNAL_PAGE - 1);
@@ -164,13 +153,81 @@ export const employeesController = {
   },
 
   /**
+   * GET /api/employees/counts
+   * Счётчики по отделам и статусам. Кэшируется на 60с — считается тяжёлым,
+   * так как требует обхода всех строк employees.
+   */
+  async getCounts(req: AuthenticatedRequest, res: Response): Promise<void> {
+    try {
+      const showArchived = req.query.archived === 'true';
+      const cacheKey = `counts:${showArchived ? 'archived' : 'active'}`;
+      const cached = countsCache.get(cacheKey);
+      if (cached && cached.expiresAt > Date.now()) {
+        res.setHeader('Cache-Control', 'private, max-age=30');
+        res.json({ success: true, data: cached.data });
+        return;
+      }
+
+      const { data: rows } = await supabase
+        .from('employees')
+        .select('org_department_id, employment_status')
+        .eq('is_archived', showArchived);
+
+      const byDepartment: Record<string, number> = {};
+      const byStatus = { active: 0, fired: 0 };
+      for (const row of rows || []) {
+        const r = row as { org_department_id: string | null; employment_status: string };
+        if (r.employment_status === 'fired') {
+          byStatus.fired++;
+        } else {
+          byStatus.active++;
+          if (r.org_department_id) {
+            byDepartment[r.org_department_id] = (byDepartment[r.org_department_id] || 0) + 1;
+          }
+        }
+      }
+
+      const payload = { byDepartment, byStatus };
+      countsCache.set(cacheKey, { data: payload, expiresAt: Date.now() + COUNTS_TTL_MS });
+      res.setHeader('Cache-Control', 'private, max-age=30');
+      res.json({ success: true, data: payload });
+    } catch (error) {
+      console.error('Get employee counts error:', error);
+      res.status(500).json({ success: false, error: 'Failed to fetch counts' });
+    }
+  },
+
+  /**
    * GET /api/employees/:id
+   * Использует in-memory кэш (TTL 60с) + ETag для HTTP 304.
    */
   async getById(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
-      const { id } = req.params;
+      const idNum = Number(req.params.id);
+      if (!idNum || Number.isNaN(idNum)) {
+        res.status(400).json({ success: false, error: 'Invalid employee id' });
+        return;
+      }
 
-      const employeeResult = await supabase.from('employees').select('*').eq('id', id).single();
+      const ifNoneMatch = req.header('if-none-match');
+      const cached = employeeCache.get(idNum);
+
+      if (cached) {
+        res.setHeader('ETag', cached.etag);
+        res.setHeader('Cache-Control', 'private, max-age=30, must-revalidate');
+        if (ifNoneMatch && ifNoneMatch === cached.etag) {
+          res.status(304).end();
+          return;
+        }
+        res.json({ success: true, data: cached.data });
+        return;
+      }
+
+      const employeeResult = await supabase
+        .from('employees')
+        .select(EMPLOYEE_FULL_COLUMNS)
+        .eq('id', idNum)
+        .single();
 
       if (employeeResult.error || !employeeResult.data) {
         res.status(404).json({ success: false, error: 'Employee not found' });
@@ -178,7 +235,11 @@ export const employeesController = {
       }
 
       const structureCache = await loadStructureCache();
-      const employee = decryptEmployee(employeeResult.data as EmployeeEncrypted, structureCache);
+      const employee = decryptEmployee(employeeResult.data as unknown as EmployeeEncrypted, structureCache);
+      const entry = employeeCache.set(idNum, employee);
+
+      res.setHeader('ETag', entry.etag);
+      res.setHeader('Cache-Control', 'private, max-age=30, must-revalidate');
       res.json({ success: true, data: employee });
     } catch (error) {
       console.error('Get employee error:', error);
@@ -307,7 +368,7 @@ export const employeesController = {
         .from('employees')
         .update(updateData)
         .eq('id', id)
-        .select()
+        .select(EMPLOYEE_FULL_COLUMNS)
         .single();
 
       if (error) {
@@ -316,6 +377,8 @@ export const employeesController = {
         return;
       }
 
+      employeeCache.invalidate(id);
+
       await auditService.logFromRequest(req, req.user.id, 'UPDATE_EMPLOYEE', {
         entityType: 'employee',
         entityId: id,
@@ -323,7 +386,7 @@ export const employeesController = {
       });
 
       const structureCache = await loadStructureCache();
-      const employee = decryptEmployee(data as EmployeeEncrypted, structureCache);
+      const employee = decryptEmployee(data as unknown as EmployeeEncrypted, structureCache);
       res.json({ success: true, data: employee });
     } catch (error) {
       if (error instanceof z.ZodError) {
@@ -353,6 +416,8 @@ export const employeesController = {
         return;
       }
 
+      employeeCache.invalidate(id);
+
       await auditService.logFromRequest(req, req.user.id, 'DELETE_EMPLOYEE', {
         entityType: 'employee',
         entityId: id,
@@ -381,6 +446,8 @@ export const employeesController = {
         effectiveDate: effective_date,
         createdBy: req.user.id,
       });
+
+      employeeCache.invalidate(id);
 
       await auditService.logFromRequest(req, req.user.id, 'UPDATE_SALARY', {
         entityType: 'employee',
@@ -434,6 +501,8 @@ export const employeesController = {
         createdBy: req.user.id,
       });
 
+      employeeCache.invalidate(id);
+
       await auditService.logFromRequest(req, req.user.id, 'UPDATE_EMPLOYEE', {
         entityType: 'employee',
         entityId: id,
@@ -444,6 +513,54 @@ export const employeesController = {
     } catch (error) {
       console.error('Change position error:', error);
       res.status(500).json({ success: false, error: 'Failed to change position' });
+    }
+  },
+
+  // POST /api/employees/:id/change-category — установить категорию труда
+  async changeCategory(req: AuthenticatedRequest, res: Response): Promise<void> {
+    try {
+      const { id } = req.params;
+      const { work_category } = req.body as { work_category: string | null };
+
+      // Валидация: если задано — должна существовать и быть активной
+      if (work_category) {
+        if (!/^[a-z0-9_]+$/.test(work_category)) {
+          res.status(400).json({ success: false, error: 'Invalid category code format' });
+          return;
+        }
+        const { data: cat } = await supabase
+          .from('work_categories')
+          .select('code, is_active')
+          .eq('code', work_category)
+          .maybeSingle();
+        if (!cat || !cat.is_active) {
+          res.status(400).json({ success: false, error: 'Unknown or inactive work_category' });
+          return;
+        }
+      }
+
+      const { error } = await supabase
+        .from('employees')
+        .update({ work_category })
+        .eq('id', Number(id));
+
+      if (error) {
+        res.status(500).json({ success: false, error: error.message });
+        return;
+      }
+
+      employeeCache.invalidate(id);
+
+      await auditService.logFromRequest(req, req.user.id, 'UPDATE_EMPLOYEE', {
+        entityType: 'employee',
+        entityId: id,
+        details: { work_category },
+      });
+
+      res.json({ success: true });
+    } catch (error) {
+      console.error('Change category error:', error);
+      res.status(500).json({ success: false, error: 'Failed to change category' });
     }
   },
 

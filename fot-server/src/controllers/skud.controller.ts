@@ -60,7 +60,7 @@ const skudReadController = {
 
       let query = supabase
         .from('skud_daily_summary')
-        .select('*')
+        .select('employee_id, date, first_entry, last_exit, total_hours, is_present')
         .gte('date', startStr)
         .lte('date', endStr)
         .order('date');
@@ -159,7 +159,7 @@ const skudReadController = {
 
       let query = supabase
         .from('skud_events')
-        .select('*')
+        .select('id, physical_person, card_number, event_date, event_time, access_point, direction, employee_id')
         .order('event_date', { ascending: false })
         .order('event_time', { ascending: false });
 

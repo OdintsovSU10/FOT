@@ -127,7 +127,7 @@ export const auditService = {
   async getByUser(userId: string, limit = 100) {
     const { data, error } = await supabase
       .from('audit_logs')
-      .select('*')
+      .select('id, user_id, action, entity_type, entity_id, details, ip_address, created_at')
       .eq('user_id', userId)
       .order('created_at', { ascending: false })
       .limit(limit);
@@ -142,7 +142,7 @@ export const auditService = {
   async getByAction(action: AuditAction, limit = 100) {
     const { data, error } = await supabase
       .from('audit_logs')
-      .select('*')
+      .select('id, user_id, action, entity_type, entity_id, details, ip_address, created_at')
       .eq('action', action)
       .order('created_at', { ascending: false })
       .limit(limit);
@@ -157,7 +157,7 @@ export const auditService = {
   async getAll(limit = 100, offset = 0) {
     const { data, error, count } = await supabase
       .from('audit_logs')
-      .select('*', { count: 'exact' })
+      .select('id, user_id, action, entity_type, entity_id, details, ip_address, created_at', { count: 'exact' })
       .order('created_at', { ascending: false })
       .range(offset, offset + limit - 1);
 

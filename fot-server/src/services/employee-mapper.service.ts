@@ -9,15 +9,20 @@ export interface StructureCache {
 
 /**
  * Загружает кэш структуры организации (отделы, должности)
- * Кэшируется в памяти на 60 секунд для избежания повторных запросов
+ * TTL 60с. Инвалидация через invalidateStructureCache() — после синхронизации Sigur
+ * или перемещения сотрудника между отделами.
  */
 const structureCacheStore = new Map<string, { data: StructureCache; expiresAt: number }>();
-const STRUCTURE_CACHE_TTL_MS = 300_000;
+const STRUCTURE_CACHE_TTL_MS = 60_000;
+const STRUCTURE_CACHE_KEY = '__global__';
+
+export function invalidateStructureCache(): void {
+  structureCacheStore.delete(STRUCTURE_CACHE_KEY);
+}
 
 export async function loadStructureCache(): Promise<StructureCache> {
-  const cacheKey = '__global__';
   const now = Date.now();
-  const cached = structureCacheStore.get(cacheKey);
+  const cached = structureCacheStore.get(STRUCTURE_CACHE_KEY);
 
   if (cached && cached.expiresAt > now) {
     return cached.data;
@@ -41,7 +46,7 @@ export async function loadStructureCache(): Promise<StructureCache> {
     cache.positions.set(p.id, p.name || '');
   });
 
-  structureCacheStore.set(cacheKey, { data: cache, expiresAt: now + STRUCTURE_CACHE_TTL_MS });
+  structureCacheStore.set(STRUCTURE_CACHE_KEY, { data: cache, expiresAt: now + STRUCTURE_CACHE_TTL_MS });
   return cache;
 }
 
@@ -83,6 +88,7 @@ export function decryptEmployeeList(encrypted: EmployeeEncrypted, structureCache
     archived_at: encrypted.archived_at,
     created_at: encrypted.created_at,
     updated_at: encrypted.updated_at,
+    work_category: encrypted.work_category ?? null,
   };
 }
 
@@ -124,5 +130,6 @@ export function decryptEmployee(encrypted: EmployeeEncrypted, structureCache: St
     archived_at: encrypted.archived_at,
     created_at: encrypted.created_at,
     updated_at: encrypted.updated_at,
+    work_category: encrypted.work_category ?? null,
   };
 }

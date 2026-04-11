@@ -95,6 +95,7 @@ export interface EmployeeEncrypted {
   archived_at: string | null;
   created_at: string;
   updated_at: string;
+  work_category: string | null;
 }
 
 // Сотрудник для API
@@ -132,6 +133,7 @@ export interface Employee {
   archived_at: string | null;
   created_at: string;
   updated_at: string;
+  work_category: string | null;
 }
 
 // История зарплаты в БД
@@ -397,6 +399,19 @@ export interface Payment {
 
 // Графики работы
 export type ScheduleType = 'office' | 'remote' | 'hybrid' | 'shift';
+export type PatternType = '5+0' | '5+2' | '6+0' | 'custom';
+/** Код категории труда из work_categories.code — динамический, не enum */
+export type WorkCategory = string;
+
+export interface IWorkCategory {
+  code: string;
+  name: string;
+  description: string | null;
+  sort_order: number;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
 
 export interface IDayOverride {
   work_start: string;
@@ -416,27 +431,20 @@ export interface WorkSchedule {
   late_threshold_minutes: number;
   day_overrides: Record<string, IDayOverride> | null;
   is_default: boolean;
+  lunch_minutes: number;
+  respects_holidays: boolean;
+  pattern_type: PatternType;
+  expected_saturdays_per_month: number;
   created_at: string;
   updated_at: string;
 }
 
-export interface DepartmentSchedule {
+export interface ICategorySchedule {
   id: string;
-  department_id: string;
+  category: WorkCategory;
   schedule_id: string;
   effective_from: string;
   effective_to: string | null;
-  created_by: number | null;
-  created_at: string;
-}
-
-export interface EmployeeSchedule {
-  id: string;
-  employee_id: number;
-  schedule_id: string;
-  effective_from: string;
-  effective_to: string | null;
-  reason: string | null;
   created_by: number | null;
   created_at: string;
 }
@@ -451,7 +459,20 @@ export interface IResolvedSchedule {
   office_days: number[] | null;
   late_threshold_minutes: number;
   day_overrides: Record<string, IDayOverride> | null;
-  source: 'employee' | 'department' | 'default';
+  lunch_minutes: number;
+  respects_holidays: boolean;
+  pattern_type: PatternType;
+  expected_saturdays_per_month: number;
+  source: 'category' | 'default';
+}
+
+export interface IProductionCalendarMonth {
+  year: number;
+  month: number;
+  norm_days: number;
+  norm_hours: number;
+  holidays: string[];
+  mandatory_holidays: string[];
 }
 
 // Согласование табелей

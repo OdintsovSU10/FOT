@@ -18,6 +18,7 @@ import type {
   TimesheetEntry,
   TimesheetEmployee,
   Employee,
+  IProductionCalendarMonth,
 } from '../../types';
 import type { IResolvedSchedule } from '../../types/schedule';
 import s from './EmployeeTimesheet.module.css';
@@ -55,7 +56,36 @@ const getISODow = (date: Date): number => {
   return d === 0 ? 7 : d;
 };
 
-const isScheduleDayOff = (sched: IResolvedSchedule | undefined, year: number, month: number, day: number): boolean => {
+const toISODate = (year: number, month: number, day: number): string => {
+  const m = String(month).padStart(2, '0');
+  const d = String(day).padStart(2, '0');
+  return `${year}-${m}-${d}`;
+};
+
+const isHolidayForSchedule = (
+  sched: IResolvedSchedule | undefined,
+  calendar: IProductionCalendarMonth | null,
+  year: number,
+  month: number,
+  day: number,
+): boolean => {
+  if (!calendar) return false;
+  const iso = toISODate(year, month, day);
+  if (calendar.mandatory_holidays?.includes(iso)) return true;
+  // Если график не резолвится — по умолчанию respects_holidays = true
+  const respects = sched ? sched.respects_holidays !== false : true;
+  if (respects && calendar.holidays?.includes(iso)) return true;
+  return false;
+};
+
+const isScheduleDayOff = (
+  sched: IResolvedSchedule | undefined,
+  calendar: IProductionCalendarMonth | null,
+  year: number,
+  month: number,
+  day: number,
+): boolean => {
+  if (isHolidayForSchedule(sched, calendar, year, month, day)) return true;
   if (!sched) {
     const dow = new Date(year, month - 1, day).getDay();
     return dow === 0 || dow === 6;
@@ -86,6 +116,7 @@ export const EmployeeTimesheetPage: FC = () => {
   const [allEmployees, setAllEmployees] = useState<TimesheetEmployee[]>([]);
   const [allEntries, setAllEntries] = useState<TimesheetEntry[]>([]);
   const [schedules, setSchedules] = useState<Record<number, IResolvedSchedule>>({});
+  const [calendar, setCalendar] = useState<IProductionCalendarMonth | null>(null);
   const [employee, setEmployee] = useState<Employee | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -110,10 +141,12 @@ export const EmployeeTimesheetPage: FC = () => {
       setAllEmployees(res.employees || []);
       setAllEntries(res.entries || []);
       setSchedules(res.schedules || {});
+      setCalendar(res.calendar || null);
       setEmployee(emp);
     } catch {
       setAllEmployees([]);
       setAllEntries([]);
+      setCalendar(null);
       setEmployee(null);
     } finally {
       setLoading(false);
@@ -153,7 +186,7 @@ export const EmployeeTimesheetPage: FC = () => {
     let normDays = 0;
     let normHours = 0;
     for (let d = 1; d <= daysCount; d++) {
-      if (!isScheduleDayOff(sched, year, month, d)) {
+      if (!isScheduleDayOff(sched, calendar, year, month, d)) {
         normDays++;
         normHours += getWorkHoursForDay(sched, year, month, d);
       }
@@ -165,7 +198,7 @@ export const EmployeeTimesheetPage: FC = () => {
     const accrued = dailyRate * workedDays;
 
     return { salary, normDays, workedDays, dailyRate, accrued, actualHours, normHours };
-  }, [employee, entries, schedules, employeeId, year, month, daysCount]);
+  }, [employee, entries, schedules, employeeId, calendar, year, month, daysCount]);
 
   const prevMonth = () => {
     if (month === 1) { setMonth(12); setYear(y => y - 1); }
@@ -179,7 +212,7 @@ export const EmployeeTimesheetPage: FC = () => {
 
   const handleDayClick = (day: number) => {
     const sched = employeeId ? schedules[employeeId] : undefined;
-    if (isScheduleDayOff(sched, year, month, day)) return;
+    if (isScheduleDayOff(sched, calendar, year, month, day)) return;
     const entry = entryMap.get(day) || null;
     setModalEmployee(employees[0] || null);
     setModalDay(day);
@@ -189,7 +222,7 @@ export const EmployeeTimesheetPage: FC = () => {
 
   const getDayCellCls = (day: number): string => {
     const sched = employeeId ? schedules[employeeId] : undefined;
-    const dayOff = isScheduleDayOff(sched, year, month, day);
+    const dayOff = isScheduleDayOff(sched, calendar, year, month, day);
     const today = isToday(year, month, day);
     const future = isFutureDay(year, month, day);
     const entry = entryMap.get(day);
@@ -239,7 +272,7 @@ export const EmployeeTimesheetPage: FC = () => {
   const breakdownRows = useMemo(() => {
     return days.map(day => {
       const sched = employeeId ? schedules[employeeId] : undefined;
-      const dayOff = isScheduleDayOff(sched, year, month, day);
+      const dayOff = isScheduleDayOff(sched, calendar, year, month, day);
       const future = isFutureDay(year, month, day);
       const entry = entryMap.get(day);
       const date = new Date(year, month - 1, day);
@@ -249,7 +282,7 @@ export const EmployeeTimesheetPage: FC = () => {
 
       return { day, weekday, dayOff, future, entry, isWorked, dailyAccrual };
     });
-  }, [days, entryMap, schedules, employeeId, year, month, salaryData.dailyRate]);
+  }, [days, entryMap, schedules, employeeId, calendar, year, month, salaryData.dailyRate]);
 
   const totalHours = salaryData.actualHours;
   const totalAccrued = salaryData.accrued;

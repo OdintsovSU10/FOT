@@ -8,6 +8,8 @@ import { resolveSchedule, resolveSchedulesBulk } from '../services/schedule.serv
 import type { AuthenticatedRequest } from '../types/index.js';
 
 const scheduleTypeEnum = z.enum(['office', 'remote', 'hybrid', 'shift']);
+const patternTypeEnum = z.enum(['5+0', '5+2', '6+0', 'custom']);
+const workCategoryCodeSchema = z.string().min(1).max(50).regex(/^[a-z0-9_]+$/);
 const weekDayArray = z.array(z.number().int().min(1).max(7)).min(1).max(7);
 
 const dayOverrideSchema = z.object({
@@ -26,6 +28,10 @@ const baseScheduleSchema = z.object({
   office_days: weekDayArray.nullable().optional(),
   late_threshold_minutes: z.number().int().min(0).max(120).optional(),
   day_overrides: z.record(z.string().regex(/^[1-7]$/), dayOverrideSchema).nullable().optional(),
+  lunch_minutes: z.number().int().min(0).max(240).optional(),
+  respects_holidays: z.boolean().optional(),
+  pattern_type: patternTypeEnum.optional(),
+  expected_saturdays_per_month: z.number().int().min(0).max(5).optional(),
 });
 
 const createScheduleSchema = baseScheduleSchema.refine((data) => {
@@ -33,11 +39,10 @@ const createScheduleSchema = baseScheduleSchema.refine((data) => {
   return Object.keys(data.day_overrides).every(k => data.work_days.includes(Number(k)));
 }, { message: 'day_overrides keys must be in work_days' });
 
-const assignSchema = z.object({
+const assignCategorySchema = z.object({
   schedule_id: z.string().uuid(),
   effective_from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   effective_to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
-  reason: z.string().max(500).nullable().optional(),
 });
 
 /** Нормализация HH:MM → HH:MM:SS */
@@ -57,14 +62,6 @@ const normalizeDayOverrides = (
     };
   }
   return result;
-};
-
-/** Проверка: header может управлять только своим отделом */
-const canManageDept = (req: AuthenticatedRequest, deptId: string): boolean => {
-  const { position_type, department_id } = req.user;
-  if (['admin', 'super_admin'].includes(position_type)) return true;
-  if (position_type === 'header' && department_id === deptId) return true;
-  return false;
 };
 
 export const scheduleController = {
@@ -140,19 +137,18 @@ export const scheduleController = {
     }
   },
 
-  /** DELETE /api/schedules/:id — удалить шаблон (если не используется) */
+  /** DELETE /api/schedules/:id — удалить шаблон (если не привязан к категории) */
   async remove(req: AuthenticatedRequest, res: Response) {
     try {
       const { id } = req.params;
 
-      // Проверяем что не используется
-      const [{ count: deptCount }, { count: empCount }] = await Promise.all([
-        supabase.from('department_schedules').select('id', { count: 'exact', head: true }).eq('schedule_id', id),
-        supabase.from('employee_schedules').select('id', { count: 'exact', head: true }).eq('schedule_id', id),
-      ]);
+      const { count: catCount } = await supabase
+        .from('category_schedules')
+        .select('id', { count: 'exact', head: true })
+        .eq('schedule_id', id);
 
-      if ((deptCount || 0) > 0 || (empCount || 0) > 0) {
-        return res.status(409).json({ success: false, error: 'График используется, удалить нельзя' });
+      if ((catCount || 0) > 0) {
+        return res.status(409).json({ success: false, error: 'График привязан к категории труда, удалить нельзя' });
       }
 
       const { error } = await supabase
@@ -169,151 +165,24 @@ export const scheduleController = {
     }
   },
 
-  /** GET /api/schedules/department/:deptId — текущий график отдела */
-  async getDepartmentSchedule(req: AuthenticatedRequest, res: Response) {
-    try {
-      const { deptId } = req.params;
-      if (!canManageDept(req, deptId)) return res.status(403).json({ success: false, error: 'Нет доступа' });
-
-      const { data, error } = await supabase
-        .from('department_schedules')
-        .select('*, work_schedules(*)')
-        .eq('department_id', deptId)
-        .order('effective_from', { ascending: false });
-
-      if (error) throw error;
-      res.json({ success: true, data: data || [] });
-    } catch (err) {
-      console.error('[schedules] getDepartmentSchedule error:', err);
-      res.status(500).json({ success: false, error: 'Ошибка загрузки графика отдела' });
-    }
-  },
-
-  /** PUT /api/schedules/department/:deptId — назначить график отделу */
-  async assignDepartment(req: AuthenticatedRequest, res: Response) {
-    try {
-      const { deptId } = req.params;
-      if (!canManageDept(req, deptId)) return res.status(403).json({ success: false, error: 'Нет доступа' });
-
-      const parsed = assignSchema.safeParse(req.body);
-      if (!parsed.success) return res.status(400).json({ success: false, error: parsed.error.issues });
-
-      // Закрыть предыдущий (если effective_to не задан)
-      await supabase
-        .from('department_schedules')
-        .update({ effective_to: parsed.data.effective_from })
-        .eq('department_id', deptId)
-        .is('effective_to', null);
-
-      const { data, error } = await supabase
-        .from('department_schedules')
-        .insert({
-          department_id: deptId,
-          schedule_id: parsed.data.schedule_id,
-          effective_from: parsed.data.effective_from,
-          effective_to: parsed.data.effective_to || null,
-          created_by: req.user.employee_id,
-        })
-        .select('*, work_schedules(*)')
-        .single();
-
-      if (error) throw error;
-      res.json({ success: true, data });
-    } catch (err) {
-      console.error('[schedules] assignDepartment error:', err);
-      res.status(500).json({ success: false, error: 'Ошибка назначения графика' });
-    }
-  },
-
-  /** GET /api/schedules/employee/:empId — график сотрудника */
-  async getEmployeeSchedule(req: AuthenticatedRequest, res: Response) {
-    try {
-      const empId = parseInt(req.params.empId);
-
-      const { data, error } = await supabase
-        .from('employee_schedules')
-        .select('*, work_schedules(*)')
-        .eq('employee_id', empId)
-        .order('effective_from', { ascending: false });
-
-      if (error) throw error;
-      res.json({ success: true, data: data || [] });
-    } catch (err) {
-      console.error('[schedules] getEmployeeSchedule error:', err);
-      res.status(500).json({ success: false, error: 'Ошибка загрузки графика сотрудника' });
-    }
-  },
-
-  /** PUT /api/schedules/employee/:empId — переопределить график сотрудника */
-  async assignEmployee(req: AuthenticatedRequest, res: Response) {
-    try {
-      const empId = parseInt(req.params.empId);
-
-      const parsed = assignSchema.safeParse(req.body);
-      if (!parsed.success) return res.status(400).json({ success: false, error: parsed.error.issues });
-
-      // Закрыть предыдущий
-      await supabase
-        .from('employee_schedules')
-        .update({ effective_to: parsed.data.effective_from })
-        .eq('employee_id', empId)
-        .is('effective_to', null);
-
-      const { data, error } = await supabase
-        .from('employee_schedules')
-        .insert({
-          employee_id: empId,
-          schedule_id: parsed.data.schedule_id,
-          effective_from: parsed.data.effective_from,
-          effective_to: parsed.data.effective_to || null,
-          reason: parsed.data.reason || null,
-          created_by: req.user.employee_id,
-        })
-        .select('*, work_schedules(*)')
-        .single();
-
-      if (error) throw error;
-      res.json({ success: true, data });
-    } catch (err) {
-      console.error('[schedules] assignEmployee error:', err);
-      res.status(500).json({ success: false, error: 'Ошибка назначения графика сотруднику' });
-    }
-  },
-
-  /** DELETE /api/schedules/employee/:empId/:schedId — убрать переопределение */
-  async removeEmployeeOverride(req: AuthenticatedRequest, res: Response) {
-    try {
-      const empId = parseInt(req.params.empId);
-      const schedId = req.params.schedId;
-
-      const { error } = await supabase
-        .from('employee_schedules')
-        .delete()
-        .eq('id', schedId)
-        .eq('employee_id', empId);
-
-      if (error) throw error;
-      res.json({ success: true });
-    } catch (err) {
-      console.error('[schedules] removeEmployeeOverride error:', err);
-      res.status(500).json({ success: false, error: 'Ошибка удаления переопределения' });
-    }
-  },
-
   /** GET /api/schedules/resolve/:empId?date=YYYY-MM-DD — resolve для сотрудника */
   async resolve(req: AuthenticatedRequest, res: Response) {
     try {
       const empId = parseInt(req.params.empId);
       const date = (req.query.date as string) || new Date().toISOString().slice(0, 10);
 
-      // Получить department_id сотрудника
       const { data: emp } = await supabase
         .from('employees')
-        .select('org_department_id')
+        .select('work_category')
         .eq('id', empId)
-        .single();
+        .maybeSingle();
 
-      const schedule = await resolveSchedule(empId, emp?.org_department_id || null, date);
+      const schedule = await resolveSchedule(
+        empId,
+        null,
+        date,
+        (emp?.work_category as string | null) || null,
+      );
       res.json({ success: true, data: schedule });
     } catch (err) {
       console.error('[schedules] resolve error:', err);
@@ -330,13 +199,15 @@ export const scheduleController = {
       const employeeIds = idsParam.split(',').map(Number).filter(n => !isNaN(n));
       const date = (req.query.date as string) || new Date().toISOString().slice(0, 10);
 
-      // Получить department_id для всех
       const { data: emps } = await supabase
         .from('employees')
-        .select('id, org_department_id')
+        .select('id, work_category')
         .in('id', employeeIds);
 
-      const employees = (emps || []).map(e => ({ id: e.id as number, org_department_id: e.org_department_id as string | null }));
+      const employees = (emps || []).map(e => ({
+        id: e.id as number,
+        work_category: (e.work_category as string | null) || null,
+      }));
       const schedules = await resolveSchedulesBulk(employees, date);
 
       const result: Record<number, unknown> = {};
@@ -348,6 +219,79 @@ export const scheduleController = {
     } catch (err) {
       console.error('[schedules] resolveBulk error:', err);
       res.status(500).json({ success: false, error: 'Ошибка массового определения графиков' });
+    }
+  },
+
+  /** GET /api/schedules/categories — список привязок category → schedule */
+  async listCategories(_req: AuthenticatedRequest, res: Response) {
+    try {
+      const { data, error } = await supabase
+        .from('category_schedules')
+        .select('*, work_schedules(*)')
+        .order('category')
+        .order('effective_from', { ascending: false });
+
+      if (error) throw error;
+      res.json({ success: true, data: data || [] });
+    } catch (err) {
+      console.error('[schedules] listCategories error:', err);
+      res.status(500).json({ success: false, error: 'Ошибка загрузки привязок категорий' });
+    }
+  },
+
+  /** PUT /api/schedules/category/:category — назначить график категории */
+  async assignCategory(req: AuthenticatedRequest, res: Response) {
+    try {
+      const parsedCat = workCategoryCodeSchema.safeParse(req.params.category);
+      if (!parsedCat.success) return res.status(400).json({ success: false, error: 'Неверная категория' });
+
+      const parsed = assignCategorySchema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ success: false, error: parsed.error.issues });
+
+      await supabase
+        .from('category_schedules')
+        .update({ effective_to: parsed.data.effective_from })
+        .eq('category', parsedCat.data)
+        .is('effective_to', null);
+
+      const { data, error } = await supabase
+        .from('category_schedules')
+        .insert({
+          category: parsedCat.data,
+          schedule_id: parsed.data.schedule_id,
+          effective_from: parsed.data.effective_from,
+          effective_to: parsed.data.effective_to || null,
+          created_by: req.user.employee_id,
+        })
+        .select('*, work_schedules(*)')
+        .single();
+
+      if (error) throw error;
+      res.json({ success: true, data });
+    } catch (err) {
+      console.error('[schedules] assignCategory error:', err);
+      res.status(500).json({ success: false, error: 'Ошибка назначения графика категории' });
+    }
+  },
+
+  /** DELETE /api/schedules/category/:category — закрыть все активные привязки */
+  async removeCategoryAssignment(req: AuthenticatedRequest, res: Response) {
+    try {
+      const parsedCat = workCategoryCodeSchema.safeParse(req.params.category);
+      if (!parsedCat.success) return res.status(400).json({ success: false, error: 'Неверная категория' });
+
+      const today = new Date().toISOString().slice(0, 10);
+      const { error } = await supabase
+        .from('category_schedules')
+        .update({ effective_to: today })
+        .eq('category', parsedCat.data)
+        .is('effective_to', null);
+
+      if (error) throw error;
+      res.json({ success: true });
+    } catch (err) {
+      console.error('[schedules] removeCategoryAssignment error:', err);
+      res.status(500).json({ success: false, error: 'Ошибка снятия привязки категории' });
     }
   },
 };

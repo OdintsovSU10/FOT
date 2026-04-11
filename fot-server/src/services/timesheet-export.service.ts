@@ -17,6 +17,7 @@ export interface IExportEmployee {
   position_id: string | null;
   org_department_id: string | null;
   sigur_employee_id: number | null;
+  work_category: string | null;
 }
 
 export interface IDepartmentTimesheetData {
@@ -76,7 +77,7 @@ export async function fetchTimesheetDataForDepartment(
   // Сотрудники
   let empQuery = supabase
     .from('employees')
-    .select('id, full_name, position_id, org_department_id, sigur_employee_id')
+    .select('id, full_name, position_id, org_department_id, sigur_employee_id, work_category')
     .eq('employment_status', 'active')
     .eq('is_archived', false)
     .order('full_name');
@@ -92,11 +93,12 @@ export async function fetchTimesheetDataForDepartment(
     position_id: (e.position_id as string | null),
     org_department_id: (e.org_department_id as string | null),
     sigur_employee_id: (e.sigur_employee_id as number | null),
+    work_category: (e.work_category as string | null) || null,
   }));
   const employeeIds = empArr.map(e => e.id);
 
   // Графики
-  const empList = empArr.map(e => ({ id: e.id, org_department_id: e.org_department_id }));
+  const empList = empArr.map(e => ({ id: e.id, work_category: e.work_category }));
   const schedulesMap = await resolveSchedulesBulk(empList, startDate);
 
   // Internal access points

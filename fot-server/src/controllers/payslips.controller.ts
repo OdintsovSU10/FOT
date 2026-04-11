@@ -14,7 +14,7 @@ const getMy = async (req: AuthenticatedRequest, res: Response): Promise<void> =>
 
     const { data, error } = await supabase
       .from('payslips')
-      .select('*')
+      .select('id, employee_id, period, gross_amount, net_amount, deductions, details, document_id, created_by, created_at')
       .eq('employee_id', employeeId)
       .order('period', { ascending: false });
 
@@ -33,7 +33,7 @@ const getByEmployee = async (req: AuthenticatedRequest, res: Response): Promise<
 
     const { data, error } = await supabase
       .from('payslips')
-      .select('*')
+      .select('id, employee_id, period, gross_amount, net_amount, deductions, details, document_id, created_by, created_at')
       .eq('employee_id', empId)
       .order('period', { ascending: false });
 

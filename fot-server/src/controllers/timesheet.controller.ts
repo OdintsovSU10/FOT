@@ -5,7 +5,7 @@ import { auditService } from '../services/audit.service.js';
 import type { AuthenticatedRequest, TimeStatus, IResolvedSchedule } from '../types/index.js';
 import { exportTimesheet } from './timesheet-export.controller.js';
 import { exportTimesheetMass } from './timesheet-mass-export.controller.js';
-import { resolveSchedulesBulk, isWorkingDay, needsSkudCheck, countWorkingDaysUpToToday as schedWorkingDaysUpToToday, countNormHoursUpToToday, getScheduleForDate, getEffectiveLateThreshold } from '../services/schedule.service.js';
+import { resolveSchedulesBulk, isWorkingDay, needsSkudCheck, countWorkingDaysUpToToday as schedWorkingDaysUpToToday, countNormHoursUpToToday, getScheduleForDate, getEffectiveLateThreshold, loadCalendarMonth } from '../services/schedule.service.js';
 import { getInternalAccessPoints } from '../services/skud-shared.service.js';
 
 const validStatuses: TimeStatus[] = ['work', 'vacation', 'dayoff', 'remote', 'unpaid', 'absent', 'sick', 'business_trip', 'manual'];
@@ -90,7 +90,7 @@ export const timesheetController = {
       // Fetch employees
       let empQuery = supabase
         .from('employees')
-        .select('id, full_name, position_id, org_department_id, employment_status')
+        .select('id, full_name, position_id, org_department_id, employment_status, work_category')
         .eq('employment_status', 'active')
         .eq('is_archived', false)
         .order('full_name');
@@ -104,9 +104,15 @@ export const timesheetController = {
 
       const employeeIds = (employees || []).map(e => e.id);
 
-      // Resolve графики для всех сотрудников
-      const empList = (employees || []).map(e => ({ id: e.id as number, org_department_id: (e.org_department_id as string | null) }));
-      const schedulesMap = await resolveSchedulesBulk(empList, startDate);
+      // Resolve графики для всех сотрудников (по категории труда) + производственный календарь месяца
+      const empList = (employees || []).map(e => ({
+        id: e.id as number,
+        work_category: (e.work_category as string | null) || null,
+      }));
+      const [schedulesMap, calendarMonth] = await Promise.all([
+        resolveSchedulesBulk(empList, startDate),
+        loadCalendarMonth(year, mon),
+      ]);
 
       // Fetch position names
       const positionIds = [...new Set((employees || []).map(e => e.position_id).filter(Boolean))];
@@ -351,10 +357,10 @@ export const timesheetController = {
           if (seenKeys.has(key)) continue;
 
           // Проверяем рабочий ли день по графику
-          if (!isWorkingDay(sched, dateObj)) continue;
+          if (!isWorkingDay(sched, dateObj, calendarMonth)) continue;
 
           // Если не нужен СКУД-контроль (remote или hybrid на remote-день) — автозаполнение
-          if (!needsSkudCheck(sched, dateObj)) {
+          if (!needsSkudCheck(sched, dateObj, calendarMonth)) {
             seenKeys.add(key);
             entries.push({
               id: null,
@@ -376,10 +382,10 @@ export const timesheetController = {
       for (const empId of employeeIds) {
         const sched = schedulesMap.get(empId);
         const empWorkDays = sched
-          ? schedWorkingDaysUpToToday(year, mon, sched)
+          ? schedWorkingDaysUpToToday(year, mon, sched, calendarMonth)
           : getWorkingDaysUpToToday(year, mon);
         normHours += sched
-          ? countNormHoursUpToToday(year, mon, sched)
+          ? countNormHoursUpToToday(year, mon, sched, calendarMonth)
           : empWorkDays * 8;
         totalWorkingDays = Math.max(totalWorkingDays, empWorkDays);
       }
@@ -419,6 +425,7 @@ export const timesheetController = {
           employees: employeesWithNames,
           entries,
           schedules: schedulesObj,
+          calendar: calendarMonth,
           stats: {
             employeeCount: employeeIds.length,
             workingDays: totalWorkingDays,

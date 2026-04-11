@@ -12,14 +12,10 @@ router.post('/', requirePosition('admin', 'super_admin'), scheduleController.cre
 router.put('/:id', requirePosition('admin', 'super_admin'), scheduleController.update);
 router.delete('/:id', requirePosition('admin', 'super_admin'), scheduleController.remove);
 
-// Графики отделов
-router.get('/department/:deptId', requirePosition('header', 'hr', 'admin', 'super_admin'), scheduleController.getDepartmentSchedule);
-router.put('/department/:deptId', requirePosition('header', 'hr', 'admin', 'super_admin'), scheduleController.assignDepartment);
-
-// Графики сотрудников
-router.get('/employee/:empId', requirePosition('header', 'hr', 'admin', 'super_admin'), scheduleController.getEmployeeSchedule);
-router.put('/employee/:empId', requirePosition('header', 'hr', 'admin', 'super_admin'), scheduleController.assignEmployee);
-router.delete('/employee/:empId/:schedId', requirePosition('header', 'hr', 'admin', 'super_admin'), scheduleController.removeEmployeeOverride);
+// Графики категорий труда
+router.get('/categories', requirePosition('header', 'hr', 'admin', 'super_admin'), scheduleController.listCategories);
+router.put('/category/:category', requirePosition('admin', 'super_admin'), scheduleController.assignCategory);
+router.delete('/category/:category', requirePosition('admin', 'super_admin'), scheduleController.removeCategoryAssignment);
 
 // Resolve
 router.get('/resolve/:empId', requirePosition('worker', 'header', 'hr', 'admin', 'super_admin'), scheduleController.resolve);

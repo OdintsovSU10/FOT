@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, type FC } from 'react';
 import { useParams, useNavigate, useLocation, useSearchParams } from 'react-router-dom';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   ArrowLeft, Edit3, Archive, RotateCcw, Trash2,
   Briefcase, FolderOpen, CalendarDays, CheckCircle,
@@ -19,7 +20,7 @@ import { DateInput } from '../../components/ui/DateInput';
 import {
   calculateAttendance, isEmployeeOnSite, computePeriodData,
 } from '../../utils/attendanceCalc';
-import type { Employee, EmployeeInput, EmployeeHistoryEvent, OrgDepartmentNode, SkudEvent } from '../../types';
+import type { EmployeeInput, SkudEvent } from '../../types';
 import '../../styles/EmployeeCardPage.css';
 import '../../styles/EmployeeCardV2.css';
 
@@ -124,12 +125,8 @@ export const EmployeeCardPage: FC = () => {
   const urlTab = searchParams.get('tab') as Tab | null;
   const urlDate = searchParams.get('date');
 
-  const [employee, setEmployee] = useState<Employee | null>(null);
-  const [history, setHistory] = useState<EmployeeHistoryEvent[]>([]);
-  const [, setDepartments] = useState<OrgDepartmentNode[]>([]);
-  const [skudEvents, setSkudEvents] = useState<SkudEvent[]>([]);
-  const [internalPoints, setInternalPoints] = useState<Set<string>>(new Set());
-  const [loading, setLoading] = useState(true);
+  const queryClient = useQueryClient();
+  const empIdNum = Number(id);
   const [error, setError] = useState('');
   const [activeTab, setActiveTab] = useState<Tab>(urlTab && ['attendance', 'info', 'history', 'skud'].includes(urlTab) ? urlTab : 'attendance');
   const [isEditing, setIsEditing] = useState(false);
@@ -157,58 +154,85 @@ export const EmployeeCardPage: FC = () => {
     else setCalMonth(m => m + 1);
   };
 
-  // Load employee + structure
-  const loadData = useCallback(async () => {
-    if (!id) return;
-    setLoading(true);
-    setError('');
-    try {
-      const [emp, hist, struct] = await Promise.all([
-        employeeService.getById(Number(id)),
-        employeeService.getHistory(Number(id)).catch(() => [] as EmployeeHistoryEvent[]),
-        structureApi.getTree().catch(() => null),
-      ]);
-      setEmployee(emp);
-      setHistory(hist);
-      if (struct?.data?.departments) setDepartments(struct.data.departments);
-    } catch {
-      setError('Ошибка загрузки данных сотрудника');
-    } finally {
-      setLoading(false);
-    }
-  }, [id]);
+  // Карточка сотрудника — основные данные (серверный кэш TTL 60с + ETag)
+  const employeeQuery = useQuery({
+    queryKey: ['employee', empIdNum],
+    queryFn: () => employeeService.getById(empIdNum),
+    enabled: !!empIdNum && !Number.isNaN(empIdNum),
+    staleTime: 60_000,
+  });
+  const employee = employeeQuery.data ?? null;
+  const loading = employeeQuery.isLoading;
 
-  useEffect(() => { loadData(); }, [loadData]);
+  // История сотрудника
+  const historyQuery = useQuery({
+    queryKey: ['employee-history', empIdNum],
+    queryFn: () => employeeService.getHistory(empIdNum).catch(() => []),
+    enabled: !!empIdNum && !Number.isNaN(empIdNum),
+    staleTime: 60_000,
+  });
+  const history = historyQuery.data ?? [];
 
-  // Load internal access points
-  useEffect(() => {
-    skudService.getAccessPointSettings().then(settings => {
-      setInternalPoints(new Set(settings.filter(s => s.is_internal).map(s => s.access_point_name.trim())));
-    }).catch(() => {});
-  }, []);
+  // Структура (для редактирования отделов) — грузится 1 раз, кэш 5 мин
+  useQuery({
+    queryKey: ['structure-tree'],
+    queryFn: () => structureApi.getTree().catch(() => null),
+    staleTime: 5 * 60_000,
+  });
 
-  // Load SKUD events for selected month
-  const [skudRefresh, setSkudRefresh] = useState(0);
-  const reloadSkudEvents = useCallback(() => setSkudRefresh(n => n + 1), []);
+  // Настройки точек доступа (меняются редко, но нужны для расчёта внутренних проходов)
+  const accessPointsQuery = useQuery({
+    queryKey: ['skud-access-point-settings'],
+    queryFn: () => skudService.getAccessPointSettings().catch(() => []),
+    staleTime: 10 * 60_000,
+  });
+  const internalPoints = useMemo<Set<string>>(() => {
+    const settings = accessPointsQuery.data ?? [];
+    return new Set(settings.filter(s => s.is_internal).map(s => s.access_point_name.trim()));
+  }, [accessPointsQuery.data]);
 
-  useEffect(() => {
-    if (!id) return;
+  // СКУД события за выбранный месяц
+  const monthRange = useMemo(() => {
     const startDate = `${calYear}-${String(calMonth + 1).padStart(2, '0')}-01`;
     const endDate = `${calYear}-${String(calMonth + 1).padStart(2, '0')}-${String(new Date(calYear, calMonth + 1, 0).getDate()).padStart(2, '0')}`;
-    skudService.getEmployeeEvents(Number(id), startDate, endDate)
-      .then(setSkudEvents)
-      .catch(() => setSkudEvents([]));
-  }, [id, calMonth, calYear, skudRefresh]);
+    return { startDate, endDate };
+  }, [calMonth, calYear]);
 
-  // Отдельная загрузка событий сегодняшнего дня для статуса (не зависит от выбранного месяца)
-  const [todayEvents, setTodayEvents] = useState<SkudEvent[]>([]);
-  useEffect(() => {
-    if (!id) return;
-    const today = new Date().toISOString().slice(0, 10);
-    skudService.getEmployeeEvents(Number(id), today, today)
-      .then(setTodayEvents)
-      .catch(() => setTodayEvents([]));
-  }, [id, skudRefresh]);
+  const skudEventsQuery = useQuery({
+    queryKey: ['skud-employee-events', empIdNum, monthRange.startDate, monthRange.endDate],
+    queryFn: () => skudService.getEmployeeEvents(empIdNum, monthRange.startDate, monthRange.endDate).catch(() => [] as SkudEvent[]),
+    enabled: !!empIdNum && !Number.isNaN(empIdNum),
+    staleTime: 30_000,
+  });
+  const skudEvents = useMemo<SkudEvent[]>(() => skudEventsQuery.data ?? [], [skudEventsQuery.data]);
+
+  // События сегодняшнего дня для статуса on-site.
+  // Если выбранный месяц совпадает с текущим — берём из месячного массива, избегая лишнего запроса.
+  const todayStr = useMemo(() => new Date().toISOString().slice(0, 10), []);
+  const isCurrentMonth = now.getFullYear() === calYear && now.getMonth() === calMonth;
+
+  const todayEventsQuery = useQuery({
+    queryKey: ['skud-employee-events-today', empIdNum, todayStr],
+    queryFn: () => skudService.getEmployeeEvents(empIdNum, todayStr, todayStr).catch(() => [] as SkudEvent[]),
+    enabled: !!empIdNum && !Number.isNaN(empIdNum) && !isCurrentMonth,
+    staleTime: 30_000,
+  });
+  const todayEvents = useMemo<SkudEvent[]>(() => {
+    if (isCurrentMonth) {
+      return skudEvents.filter(e => e.event_date === todayStr);
+    }
+    return todayEventsQuery.data ?? [];
+  }, [isCurrentMonth, skudEvents, todayEventsQuery.data, todayStr]);
+
+  const reloadSkudEvents = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: ['skud-employee-events', empIdNum] });
+    queryClient.invalidateQueries({ queryKey: ['skud-employee-events-today', empIdNum] });
+  }, [queryClient, empIdNum]);
+
+  const reloadEmployee = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: ['employee', empIdNum] });
+    queryClient.invalidateQueries({ queryKey: ['employee-history', empIdNum] });
+  }, [queryClient, empIdNum]);
 
   // Calculated attendance data
   const attendance = useMemo(
@@ -263,19 +287,19 @@ export const EmployeeCardPage: FC = () => {
 
   const saveEditing = async () => {
     if (!employee) return;
-    try { await employeeService.update(employee.id, editData); setIsEditing(false); loadData(); }
+    try { await employeeService.update(employee.id, editData); setIsEditing(false); reloadEmployee(); }
     catch { setError('Ошибка сохранения'); }
   };
 
   const handleArchive = async () => {
     if (!employee || !confirm('Перевести сотрудника в архив?')) return;
-    try { await employeeService.archive(employee.id); loadData(); }
+    try { await employeeService.archive(employee.id); reloadEmployee(); }
     catch { setError('Ошибка архивации'); }
   };
 
   const handleRestore = async () => {
     if (!employee) return;
-    try { await employeeService.restore(employee.id); loadData(); }
+    try { await employeeService.restore(employee.id); reloadEmployee(); }
     catch { setError('Ошибка восстановления'); }
   };
 

@@ -95,7 +95,7 @@ export const chatService = {
         sender_id: senderId,
         content: encryptedContent,
       })
-      .select('*')
+      .select('id, conversation_id, sender_id, content, is_read, created_at')
       .single();
 
     if (error || !message) {
@@ -130,7 +130,7 @@ export const chatService = {
 
     const { data, error } = await supabase
       .from('chat_messages')
-      .select('*')
+      .select('id, conversation_id, sender_id, content, is_read, created_at')
       .eq('conversation_id', conversationId)
       .order('created_at', { ascending: false })
       .range(offset, offset + limit - 1);
@@ -147,7 +147,7 @@ export const chatService = {
    * Получить список диалогов пользователя
    */
   async getConversations(userId: string): Promise<IChatConversation[]> {
-    // Получаем conversation_ids пользователя
+    // 1) conversation_ids пользователя
     const { data: participations } = await supabase
       .from('chat_participants')
       .select('conversation_id')
@@ -157,69 +157,85 @@ export const chatService = {
 
     const convIds = participations.map(p => p.conversation_id);
 
-    // Получаем диалоги
+    // 2) Все диалоги одним запросом
     const { data: conversations } = await supabase
       .from('chat_conversations')
-      .select('*')
+      .select('id, created_at, updated_at')
       .in('id', convIds)
       .order('updated_at', { ascending: false });
 
-    if (!conversations) return [];
+    if (!conversations || conversations.length === 0) return [];
 
-    // Для каждого диалога: участники, последнее сообщение, непрочитанные
-    const result: IChatConversation[] = await Promise.all(
-      conversations.map(async (conv) => {
-        // Участники
-        const { data: parts } = await supabase
-          .from('chat_participants')
-          .select('user_id')
-          .eq('conversation_id', conv.id);
+    // 3) Все участники всех диалогов одним запросом
+    const { data: allParts } = await supabase
+      .from('chat_participants')
+      .select('conversation_id, user_id')
+      .in('conversation_id', convIds);
 
-        const participantIds = (parts || []).map(p => p.user_id);
+    const partsByConv = new Map<string, string[]>();
+    (allParts || []).forEach(p => {
+      const arr = partsByConv.get(p.conversation_id) || [];
+      arr.push(p.user_id);
+      partsByConv.set(p.conversation_id, arr);
+    });
 
-        // Получаем имена
-        const { data: profiles } = await supabase
-          .from('user_profiles')
-          .select('id, full_name')
-          .in('id', participantIds);
+    // 4) Все user_profiles одним запросом
+    const allUserIds = [...new Set((allParts || []).map(p => p.user_id))];
+    const { data: profiles } = await supabase
+      .from('user_profiles')
+      .select('id, full_name')
+      .in('id', allUserIds);
 
-        const participants = (profiles || []).map(p => ({
-          user_id: p.id,
-          full_name: p.full_name,
-        }));
+    const profileById = new Map<string, { id: string; full_name: string | null }>();
+    (profiles || []).forEach(p => profileById.set(p.id, p));
 
-        // Последнее сообщение
-        const { data: lastMsg } = await supabase
-          .from('chat_messages')
-          .select('content, sender_id, created_at')
-          .eq('conversation_id', conv.id)
-          .order('created_at', { ascending: false })
-          .limit(1)
-          .single();
+    // 5) Все сообщения (только нужные колонки) одним запросом — берём по одному последнему на каждый диалог
+    // PostgREST не поддерживает DISTINCT ON, поэтому берём все сообщения за разумный лимит и группируем в JS
+    const { data: allMsgs } = await supabase
+      .from('chat_messages')
+      .select('conversation_id, content, sender_id, created_at, is_read')
+      .in('conversation_id', convIds)
+      .order('created_at', { ascending: false })
+      .limit(convIds.length * 50);
 
-        // Непрочитанные (не от текущего пользователя)
-        const { count: unreadCount } = await supabase
-          .from('chat_messages')
-          .select('id', { count: 'exact', head: true })
-          .eq('conversation_id', conv.id)
-          .eq('is_read', false)
-          .neq('sender_id', userId);
+    const lastByConv = new Map<string, { content: string; sender_id: string; created_at: string }>();
+    const unreadByConv = new Map<string, number>();
+    (allMsgs || []).forEach(m => {
+      if (!lastByConv.has(m.conversation_id)) {
+        lastByConv.set(m.conversation_id, {
+          content: m.content,
+          sender_id: m.sender_id,
+          created_at: m.created_at,
+        });
+      }
+      if (!m.is_read && m.sender_id !== userId) {
+        unreadByConv.set(m.conversation_id, (unreadByConv.get(m.conversation_id) || 0) + 1);
+      }
+    });
 
-        return {
-          id: conv.id,
-          created_at: conv.created_at,
-          updated_at: conv.updated_at,
-          participants,
-          last_message: lastMsg ? {
-            ...lastMsg,
-            content: decryptOrPassthrough(lastMsg.content),
-          } : null,
-          unread_count: unreadCount || 0,
-        };
-      })
-    );
+    // 6) Сборка результата без дополнительных запросов
+    return conversations.map(conv => {
+      const participantIds = partsByConv.get(conv.id) || [];
+      const participants = participantIds
+        .map(uid => profileById.get(uid))
+        .filter((p): p is { id: string; full_name: string | null } => !!p)
+        .map(p => ({ user_id: p.id, full_name: p.full_name }));
 
-    return result;
+      const lastMsg = lastByConv.get(conv.id);
+
+      return {
+        id: conv.id,
+        created_at: conv.created_at,
+        updated_at: conv.updated_at,
+        participants,
+        last_message: lastMsg ? {
+          content: decryptOrPassthrough(lastMsg.content),
+          sender_id: lastMsg.sender_id,
+          created_at: lastMsg.created_at,
+        } : null,
+        unread_count: unreadByConv.get(conv.id) || 0,
+      };
+    });
   },
 
   /**

@@ -31,7 +31,6 @@ export interface EmployeeCounts {
 export interface PaginatedResponse {
   data: Employee[];
   meta: PaginatedMeta;
-  counts: EmployeeCounts;
 }
 
 export const employeeService = {
@@ -54,8 +53,15 @@ export const employeeService = {
     if (params.status) qs.set('status', params.status);
     if (params.departmentId) qs.set('department_id', params.departmentId);
     if (params.archived) qs.set('archived', 'true');
-    const response = await apiClient.get<{ data: Employee[]; meta: PaginatedMeta; counts: EmployeeCounts }>(`/employees?${qs}`);
-    return { data: response.data || [], meta: response.meta || { page: 1, pageSize: 50, total: 0, totalPages: 0 }, counts: response.counts || { byDepartment: {}, byStatus: { active: 0, fired: 0 } } };
+    const response = await apiClient.get<{ data: Employee[]; meta: PaginatedMeta }>(`/employees?${qs}`);
+    return { data: response.data || [], meta: response.meta || { page: 1, pageSize: 50, total: 0, totalPages: 0 } };
+  },
+
+  /** Счётчики сотрудников — дешёвый отдельный эндпоинт, серверный кэш 60с */
+  async getCounts(archived = false): Promise<EmployeeCounts> {
+    const qs = archived ? '?archived=true' : '';
+    const response = await apiClient.get<ApiResponse<EmployeeCounts>>(`/employees/counts${qs}`);
+    return response.data || { byDepartment: {}, byStatus: { active: 0, fired: 0 } };
   },
 
   async getById(id: number): Promise<Employee> {
@@ -153,6 +159,12 @@ export const employeeService = {
       org_department_id: orgDepartmentId,
     });
     return response.data;
+  },
+
+  async changeCategory(id: number, workCategory: string | null): Promise<void> {
+    await apiClient.post(`/employees/${id}/change-category`, {
+      work_category: workCategory,
+    });
   },
 
   async enrichPreview(file: File): Promise<EnrichPreview> {

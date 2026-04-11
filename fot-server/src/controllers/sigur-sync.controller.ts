@@ -19,6 +19,7 @@ import {
   type ISyncContext,
   type SyncAllStepName,
 } from '../services/sigur-sync.service.js';
+import { invalidateStructureCache } from '../services/employee-mapper.service.js';
 import type { AuthenticatedRequest } from '../types/index.js';
 
 type ConnectionType = 'external' | 'internal';
@@ -163,6 +164,7 @@ export const sigurSyncController = {
       lockAcquired = true;
 
       const result = await syncDepartmentsLogic(connection, {});
+      invalidateStructureCache();
       res.json({ success: true, data: result });
     } catch (error) {
       if (isManualSyncConflict(error)) {
@@ -189,6 +191,7 @@ export const sigurSyncController = {
       lockAcquired = true;
 
       const result = await syncPositionsFromSigurLogic(connection, {});
+      invalidateStructureCache();
       res.json({ success: true, data: result });
     } catch (error) {
       if (isManualSyncConflict(error)) {
@@ -344,6 +347,11 @@ export const sigurSyncController = {
       }
 
       const hasErrors = failedSteps.length > 0;
+
+      // Сбрасываем кэш структуры если были шаги структуры/сотрудников
+      if (steps.some(s => s === 'departments' || s === 'positions' || s === 'employees')) {
+        invalidateStructureCache();
+      }
 
       await auditService.logFromRequest(req, req.user.id, 'SYNC_SIGUR', {
         details: {

@@ -10,6 +10,7 @@ import {
   seedPositionsLogic,
   syncEmployeesLogic,
 } from './sigur-sync.service.js';
+import { invalidateStructureCache } from './employee-mapper.service.js';
 import type { ISyncContext } from './sigur-sync-shared.js';
 
 const STRUCTURE_SYNC_INTERVAL = 60 * 60_000; // 1 час
@@ -35,6 +36,10 @@ async function runStructureSyncCycle(): Promise<void> {
       await syncPositionsFromSigurLogic(undefined, context);
       await seedPositionsLogic();
       await syncEmployeesLogic(undefined, () => {}, context, false);
+
+      // Сбрасываем кэш структуры, чтобы карточка сотрудника не мигала
+      // между старыми и новыми именами отделов/должностей
+      invalidateStructureCache();
 
       console.log('[structure-scheduler] hourly sync done');
     } catch (err) {

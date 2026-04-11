@@ -1,11 +1,10 @@
 import { type FC, useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { ChevronLeft, ChevronRight, ChevronDown, Download, Clock } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ChevronDown, Download } from 'lucide-react';
 import { TimesheetStats } from '../../components/timesheet/TimesheetStats';
 import { TimesheetGrid } from '../../components/timesheet/TimesheetGrid';
 import { TimesheetSidePanel } from '../../components/timesheet/TimesheetSidePanel';
 import { TimesheetCorrectionModal } from '../../components/timesheet/TimesheetCorrectionModal';
 import { LateRatingModal } from '../../components/timesheet/LateRatingModal';
-import { ScheduleSettingsPanel } from '../../components/schedule/ScheduleSettingsPanel';
 import { timesheetService } from '../../services/timesheetService';
 import { apiClient } from '../../api/client';
 import { useAuth } from '../../contexts/AuthContext';
@@ -73,7 +72,6 @@ export const TimesheetPage: FC = () => {
   }, []);
 
   // Schedule settings panel
-  const [schedPanelOpen, setSchedPanelOpen] = useState(false);
 
   // Department selector
   const [deptOptions, setDeptOptions] = useState<IDeptOption[]>([]);
@@ -296,12 +294,6 @@ export const TimesheetPage: FC = () => {
             departmentId={selectedDeptId}
             period={`${year}-${String(month).padStart(2, '0')}`}
           />
-          {selectedDeptId && (
-            <button className="ts-btn" onClick={() => setSchedPanelOpen(true)}>
-              <Clock size={16} />
-              График
-            </button>
-          )}
           <button className="ts-btn" onClick={handleExport}>
             <Download size={16} />
             Экспорт
@@ -351,15 +343,6 @@ export const TimesheetPage: FC = () => {
         employees={employees}
         entries={entries}
         schedules={schedules}
-      />
-
-      {/* Schedule Settings Panel */}
-      <ScheduleSettingsPanel
-        open={schedPanelOpen}
-        onClose={() => { setSchedPanelOpen(false); loadData(); }}
-        departmentId={selectedDeptId}
-        departmentName={selectedDeptName}
-        employees={employees.map(e => ({ id: e.id, full_name: e.full_name }))}
       />
 
       {/* Correction Modal */}

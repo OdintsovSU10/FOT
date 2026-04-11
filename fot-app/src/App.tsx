@@ -16,9 +16,10 @@ import './App.css';
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      staleTime: 30_000,
+      staleTime: 60_000,
       gcTime: 5 * 60_000,
       refetchOnWindowFocus: false,
+      refetchOnMount: false,
       retry: 1,
     },
   },
@@ -40,8 +41,8 @@ const UserManagementPage = lazy(() => import('./pages/super-admin/UserManagement
 const DataAuditPage = lazy(() => import('./pages/super-admin/DataAuditPage').then(m => ({ default: m.DataAuditPage })));
 const RoleManagementPage = lazy(() => import('./pages/super-admin/RoleManagementPage').then(m => ({ default: m.RoleManagementPage })));
 const SystemSettingsPage = lazy(() => import('./pages/super-admin/SystemSettingsPage').then(m => ({ default: m.SystemSettingsPage })));
-const ProductionCalendarPage = lazy(() => import('./pages/super-admin/ProductionCalendarPage').then(m => ({ default: m.ProductionCalendarPage })));
 const PayslipManagePage = lazy(() => import('./pages/super-admin/PayslipManagePage').then(m => ({ default: m.PayslipManagePage })));
+const SchedulesPage = lazy(() => import('./pages/admin/SchedulesPage').then(m => ({ default: m.SchedulesPage })));
 
 // Employees & SKUD
 const EmployeesPage = lazy(() => import('./pages/employees/EmployeesPage').then(m => ({ default: m.EmployeesPage })));
@@ -53,8 +54,7 @@ const SkudSupabasePage = lazy(() => import('./pages/skud/SkudSupabasePage').then
 
 // Timesheet
 const TimesheetPage = lazy(() => import('./pages/timesheet/TimesheetPage').then(m => ({ default: m.TimesheetPage })));
-const TimesheetReviewPage = lazy(() => import('./pages/timesheet/TimesheetReviewPage').then(m => ({ default: m.TimesheetReviewPage })));
-const MassTimesheetExportPage = lazy(() => import('./pages/timesheet/MassTimesheetExportPage').then(m => ({ default: m.MassTimesheetExportPage })));
+const TimesheetHrPage = lazy(() => import('./pages/timesheet/TimesheetHrPage').then(m => ({ default: m.TimesheetHrPage })));
 
 // Discipline Analytics
 const DisciplineAnalyticsPage = lazy(() => import('./pages/DisciplineAnalyticsPage').then(m => ({ default: m.DisciplineAnalyticsPage })));
@@ -266,14 +266,6 @@ const AppRoutes = () => {
             }
           />
           <Route
-            path="/timesheet-export"
-            element={
-              <Layout title="Экспорт табелей" theme={theme} onToggleTheme={toggleTheme}>
-                <MassTimesheetExportPage />
-              </Layout>
-            }
-          />
-          <Route
             path="/my-employees"
             element={
               <Layout title="Сотрудники" theme={theme} onToggleTheme={toggleTheme}>
@@ -326,10 +318,10 @@ const AppRoutes = () => {
         {/* HR routes */}
         <Route element={<ProtectedRoute requiredPosition="hr" />}>
           <Route
-            path="/timesheet-review"
+            path="/timesheet-hr"
             element={
-              <Layout title="Проверка табелей" theme={theme} onToggleTheme={toggleTheme}>
-                <TimesheetReviewPage />
+              <Layout title="Табели HR" theme={theme} onToggleTheme={toggleTheme}>
+                <TimesheetHrPage />
               </Layout>
             }
           />
@@ -366,6 +358,14 @@ const AppRoutes = () => {
             element={
               <Layout title="Управление кадрами" theme={theme} onToggleTheme={toggleTheme}>
                 <StaffControlPage />
+              </Layout>
+            }
+          />
+          <Route
+            path="/admin/schedules"
+            element={
+              <Layout title="Графики работы" theme={theme} onToggleTheme={toggleTheme}>
+                <SchedulesPage />
               </Layout>
             }
           />
@@ -423,14 +423,6 @@ const AppRoutes = () => {
             element={
               <Layout title="Системные настройки" theme={theme} onToggleTheme={toggleTheme}>
                 <SystemSettingsPage />
-              </Layout>
-            }
-          />
-          <Route
-            path="/admin/production-calendar"
-            element={
-              <Layout title="Производственный календарь" theme={theme} onToggleTheme={toggleTheme}>
-                <ProductionCalendarPage />
               </Layout>
             }
           />

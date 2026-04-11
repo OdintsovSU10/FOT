@@ -36,6 +36,7 @@ export interface Employee {
   archived_at: string | null;
   created_at: string;
   updated_at: string;
+  work_category: string | null;
 }
 
 // Типы для обогащения сотрудников из Excel

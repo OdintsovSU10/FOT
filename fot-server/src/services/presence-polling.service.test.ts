@@ -315,9 +315,12 @@ describe('presence-polling.service', () => {
     expect(mockedState.supabaseMock.rpc).not.toHaveBeenCalled();
   });
 
-  it('uses overlap without sending already-known events to upsert', async () => {
+  it('forwards all events to upsert and relies on DB dedup (no pre-check query)', async () => {
+    // После оптимизации egress пред-запрос существующих dedup_hash удалён.
+    // Теперь все события из окна overlap отправляются в upsert, а Postgres
+    // отсекает дубликаты через UNIQUE (dedup_hash, event_date) +
+    // ignoreDuplicates: true. Это снижает ingress-трафик из Supabase.
     const now = new Date(2026, 2, 27, 10, 0, 0);
-    const duplicateHash = computeDedupHash('Иван Иванов', '2026-03-27', '09:00:00', 'КПП-1', 'entry');
 
     mockedState.queryResolver = (query) => {
       if (query.table === 'skud_events' && findOperation(query, 'select', 'event_date, event_time')) {
@@ -328,10 +331,6 @@ describe('presence-polling.service', () => {
           data: [{ id: 1, full_name: 'Иван Иванов', sigur_employee_id: 101 }],
           error: null,
         };
-      }
-
-      if (query.table === 'skud_events' && findOperation(query, 'select', 'dedup_hash')) {
-        return { data: [{ dedup_hash: duplicateHash }], error: null };
       }
       if (query.table === 'skud_events' && findOperation(query, 'upsert')) {
         return { data: null, error: null };
@@ -349,8 +348,15 @@ describe('presence-polling.service', () => {
     const upsertQuery = mockedState.queryLog.find(query => query.table === 'skud_events' && findOperation(query, 'upsert'));
     const payload = upsertQuery?.operations.find(op => op.method === 'upsert')?.args[0] as Array<{ event_time: string }>;
 
-    expect(payload).toHaveLength(1);
-    expect(payload[0]?.event_time).toBe('09:15:00');
+    // Оба события уезжают в upsert; дубликат отсечёт Postgres
+    expect(payload).toHaveLength(2);
+    expect(payload.map(p => p.event_time).sort()).toEqual(['09:00:00', '09:15:00']);
     expect(POLL_OVERLAP_MS).toBeGreaterThan(0);
+
+    // Гарантия: пред-select по dedup_hash больше не вызывается
+    const preCheck = mockedState.queryLog.find(query =>
+      query.table === 'skud_events' && findOperation(query, 'select', 'dedup_hash'),
+    );
+    expect(preCheck).toBeUndefined();
   });
 });

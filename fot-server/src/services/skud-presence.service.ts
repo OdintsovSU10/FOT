@@ -6,8 +6,23 @@ import { formatDateToISO } from '../utils/date.utils.js';
 import type { IPresenceParams, IPresenceItem } from '../types/skud.types.js';
 import { getAllDepartmentsTree, getInternalAccessPoints } from './skud-shared.service.js';
 
+// In-memory кэш по ключу departmentId (TTL 30с). Снижает нагрузку при множественных
+// пользователях, смотрящих один отдел одновременно (polling 60с у фронта).
+const presenceCache = new Map<string, { data: IPresenceItem[]; expiresAt: number }>();
+const PRESENCE_TTL_MS = 30_000;
+
+export function invalidatePresenceCache(): void {
+  presenceCache.clear();
+}
+
 export async function getPresence(params: IPresenceParams): Promise<IPresenceItem[]> {
   const { departmentId } = params;
+
+  const cacheKey = departmentId ?? '__all__';
+  const cached = presenceCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.data;
+  }
 
   // Загружаем все отделы (из кэша)
   const allDepts = await getAllDepartmentsTree();
@@ -42,6 +57,7 @@ export async function getPresence(params: IPresenceParams): Promise<IPresenceIte
 
   const { data: employees } = await empQuery;
   if (!employees || employees.length === 0) {
+    presenceCache.set(cacheKey, { data: [], expiresAt: Date.now() + PRESENCE_TTL_MS });
     return [];
   }
 
@@ -231,5 +247,6 @@ export async function getPresence(params: IPresenceParams): Promise<IPresenceIte
   const statusOrder: Record<string, number> = { online: 0, offline: 1, unknown: 2 };
   result.sort((a, b) => statusOrder[a.status] - statusOrder[b.status]);
 
+  presenceCache.set(cacheKey, { data: result, expiresAt: Date.now() + PRESENCE_TTL_MS });
   return result;
 }

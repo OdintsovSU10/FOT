@@ -1,4 +1,5 @@
 import { supabase } from '../config/database.js';
+import { employeeCache } from './employee-cache.service.js';
 
 interface ChangeOpts {
   reason?: string;
@@ -51,6 +52,8 @@ export const employeeChangesService = {
         })
         .eq('id', employeeId);
     }
+
+    employeeCache.invalidate(employeeId);
   },
 
   /**
@@ -98,6 +101,8 @@ export const employeeChangesService = {
         })
         .eq('id', employeeId);
     }
+
+    employeeCache.invalidate(employeeId);
   },
 
   /**
@@ -148,6 +153,8 @@ export const employeeChangesService = {
       .from('employees')
       .update(updateData)
       .eq('id', employeeId);
+
+    employeeCache.invalidate(employeeId);
   },
 
   /**
@@ -183,6 +190,8 @@ export const employeeChangesService = {
         updated_at: new Date().toISOString(),
       }).eq('id', employeeId);
     }
+
+    employeeCache.invalidate(employeeId);
   },
 
   /**
@@ -240,6 +249,8 @@ export const employeeChangesService = {
         updated_at: new Date().toISOString(),
       }).eq('id', employeeId);
     }
+
+    employeeCache.invalidate(employeeId);
   },
 
   /**
@@ -262,5 +273,7 @@ export const employeeChangesService = {
       org_department_id: latest?.org_department_id || null,
       updated_at: new Date().toISOString(),
     }).eq('id', employeeId);
+
+    employeeCache.invalidate(employeeId);
   },
 };

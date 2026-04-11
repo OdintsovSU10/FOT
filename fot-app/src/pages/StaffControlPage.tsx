@@ -4,6 +4,8 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import { Pencil, ArrowRightLeft, History, TrendingUp, Upload, UserPlus } from 'lucide-react';
 import { SearchInput } from '../components/ui/SearchInput';
 import { employeeService } from '../services/employeeService';
+import { workCategoryService } from '../services/workCategoryService';
+import type { IWorkCategory } from '../types/schedule';
 import { useIsMobile } from '../hooks/useIsMobile';
 import { useDebouncedValue } from '../hooks/useDebouncedValue';
 import { useStaffData } from '../hooks/useStaffData';
@@ -30,19 +32,20 @@ const sortDepts = (depts: OrgDepartmentNode[]): OrgDepartmentNode[] =>
 const fmt = (n: number | null | undefined) =>
   n ? n.toLocaleString('ru-RU') + ' ₽' : '—';
 
-type ModalType = 'salary' | 'salary_actual' | 'position' | 'department';
+type ModalType = 'salary' | 'salary_actual' | 'position' | 'department' | 'category';
 
 /* ───────── Memoized table row ───────── */
 
 interface IStaffRowProps {
   emp: Employee;
   index: number;
+  categoryLabels: Map<string, string>;
   onNavigate: (emp: Employee) => void;
   onOpenModal: (emp: Employee, type: ModalType) => void;
   onOpenHistory: (emp: Employee) => void;
 }
 
-const StaffRow: FC<IStaffRowProps> = memo(({ emp, index, onNavigate, onOpenModal, onOpenHistory }) => (
+const StaffRow: FC<IStaffRowProps> = memo(({ emp, index, categoryLabels, onNavigate, onOpenModal, onOpenHistory }) => (
   <tr className="sc-row" onClick={() => onNavigate(emp)}>
     <td className="sc-td-num">{index + 1}</td>
     <td className="sc-td-name">{emp.full_name}</td>
@@ -60,6 +63,14 @@ const StaffRow: FC<IStaffRowProps> = memo(({ emp, index, onNavigate, onOpenModal
           <Pencil size={12} />
         </button>
         {emp.position_name || '—'}
+      </span>
+    </td>
+    <td>
+      <span className="sc-cell-with-btn">
+        <button className="sc-inline-btn" title="Изменить категорию труда" onClick={e => { e.stopPropagation(); onOpenModal(emp, 'category'); }}>
+          <Pencil size={12} />
+        </button>
+        {emp.work_category ? categoryLabels.get(emp.work_category) || emp.work_category : '—'}
       </span>
     </td>
     <td className="sc-td-salary">
@@ -92,13 +103,15 @@ interface IStaffModalsProps {
   modalType: ModalType | null;
   modalEmp: Employee | null;
   allDepts: OrgDepartmentNode[];
+  categories: IWorkCategory[];
   onClose: () => void;
   onSaveSalary: (empId: number, val: number, type: ModalType, reason?: string, date?: string) => Promise<void>;
   onSavePosition: (empId: number, val: string, reason?: string, date?: string) => Promise<void>;
   onSaveDepartment: (empId: number, deptId: string) => Promise<void>;
+  onSaveCategory: (empId: number, category: string | null) => Promise<void>;
 }
 
-const StaffModals: FC<IStaffModalsProps> = memo(({ modalType, modalEmp, allDepts, onClose, onSaveSalary, onSavePosition, onSaveDepartment }) => {
+const StaffModals: FC<IStaffModalsProps> = memo(({ modalType, modalEmp, allDepts, categories, onClose, onSaveSalary, onSavePosition, onSaveDepartment, onSaveCategory }) => {
   const [salaryVal, setSalaryVal] = useState('');
   const [salaryDate, setSalaryDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [salaryReason, setSalaryReason] = useState('');
@@ -106,6 +119,7 @@ const StaffModals: FC<IStaffModalsProps> = memo(({ modalType, modalEmp, allDepts
   const [positionDate, setPositionDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [positionReason, setPositionReason] = useState('');
   const [deptVal, setDeptVal] = useState('');
+  const [categoryVal, setCategoryVal] = useState<string>('');
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -117,6 +131,7 @@ const StaffModals: FC<IStaffModalsProps> = memo(({ modalType, modalEmp, allDepts
       setPositionDate(new Date().toISOString().slice(0, 10));
       setPositionReason('');
       setDeptVal(modalEmp.org_department_id || '');
+      setCategoryVal(modalEmp.work_category || '');
     }
   }, [modalEmp]);
 
@@ -140,6 +155,13 @@ const StaffModals: FC<IStaffModalsProps> = memo(({ modalType, modalEmp, allDepts
     if (!deptVal) return;
     setSaving(true);
     await onSaveDepartment(modalEmp.id, deptVal);
+    setSaving(false);
+  };
+
+  const handleCategory = async () => {
+    setSaving(true);
+    const value = categoryVal === '' ? null : categoryVal;
+    await onSaveCategory(modalEmp.id, value);
     setSaving(false);
   };
 
@@ -211,6 +233,44 @@ const StaffModals: FC<IStaffModalsProps> = memo(({ modalType, modalEmp, allDepts
     );
   }
 
+  if (modalType === 'category') {
+    return (
+      <div className="sc-overlay" onClick={onClose}>
+        <div className="sc-modal" onClick={e => e.stopPropagation()}>
+          <div className="sc-modal-header">
+            <h3>Категория труда — {modalEmp.full_name}</h3>
+            <button className="sc-modal-close" onClick={onClose}>&times;</button>
+          </div>
+          <div className="sc-modal-body">
+            <div className="sc-field">
+              <label>Категория</label>
+              <select value={categoryVal} onChange={e => setCategoryVal(e.target.value)} autoFocus>
+                <option value="">— не назначена —</option>
+                {categories.filter(c => c.is_active).map(c => (
+                  <option key={c.code} value={c.code}>{c.name}</option>
+                ))}
+              </select>
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+              График работы подтянется автоматически по привязке категории. Индивидуальный график
+              сотрудника, если задан, имеет приоритет.
+            </div>
+          </div>
+          <div className="sc-modal-footer">
+            <button className="sc-btn cancel" onClick={onClose}>Отмена</button>
+            <button
+              className="sc-btn apply"
+              onClick={handleCategory}
+              disabled={saving || (categoryVal || '') === (modalEmp.work_category || '')}
+            >
+              {saving ? 'Сохранение...' : 'Применить'}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="sc-overlay" onClick={onClose}>
       <div className="sc-modal" onClick={e => e.stopPropagation()}>
@@ -244,6 +304,7 @@ const StaffModals: FC<IStaffModalsProps> = memo(({ modalType, modalEmp, allDepts
 
 interface IVirtualTableProps {
   filtered: Employee[];
+  categoryLabels: Map<string, string>;
   onNavigate: (emp: Employee) => void;
   onOpenModal: (emp: Employee, type: ModalType) => void;
   onOpenHistory: (emp: Employee) => void;
@@ -251,7 +312,7 @@ interface IVirtualTableProps {
 
 const ROW_HEIGHT = 36;
 
-const VirtualTable: FC<IVirtualTableProps> = memo(({ filtered, onNavigate, onOpenModal, onOpenHistory }) => {
+const VirtualTable: FC<IVirtualTableProps> = memo(({ filtered, categoryLabels, onNavigate, onOpenModal, onOpenHistory }) => {
   const scrollRef = useRef<HTMLDivElement>(null);
   const virtualizer = useVirtualizer({
     count: filtered.length,
@@ -269,6 +330,7 @@ const VirtualTable: FC<IVirtualTableProps> = memo(({ filtered, onNavigate, onOpe
             <th>ФИО</th>
             <th>Отдел</th>
             <th>Должность</th>
+            <th>Категория</th>
             <th>Оклад (договор)</th>
             <th>Реальный оклад</th>
             <th className="sc-th-hist"></th>
@@ -276,12 +338,12 @@ const VirtualTable: FC<IVirtualTableProps> = memo(({ filtered, onNavigate, onOpe
         </thead>
         <tbody>
           {filtered.length === 0 ? (
-            <tr><td colSpan={7} className="sc-empty">Нет сотрудников</td></tr>
+            <tr><td colSpan={8} className="sc-empty">Нет сотрудников</td></tr>
           ) : (
             <>
               {/* spacer top */}
               {virtualizer.getVirtualItems()[0]?.start > 0 && (
-                <tr><td colSpan={7} style={{ height: virtualizer.getVirtualItems()[0].start, padding: 0, border: 'none' }} /></tr>
+                <tr><td colSpan={8} style={{ height: virtualizer.getVirtualItems()[0].start, padding: 0, border: 'none' }} /></tr>
               )}
               {virtualizer.getVirtualItems().map(vRow => {
                 const emp = filtered[vRow.index];
@@ -290,6 +352,7 @@ const VirtualTable: FC<IVirtualTableProps> = memo(({ filtered, onNavigate, onOpe
                     key={emp.id}
                     emp={emp}
                     index={vRow.index}
+                    categoryLabels={categoryLabels}
                     onNavigate={onNavigate}
                     onOpenModal={onOpenModal}
                     onOpenHistory={onOpenHistory}
@@ -301,7 +364,7 @@ const VirtualTable: FC<IVirtualTableProps> = memo(({ filtered, onNavigate, onOpe
                 const items = virtualizer.getVirtualItems();
                 const lastItem = items[items.length - 1];
                 const remaining = lastItem ? virtualizer.getTotalSize() - lastItem.end : 0;
-                return remaining > 0 ? <tr><td colSpan={7} style={{ height: remaining, padding: 0, border: 'none' }} /></tr> : null;
+                return remaining > 0 ? <tr><td colSpan={8} style={{ height: remaining, padding: 0, border: 'none' }} /></tr> : null;
               })()}
             </>
           )}
@@ -315,14 +378,15 @@ const VirtualTable: FC<IVirtualTableProps> = memo(({ filtered, onNavigate, onOpe
 
 interface IVirtualCardsProps {
   filtered: Employee[];
+  categoryLabels: Map<string, string>;
   onNavigate: (emp: Employee) => void;
   onOpenModal: (emp: Employee, type: ModalType) => void;
   onOpenHistory: (emp: Employee) => void;
 }
 
-const CARD_HEIGHT = 180;
+const CARD_HEIGHT = 200;
 
-const MobileCard: FC<{ emp: Employee; onNavigate: (emp: Employee) => void; onOpenModal: (emp: Employee, type: ModalType) => void; onOpenHistory: (emp: Employee) => void }> = memo(({ emp, onNavigate, onOpenModal, onOpenHistory }) => (
+const MobileCard: FC<{ emp: Employee; categoryLabels: Map<string, string>; onNavigate: (emp: Employee) => void; onOpenModal: (emp: Employee, type: ModalType) => void; onOpenHistory: (emp: Employee) => void }> = memo(({ emp, categoryLabels, onNavigate, onOpenModal, onOpenHistory }) => (
   <div className="sc-card" onClick={() => onNavigate(emp)}>
     <div className="sc-card-name">{emp.full_name}</div>
     <div className="sc-card-row">
@@ -332,6 +396,10 @@ const MobileCard: FC<{ emp: Employee; onNavigate: (emp: Employee) => void; onOpe
     <div className="sc-card-row">
       <span className="sc-card-label">Должность</span>
       <span>{emp.position_name || '—'}</span>
+    </div>
+    <div className="sc-card-row">
+      <span className="sc-card-label">Категория</span>
+      <span>{emp.work_category ? categoryLabels.get(emp.work_category) || emp.work_category : '—'}</span>
     </div>
     <div className="sc-card-row">
       <span className="sc-card-label">Оклад (дог.)</span>
@@ -348,6 +416,9 @@ const MobileCard: FC<{ emp: Employee; onNavigate: (emp: Employee) => void; onOpe
       <button className="sc-btn-icon" title="Сменить должность" onClick={e => { e.stopPropagation(); onOpenModal(emp, 'position'); }}>
         <Pencil size={14} />
       </button>
+      <button className="sc-btn-icon" title="Категория труда" onClick={e => { e.stopPropagation(); onOpenModal(emp, 'category'); }}>
+        <Pencil size={14} />
+      </button>
       <button className="sc-btn-icon" title="Изменить оклад" onClick={e => { e.stopPropagation(); onOpenModal(emp, 'salary'); }}>
         <TrendingUp size={14} />
       </button>
@@ -358,7 +429,7 @@ const MobileCard: FC<{ emp: Employee; onNavigate: (emp: Employee) => void; onOpe
   </div>
 ));
 
-const VirtualCards: FC<IVirtualCardsProps> = memo(({ filtered, onNavigate, onOpenModal, onOpenHistory }) => {
+const VirtualCards: FC<IVirtualCardsProps> = memo(({ filtered, categoryLabels, onNavigate, onOpenModal, onOpenHistory }) => {
   const scrollRef = useRef<HTMLDivElement>(null);
   const virtualizer = useVirtualizer({
     count: filtered.length,
@@ -374,7 +445,7 @@ const VirtualCards: FC<IVirtualCardsProps> = memo(({ filtered, onNavigate, onOpe
           const emp = filtered[vRow.index];
           return (
             <div key={emp.id} style={{ position: 'absolute', top: 0, left: 0, width: '100%', transform: `translateY(${vRow.start}px)` }}>
-              <MobileCard emp={emp} onNavigate={onNavigate} onOpenModal={onOpenModal} onOpenHistory={onOpenHistory} />
+              <MobileCard emp={emp} categoryLabels={categoryLabels} onNavigate={onNavigate} onOpenModal={onOpenModal} onOpenHistory={onOpenHistory} />
             </div>
           );
         })}
@@ -404,6 +475,17 @@ export const StaffControlPage: FC = () => {
     search: debouncedSearch || undefined,
     departmentId: deptId || undefined,
   });
+
+  const [workCategories, setWorkCategories] = useState<IWorkCategory[]>([]);
+  useEffect(() => {
+    workCategoryService.list().then(setWorkCategories).catch(() => setWorkCategories([]));
+  }, []);
+
+  const categoryLabels = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const c of workCategories) m.set(c.code, c.name);
+    return m;
+  }, [workCategories]);
 
   useEffect(() => {
     const p = new URLSearchParams();
@@ -492,6 +574,12 @@ export const StaffControlPage: FC = () => {
     const deptName = allDepts.find(d => d.id === newDeptId)?.name;
     patchEmployee(empId, { org_department_id: newDeptId, department: deptName });
   }, [closeModal, patchEmployee, allDepts]);
+
+  const handleSaveCategory = useCallback(async (empId: number, category: string | null) => {
+    await employeeService.changeCategory(empId, category);
+    closeModal();
+    patchEmployee(empId, { work_category: category });
+  }, [closeModal, patchEmployee]);
 
   /* ─── history panel data changed ─── */
 
@@ -611,9 +699,9 @@ export const StaffControlPage: FC = () => {
       {loading ? (
         <div className="sc-loading">Загрузка...</div>
       ) : isMobile ? (
-        <VirtualCards filtered={employees} onNavigate={handleNavigate} onOpenModal={openModal} onOpenHistory={openHistory} />
+        <VirtualCards filtered={employees} categoryLabels={categoryLabels} onNavigate={handleNavigate} onOpenModal={openModal} onOpenHistory={openHistory} />
       ) : (
-        <VirtualTable filtered={employees} onNavigate={handleNavigate} onOpenModal={openModal} onOpenHistory={openHistory} />
+        <VirtualTable filtered={employees} categoryLabels={categoryLabels} onNavigate={handleNavigate} onOpenModal={openModal} onOpenHistory={openHistory} />
       )}
 
       {/* Pagination */}
@@ -642,10 +730,12 @@ export const StaffControlPage: FC = () => {
         modalType={modalType}
         modalEmp={modalEmp}
         allDepts={allDepts}
+        categories={workCategories}
         onClose={closeModal}
         onSaveSalary={handleSaveSalary}
         onSavePosition={handleSavePosition}
         onSaveDepartment={handleSaveDepartment}
+        onSaveCategory={handleSaveCategory}
       />
 
       {/* ─── Import Modal ─── */}
