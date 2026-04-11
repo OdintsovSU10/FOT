@@ -1,5 +1,5 @@
 import { apiClient } from '../api/client';
-import type { TwoFactorData, EmployeePositionType } from '../types';
+import type { ChatInboundMode, TwoFactorData, EmployeePositionType } from '../types';
 
 interface ApiResponse<T> {
   data: T;
@@ -15,6 +15,7 @@ interface UserFromApi {
   imported_position: string | null;
   employee_id: string | null;
   supervisor_id: string | null;
+  chat_inbound_mode: ChatInboundMode;
   is_approved: boolean;
   two_factor_enabled: boolean;
   approved_at: string | null;
@@ -42,8 +43,8 @@ export const adminService = {
     return response.data || [];
   },
 
-  async approveUser(userId: string, options?: { position_type?: EmployeePositionType; employee_id?: number }): Promise<void> {
-    await apiClient.post(`/admin/users/${userId}/approve`, options || {});
+  async approveUser(userId: string, options: { position_type: EmployeePositionType; employee_id?: number }): Promise<void> {
+    await apiClient.post(`/admin/users/${userId}/approve`, options);
   },
 
   async rejectUser(userId: string): Promise<void> {
@@ -64,6 +65,10 @@ export const adminService = {
 
   async updateUserName(userId: string, fullName: string): Promise<void> {
     await apiClient.patch(`/admin/users/${userId}/name`, { full_name: fullName });
+  },
+
+  async updateUserChatInboundMode(userId: string, chatInboundMode: ChatInboundMode): Promise<void> {
+    await apiClient.patch(`/admin/users/${userId}/chat-inbound-mode`, { chat_inbound_mode: chatInboundMode });
   },
 
   async updateUserEmployee(userId: string, employeeId: number | null, departmentId?: string): Promise<void> {

@@ -28,9 +28,9 @@ const STATUS_ICONS: Record<TimesheetApprovalStatus, FC<{ size?: number }>> = {
 };
 
 export const TimesheetApprovalBar: FC<IProps> = ({ departmentId, period }) => {
-  const { positionType } = useAuth();
-  const isHeader = positionType === 'header';
-  const isHrPlus = positionType === 'hr' || positionType === 'admin' || positionType === 'super_admin';
+  const { canEditPage } = useAuth();
+  const canSubmitDepartment = canEditPage('/timesheet');
+  const canReviewHr = canEditPage('/timesheet-hr');
 
   const [approval, setApproval] = useState<ITimesheetApproval | null>(null);
   const [loading, setLoading] = useState(false);
@@ -104,7 +104,7 @@ export const TimesheetApprovalBar: FC<IProps> = ({ departmentId, period }) => {
         </span>
       )}
 
-      {isHeader && (status === 'draft' || status === 'rejected') && (
+      {canSubmitDepartment && (status === 'draft' || status === 'rejected') && (
         <button
           className="ts-btn"
           onClick={handleSubmit}
@@ -115,7 +115,7 @@ export const TimesheetApprovalBar: FC<IProps> = ({ departmentId, period }) => {
         </button>
       )}
 
-      {isHrPlus && status === 'submitted' && (
+      {canReviewHr && status === 'submitted' && (
         <>
           {showComment ? (
             <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginLeft: 'auto' }}>

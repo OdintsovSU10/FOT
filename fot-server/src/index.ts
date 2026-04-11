@@ -3,6 +3,7 @@ import { Server } from 'socket.io';
 import app from './app.js';
 import { env } from './config/env.js';
 import { startPresencePolling } from './services/presence-polling.service.js';
+import { startSigurMonitor } from './services/sigur-monitor.service.js';
 import { startStructureSyncScheduler } from './services/sigur-structure-scheduler.service.js';
 import { setupChatSocket } from './socket/chatHandler.js';
 import { setIo } from './socket/io-instance.js';
@@ -27,5 +28,6 @@ httpServer.listen(PORT, () => {
   console.log(`CORS Origin: ${env.CORS_ORIGIN}`);
   console.log('Socket.IO enabled');
   startPresencePolling();
+  startSigurMonitor();
   startStructureSyncScheduler();
 });

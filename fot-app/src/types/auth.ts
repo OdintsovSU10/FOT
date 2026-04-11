@@ -1,5 +1,6 @@
 // Тип должности (динамический, из system_roles)
 export type EmployeePositionType = string;
+export type ChatInboundMode = 'open' | 'requests_only' | 'disabled';
 
 // Для обратной совместимости (deprecated)
 export type UserRole = EmployeePositionType;
@@ -18,6 +19,13 @@ export interface SystemRole {
   updated_at: string;
 }
 
+export interface PageAccessPermission {
+  can_view: boolean;
+  can_edit: boolean;
+}
+
+export type PageAccessMap = Record<string, PageAccessPermission>;
+
 export interface User {
   id: string;
   email: string;
@@ -30,7 +38,10 @@ export interface UserProfile {
   employee_id: number | null;              // Связь с employees
   department_id: string | null;            // org_department_id сотрудника
   supervisor_id: string | null;            // ID руководителя
+  chat_inbound_mode: ChatInboundMode;
   imported_position: string | null;        // Должность из импорта (для worker)
+  permissions: string[];
+  page_access: PageAccessMap;
   is_approved: boolean;
   two_factor_enabled: boolean;
   created_at: string;
@@ -73,4 +84,3 @@ export interface PendingUser {
   created_at: string;
   position_type: EmployeePositionType;
 }
-

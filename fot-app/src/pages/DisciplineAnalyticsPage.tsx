@@ -107,8 +107,8 @@ const getSummary = (v: IViolationRaw): string => {
 };
 
 export const DisciplineAnalyticsPage: FC = () => {
-  const { positionType, profile } = useAuth();
-  const isHeaderOnly = positionType === 'header';
+  const { hasPermission, profile } = useAuth();
+  const isDepartmentScope = hasPermission('data.scope.department') && !hasPermission('data.scope.all');
   const isMobile = useIsMobile(430);
 
   const now = new Date();
@@ -158,10 +158,10 @@ export const DisciplineAnalyticsPage: FC = () => {
   const buildMonthValue = useCallback((year: number, month: number) => `${year}-${String(month).padStart(2, '0')}`, []);
 
   useEffect(() => {
-    if (isHeaderOnly && profile?.department_id) {
+    if (isDepartmentScope && profile?.department_id) {
       setSelectedDept(profile.department_id);
     }
-  }, [isHeaderOnly, profile?.department_id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isDepartmentScope, profile?.department_id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const fetchData = useCallback(async (signal?: AbortSignal) => {
     setLoading(true);
@@ -263,10 +263,10 @@ export const DisciplineAnalyticsPage: FC = () => {
 
   const panelEmployee = panelEmpId !== null ? employees.find(e => e.employee_id === panelEmpId) ?? null : null;
 
-  const hasFilters = (isHeaderOnly ? false : selectedDept !== '') || searchQuery !== '';
+  const hasFilters = (isDepartmentScope ? false : selectedDept !== '') || searchQuery !== '';
 
   const clearFilters = () => {
-    if (!isHeaderOnly) setSelectedDept('');
+    if (!isDepartmentScope) setSelectedDept('');
     setSearchQuery('');
   };
 
@@ -405,7 +405,7 @@ export const DisciplineAnalyticsPage: FC = () => {
                   <button className="da-search-clear" onClick={() => setSearchQuery('')}>&times;</button>
                 )}
               </div>
-              {isHeaderOnly ? (
+              {isDepartmentScope ? (
                 <div className="da-dept-label">
                   {deptData[selectedDept] ?? 'Мой отдел'}
                 </div>

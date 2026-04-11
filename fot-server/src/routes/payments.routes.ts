@@ -1,14 +1,14 @@
 import { Router } from 'express';
 import { paymentsController } from '../controllers/payments.controller.js';
-import { authenticate, requirePosition } from '../middleware/auth.js';
+import { authenticate, requirePageAccess } from '../middleware/auth.js';
 
 const router = Router();
 
 router.use(authenticate);
 
-router.get('/my', requirePosition('worker', 'header', 'hr', 'admin', 'super_admin'), paymentsController.getMy);
-router.get('/employee/:empId', requirePosition('hr', 'admin', 'super_admin'), paymentsController.getByEmployee);
-router.post('/', requirePosition('hr', 'admin', 'super_admin'), paymentsController.create);
-router.post('/import', requirePosition('hr', 'admin', 'super_admin'), paymentsController.importBatch);
+router.get('/my', requirePageAccess('/employee/payments', 'view'), paymentsController.getMy);
+router.get('/employee/:empId', requirePageAccess('/admin/payslips', 'view'), paymentsController.getByEmployee);
+router.post('/', requirePageAccess('/admin/payslips', 'edit'), paymentsController.create);
+router.post('/import', requirePageAccess('/admin/payslips', 'edit'), paymentsController.importBatch);
 
 export default router;

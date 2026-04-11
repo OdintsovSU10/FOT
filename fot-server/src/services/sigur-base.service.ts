@@ -1,6 +1,7 @@
 import axios, { AxiosInstance, AxiosError } from 'axios';
 import https from 'https';
 import { env } from '../config/env.js';
+import { IS_PRODUCTION } from '../config/features.js';
 
 export type ConnectionType = 'external' | 'internal';
 
@@ -48,27 +49,35 @@ export class SigurServiceBase {
     return null;
   }
 
+  private isConnectionAvailable(type: ConnectionType): boolean {
+    if (IS_PRODUCTION && type === 'internal') return false;
+    return this.getConnectionConfig(type) !== null;
+  }
+
   /** Определяет доступный тип подключения. */
   protected resolveConnectionType(preferred?: ConnectionType): ConnectionType {
     if (preferred) {
-      const config = this.getConnectionConfig(preferred);
-      if (config) return preferred;
+      if (this.isConnectionAvailable(preferred)) return preferred;
     }
-    if (this.getConnectionConfig('internal')) return 'internal';
-    if (this.getConnectionConfig('external')) return 'external';
-    throw new Error('Sigur не настроен. Укажите SIGUR_INTERNAL_* или SIGUR_EXTERNAL_* в .env');
+    if (this.isConnectionAvailable('internal')) return 'internal';
+    if (this.isConnectionAvailable('external')) return 'external';
+    throw new Error(
+      IS_PRODUCTION
+        ? 'Sigur не настроен. В production требуется SIGUR_EXTERNAL_* в .env'
+        : 'Sigur не настроен. Укажите SIGUR_INTERNAL_* или SIGUR_EXTERNAL_* в .env',
+    );
   }
 
   /** Проверяет, настроено ли хотя бы одно подключение к Sigur. */
   isConfigured(): boolean {
-    return !!(this.getConnectionConfig('external') || this.getConnectionConfig('internal'));
+    return this.isConnectionAvailable('external') || this.isConnectionAvailable('internal');
   }
 
   /** Возвращает информацию о доступных подключениях. */
   getAvailableConnections(): { external: boolean; internal: boolean } {
     return {
-      external: !!this.getConnectionConfig('external'),
-      internal: !!this.getConnectionConfig('internal'),
+      external: this.isConnectionAvailable('external'),
+      internal: this.isConnectionAvailable('internal'),
     };
   }
 

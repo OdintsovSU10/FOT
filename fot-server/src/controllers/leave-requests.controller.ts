@@ -4,6 +4,7 @@ import type { AuthenticatedRequest } from '../types/index.js';
 import { pushService } from '../services/push.service.js';
 import { notificationService } from '../services/notification.service.js';
 import { getIo } from '../socket/io-instance.js';
+import { canAccessEmployeeInScope, resolveScopedDepartmentId } from '../services/data-scope.service.js';
 
 const LEAVE_REQUEST_TYPES = ['vacation', 'sick_leave', 'remote', 'dayoff', 'business_trip', 'certificate', 'time_correction'] as const;
 const LEAVE_TYPE_LABELS: Record<string, string> = {
@@ -17,6 +18,20 @@ const LEAVE_TO_TIMESHEET: Record<string, string> = {
   dayoff: 'dayoff',
   business_trip: 'business_trip',
 };
+
+async function loadEmployeeIdsByDepartment(departmentId: string): Promise<Array<{ id: number; full_name: string | null }>> {
+  const { data, error } = await supabase
+    .from('employees')
+    .select('id, full_name')
+    .eq('org_department_id', departmentId)
+    .eq('employment_status', 'active');
+
+  if (error) {
+    throw error;
+  }
+
+  return data || [];
+}
 
 /** Создание заявления (worker+) */
 const create = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
@@ -123,19 +138,13 @@ const getMy = async (req: AuthenticatedRequest, res: Response): Promise<void> =>
 /** Заявления отдела (header) */
 const getDepartment = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
-    const departmentId = req.user.department_id;
+    const departmentId = await resolveScopedDepartmentId(req, null);
     if (!departmentId) {
       res.json({ success: true, data: [] });
       return;
     }
 
-    // Получаем id и ФИО сотрудников отдела
-    const { data: employees } = await supabase
-      .from('employees')
-      .select('id, full_name')
-      .eq('org_department_id', departmentId)
-      .eq('employment_status', 'active');
-
+    const employees = await loadEmployeeIdsByDepartment(departmentId);
     const empIds = (employees || []).map(e => e.id);
     if (empIds.length === 0) {
       res.json({ success: true, data: [] });
@@ -166,6 +175,7 @@ const getDepartment = async (req: AuthenticatedRequest, res: Response): Promise<
 /** Все заявления организации (hr/admin) */
 const getAll = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
+    const scopedDepartmentId = await resolveScopedDepartmentId(req, null);
     let query = supabase
       .from('leave_requests')
       .select('*')
@@ -174,6 +184,16 @@ const getAll = async (req: AuthenticatedRequest, res: Response): Promise<void> =
     const status = req.query.status as string | undefined;
     if (status) {
       query = query.eq('status', status);
+    }
+
+    if (scopedDepartmentId) {
+      const employees = await loadEmployeeIdsByDepartment(scopedDepartmentId);
+      const employeeIds = employees.map(employee => employee.id);
+      if (employeeIds.length === 0) {
+        res.json({ success: true, data: [] });
+        return;
+      }
+      query = query.in('employee_id', employeeIds);
     }
 
     const { data, error } = await query;
@@ -224,18 +244,9 @@ const approve = async (req: AuthenticatedRequest, res: Response): Promise<void> 
       return;
     }
 
-    // header может одобрять только заявления своего отдела
-    if (req.user.position_type === 'header') {
-      const { data: emp } = await supabase
-        .from('employees')
-        .select('org_department_id')
-        .eq('id', request.employee_id)
-        .single();
-
-      if (emp?.org_department_id !== req.user.department_id) {
-        res.status(403).json({ success: false, error: 'Нет доступа к заявлениям другого отдела' });
-        return;
-      }
+    if (!(await canAccessEmployeeInScope(req, request.employee_id))) {
+      res.status(403).json({ success: false, error: 'Нет доступа к заявлениям сотрудника' });
+      return;
     }
 
     const { data, error } = await supabase
@@ -323,18 +334,9 @@ const reject = async (req: AuthenticatedRequest, res: Response): Promise<void> =
       return;
     }
 
-    // header: только свой отдел
-    if (req.user.position_type === 'header') {
-      const { data: emp } = await supabase
-        .from('employees')
-        .select('org_department_id')
-        .eq('id', request.employee_id)
-        .single();
-
-      if (emp?.org_department_id !== req.user.department_id) {
-        res.status(403).json({ success: false, error: 'Нет доступа к заявлениям другого отдела' });
-        return;
-      }
+    if (!(await canAccessEmployeeInScope(req, request.employee_id))) {
+      res.status(403).json({ success: false, error: 'Нет доступа к заявлениям сотрудника' });
+      return;
     }
 
     const { data, error } = await supabase

@@ -1,7 +1,9 @@
-import React, { useState, useRef, useEffect, type FC } from 'react';
+import React, { useEffect, useMemo, useRef, useState, type FC } from 'react';
+import { ApiError } from '../../api/client';
 import { useAuth } from '../../contexts/AuthContext';
 import { useChatContext } from '../../contexts/ChatContext';
-import { chatService, type IChatUser } from '../../services/chatService';
+import { useToast } from '../../contexts/ToastContext';
+import { chatService, type IChatContactRequest, type IChatUser } from '../../services/chatService';
 import { usePushNotifications } from '../../hooks/usePushNotifications';
 import styles from './ChatSidePanel.module.css';
 
@@ -18,32 +20,52 @@ const CheckIcon: FC<{ double?: boolean; className?: string }> = ({ double, class
   </svg>
 );
 
+type PanelTab = 'chats' | 'requests';
+type RequestBox = 'inbox' | 'outbox';
+
+const getRequestButtonLabel = (user: IChatUser): string => {
+  if (user.request_status === 'outgoing_pending') return 'Ожидает';
+  if (user.request_status === 'incoming_pending') return 'Входящий';
+  return user.availability === 'direct' ? 'Написать' : 'Запросить';
+};
+
 export const ChatSidePanel: FC = () => {
-  const { profile, isAuthenticated, isApproved } = useAuth();
+  const { profile, isAuthenticated, isApproved, getRoleLabel } = useAuth();
+  const toast = useToast();
   const {
     isOpen,
     closeChat,
     conversations,
     activeConversationId,
     messages,
+    incomingRequests,
+    outgoingRequests,
     loading,
     selectConversation,
     sendMessage,
     startConversation,
+    createRequest,
+    approveRequest,
+    rejectRequest,
   } = useChatContext();
 
   const { isSupported: pushSupported, permission, isSubscribed, subscribe } = usePushNotifications();
   const showPushBanner = pushSupported && permission !== 'denied' && !isSubscribed;
 
+  const [activeTab, setActiveTab] = useState<PanelTab>('chats');
+  const [requestBox, setRequestBox] = useState<RequestBox>('inbox');
   const [inputValue, setInputValue] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<IChatUser[]>([]);
   const [searchOpen, setSearchOpen] = useState(false);
   const [mobileShowChat, setMobileShowChat] = useState(false);
+  const [requestActionId, setRequestActionId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const touchStartX = useRef(0);
   const touchStartY = useRef(0);
+
+  const requests = requestBox === 'inbox' ? incomingRequests : outgoingRequests;
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -55,32 +77,32 @@ export const ChatSidePanel: FC = () => {
       setSearchQuery('');
       setSearchResults([]);
       setMobileShowChat(false);
+      setActiveTab('chats');
+      setRequestBox('inbox');
     }
-    // Блокируем скролл основной страницы при открытом чате
-    if (isOpen) {
-      document.body.style.overflow = 'hidden';
-    } else {
-      document.body.style.overflow = '';
-    }
+
+    document.body.style.overflow = isOpen ? 'hidden' : '';
     return () => { document.body.style.overflow = ''; };
   }, [isOpen]);
 
-  // Динамическая высота панели при открытой клавиатуре (iOS Safari)
   useEffect(() => {
     if (!isOpen) return;
-    const vv = window.visualViewport;
-    if (!vv) return;
+    const viewport = window.visualViewport;
+    if (!viewport) return;
+
     const update = () => {
       if (!panelRef.current) return;
-      panelRef.current.style.height = `${vv.height}px`;
-      panelRef.current.style.top = `${vv.offsetTop}px`;
+      panelRef.current.style.height = `${viewport.height}px`;
+      panelRef.current.style.top = `${viewport.offsetTop}px`;
     };
+
     update();
-    vv.addEventListener('resize', update);
-    vv.addEventListener('scroll', update);
+    viewport.addEventListener('resize', update);
+    viewport.addEventListener('scroll', update);
+
     return () => {
-      vv.removeEventListener('resize', update);
-      vv.removeEventListener('scroll', update);
+      viewport.removeEventListener('resize', update);
+      viewport.removeEventListener('scroll', update);
       if (panelRef.current) {
         panelRef.current.style.height = '';
         panelRef.current.style.top = '';
@@ -89,7 +111,11 @@ export const ChatSidePanel: FC = () => {
   }, [isOpen]);
 
   useEffect(() => {
-    if (!searchOpen) { setSearchResults([]); return; }
+    if (!searchOpen || activeTab !== 'chats') {
+      setSearchResults([]);
+      return;
+    }
+
     const timeout = setTimeout(async () => {
       try {
         const results = await chatService.searchUsers(searchQuery);
@@ -98,98 +124,165 @@ export const ChatSidePanel: FC = () => {
         setSearchResults([]);
       }
     }, 300);
-    return () => clearTimeout(timeout);
-  }, [searchQuery, searchOpen]);
 
-  const handleTouchStart = (e: React.TouchEvent) => {
-    touchStartX.current = e.touches[0].clientX;
-    touchStartY.current = e.touches[0].clientY;
+    return () => clearTimeout(timeout);
+  }, [searchOpen, searchQuery, activeTab]);
+
+  const activeConversation = useMemo(
+    () => conversations.find(conversation => conversation.id === activeConversationId) || null,
+    [conversations, activeConversationId],
+  );
+
+  const handleTouchStart = (event: React.TouchEvent) => {
+    touchStartX.current = event.touches[0].clientX;
+    touchStartY.current = event.touches[0].clientY;
   };
 
-  const handleTouchMove = (e: React.TouchEvent) => {
-    const dx = e.touches[0].clientX - touchStartX.current;
-    const dy = Math.abs(e.touches[0].clientY - touchStartY.current);
-    if (dx > 10 && dx > dy && panelRef.current) {
-      panelRef.current.style.transform = `translateX(${dx}px)`;
+  const handleTouchMove = (event: React.TouchEvent) => {
+    const deltaX = event.touches[0].clientX - touchStartX.current;
+    const deltaY = Math.abs(event.touches[0].clientY - touchStartY.current);
+    if (deltaX > 10 && deltaX > deltaY && panelRef.current) {
+      panelRef.current.style.transform = `translateX(${deltaX}px)`;
       panelRef.current.style.transition = 'none';
     }
   };
 
-  const handleTouchEnd = (e: React.TouchEvent) => {
-    const dx = e.changedTouches[0].clientX - touchStartX.current;
+  const handleTouchEnd = (event: React.TouchEvent) => {
+    const deltaX = event.changedTouches[0].clientX - touchStartX.current;
     if (panelRef.current) {
       panelRef.current.style.transform = '';
       panelRef.current.style.transition = '';
     }
-    if (dx > 80) closeChat();
+    if (deltaX > 80) closeChat();
   };
 
   const handleSend = async () => {
-    if (!inputValue.trim()) return;
+    if (!inputValue.trim() || !activeConversation?.is_writable) return;
     const text = inputValue;
     setInputValue('');
-    await sendMessage(text);
-  };
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleSend();
+    try {
+      await sendMessage(text);
+    } catch (error) {
+      setInputValue(text);
+      toast.error(error instanceof Error ? error.message : 'Не удалось отправить сообщение');
     }
   };
 
-  const handleStartChat = (user: IChatUser) => {
-    setSearchOpen(false);
-    setSearchQuery('');
-    setSearchResults([]);
-    setMobileShowChat(true);
-    startConversation(user.id);
+  const handleKeyDown = (event: React.KeyboardEvent) => {
+    if (event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault();
+      void handleSend();
+    }
   };
 
-  const handleSelectConversation = (convId: string) => {
-    setMobileShowChat(true);
-    selectConversation(convId);
+  const handleStartChat = async (user: IChatUser) => {
+    try {
+      setSearchOpen(false);
+      setSearchQuery('');
+      setSearchResults([]);
+      await startConversation(user.id);
+      setActiveTab('chats');
+      setMobileShowChat(true);
+    } catch (error) {
+      const message = error instanceof ApiError ? error.message : 'Не удалось открыть чат';
+      toast.error(message);
+    }
+  };
+
+  const handleCreateRequest = async (user: IChatUser) => {
+    try {
+      setRequestActionId(user.id);
+      await createRequest(user.id);
+      toast.success('Запрос на контакт отправлен');
+    } catch (error) {
+      const message = error instanceof ApiError ? error.message : 'Не удалось отправить запрос';
+      toast.error(message);
+    } finally {
+      setRequestActionId(null);
+    }
+  };
+
+  const handleRequestAction = async (request: IChatContactRequest, action: 'approve' | 'reject') => {
+    try {
+      setRequestActionId(request.id);
+      if (action === 'approve') {
+        const result = await approveRequest(request.id);
+        setActiveTab('chats');
+        setMobileShowChat(true);
+        await selectConversation(result.conversation_id);
+        toast.success('Запрос одобрен');
+      } else {
+        await rejectRequest(request.id);
+        toast.info('Запрос отклонён');
+      }
+    } catch (error) {
+      const message = error instanceof ApiError ? error.message : 'Не удалось обработать запрос';
+      toast.error(message);
+    } finally {
+      setRequestActionId(null);
+    }
+  };
+
+  const handleSelectConversation = async (conversationId: string) => {
+    try {
+      await selectConversation(conversationId);
+      setMobileShowChat(true);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Не удалось открыть диалог');
+    }
   };
 
   const handleToggleSearch = () => {
+    setActiveTab('chats');
     setSearchOpen(prev => {
-      if (prev) { setSearchQuery(''); setSearchResults([]); }
+      if (prev) {
+        setSearchQuery('');
+        setSearchResults([]);
+      }
       return !prev;
     });
   };
 
+  const handleSwitchTab = (tab: PanelTab) => {
+    setActiveTab(tab);
+    if (tab !== 'chats') {
+      setSearchOpen(false);
+      setSearchQuery('');
+      setSearchResults([]);
+      setMobileShowChat(false);
+    }
+  };
+
   const getOtherName = (participants: { user_id: string; full_name: string | null }[]) => {
-    const other = participants.find(p => p.user_id !== profile?.id);
+    const other = participants.find(participant => participant.user_id !== profile?.id);
     return other?.full_name || 'Неизвестный';
   };
 
   const getInitials = (name: string) => {
-    const parts = name.split(' ');
-    if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+    const parts = name.split(' ').filter(Boolean);
+    if (parts.length >= 2) return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
     return name.slice(0, 2).toUpperCase();
   };
 
   const formatTime = (dateStr: string) => {
-    const d = new Date(dateStr);
+    const date = new Date(dateStr);
     const now = new Date();
-    if (d.toDateString() === now.toDateString()) {
-      return d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+    if (date.toDateString() === now.toDateString()) {
+      return date.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
     }
-    return d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' }) +
-      ' ' + d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+    return `${date.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })} ${date.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}`;
   };
 
   const formatDateLabel = (dateStr: string) => {
-    const d = new Date(dateStr);
+    const date = new Date(dateStr);
     const now = new Date();
     const yesterday = new Date(now);
     yesterday.setDate(yesterday.getDate() - 1);
-    if (d.toDateString() === now.toDateString()) return 'Сегодня';
-    if (d.toDateString() === yesterday.toDateString()) return 'Вчера';
-    return d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' });
-  };
 
-  const activeConversation = conversations.find(c => c.id === activeConversationId);
+    if (date.toDateString() === now.toDateString()) return 'Сегодня';
+    if (date.toDateString() === yesterday.toDateString()) return 'Вчера';
+    return date.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' });
+  };
 
   if (!isAuthenticated || !isApproved) return null;
 
@@ -203,47 +296,63 @@ export const ChatSidePanel: FC = () => {
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
       >
-        {/* Left pane */}
-        <div className={`${styles.listPane} ${mobileShowChat ? styles.hidden : ''}`}>
+        <div className={`${styles.listPane} ${mobileShowChat && activeTab === 'chats' ? styles.hidden : ''}`}>
           <div className={styles.listPaneHeader}>
-            {/* Мобильные: ← Назад слева */}
             <button className={`${styles.iconBtn} ${styles.mobileOnly}`} onClick={closeChat}>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="18" height="18">
-                <path d="M15 18l-6-6 6-6"/>
+                <path d="M15 18l-6-6 6-6" />
               </svg>
             </button>
-            <h3 className={styles.listPaneTitle}>{searchOpen ? 'Новый чат' : 'Чаты'}</h3>
-            {/* Десктоп: + справа */}
-            <button className={`${styles.iconBtn} ${styles.desktopOnly} ${searchOpen ? styles.iconBtnActive : ''}`} onClick={handleToggleSearch}>
-              {searchOpen ? (
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="18" height="18">
-                  <path d="M18 6L6 18M6 6l12 12"/>
-                </svg>
+            <h3 className={styles.listPaneTitle}>{activeTab === 'chats' ? (searchOpen ? 'Новый чат' : 'Чаты') : 'Запросы'}</h3>
+            <button
+              className={`${styles.iconBtn} ${activeTab === 'chats' && searchOpen ? styles.iconBtnActive : ''}`}
+              onClick={activeTab === 'chats' ? handleToggleSearch : () => handleSwitchTab('chats')}
+            >
+              {activeTab === 'chats' ? (
+                searchOpen ? (
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="18" height="18">
+                    <path d="M18 6L6 18M6 6l12 12" />
+                  </svg>
+                ) : (
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="18" height="18">
+                    <path d="M12 5v14M5 12h14" />
+                  </svg>
+                )
               ) : (
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="18" height="18">
-                  <path d="M12 5v14M5 12h14"/>
-                </svg>
-              )}
-            </button>
-            {/* Мобильные: + справа */}
-            <button className={`${styles.iconBtn} ${styles.mobileOnly} ${styles.iconBtnPrimary} ${searchOpen ? styles.iconBtnActive : ''}`} onClick={handleToggleSearch}>
-              {searchOpen ? (
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="18" height="18">
-                  <path d="M18 6L6 18M6 6l12 12"/>
-                </svg>
-              ) : (
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="18" height="18">
-                  <path d="M12 5v14M5 12h14"/>
+                  <path d="M3 12h18" />
+                  <path d="M3 6h18" />
+                  <path d="M3 18h18" />
                 </svg>
               )}
             </button>
           </div>
 
-          {showPushBanner && (
+          <div className={styles.panelTabs}>
+            <button
+              className={`${styles.panelTab} ${activeTab === 'chats' ? styles.panelTabActive : ''}`}
+              onClick={() => handleSwitchTab('chats')}
+            >
+              Чаты
+            </button>
+            <button
+              className={`${styles.panelTab} ${activeTab === 'requests' ? styles.panelTabActive : ''}`}
+              onClick={() => handleSwitchTab('requests')}
+            >
+              Запросы
+              {incomingRequests.filter(request => request.status === 'pending').length > 0 && (
+                <span className={styles.panelTabBadge}>
+                  {incomingRequests.filter(request => request.status === 'pending').length}
+                </span>
+              )}
+            </button>
+          </div>
+
+          {showPushBanner && activeTab === 'chats' && (
             <div className={styles.pushBanner}>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="14" height="14" style={{ flexShrink: 0 }}>
-                <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/>
-                <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+                <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
+                <path d="M13.73 21a2 2 0 0 1-3.46 0" />
               </svg>
               <span>Уведомления</span>
               <button className={styles.pushBannerBtn} onClick={subscribe}>
@@ -252,61 +361,78 @@ export const ChatSidePanel: FC = () => {
             </div>
           )}
 
-          {searchOpen ? (
-            /* Режим поиска: другой фон, только результаты */
+          {activeTab === 'chats' && searchOpen ? (
             <div className={styles.searchPane}>
               <div className={styles.searchSection}>
                 <input
                   type="text"
                   placeholder="Имя сотрудника..."
                   value={searchQuery}
-                  onChange={e => setSearchQuery(e.target.value)}
+                  onChange={event => setSearchQuery(event.target.value)}
                   className={styles.searchInput}
                   autoFocus
                 />
               </div>
               <div className={styles.searchResultsList}>
                 {searchResults.length === 0 ? (
-                  <div className={styles.emptyList}>{searchQuery ? 'Не найдено' : 'Введите имя'}</div>
+                  <div className={styles.emptyList}>{searchQuery ? 'Ничего не найдено' : 'Введите имя сотрудника'}</div>
                 ) : (
                   searchResults.map(user => (
-                    <div key={user.id} className={styles.searchItem} onClick={() => handleStartChat(user)}>
+                    <div key={user.id} className={styles.searchItem}>
                       <div className={styles.avatarSmall}>{getInitials(user.full_name || '??')}</div>
                       <div className={styles.searchItemInfo}>
-                        <span className={styles.searchItemName}>{user.full_name}</span>
+                        <span className={styles.searchItemName}>{user.full_name || 'Без имени'}</span>
+                        <span className={styles.searchItemMeta}>
+                          {getRoleLabel(user.position_type)} · {user.availability_reason}
+                        </span>
                       </div>
+                      <button
+                        className={`${styles.searchActionBtn} ${user.availability === 'request' ? styles.searchActionRequest : ''}`}
+                        disabled={requestActionId === user.id || user.request_status !== null}
+                        onClick={() => {
+                          if (user.availability === 'direct') {
+                            void handleStartChat(user);
+                          } else {
+                            void handleCreateRequest(user);
+                          }
+                        }}
+                      >
+                        {requestActionId === user.id ? '...' : getRequestButtonLabel(user)}
+                      </button>
                     </div>
                   ))
                 )}
               </div>
             </div>
-          ) : (
-            /* Обычный режим: список диалогов */
+          ) : activeTab === 'chats' ? (
             <div className={styles.conversationList}>
               {conversations.length === 0 ? (
                 <div className={styles.emptyList}>Нет диалогов</div>
               ) : (
-                conversations.map(conv => {
-                  const otherName = getOtherName(conv.participants);
+                conversations.map(conversation => {
+                  const otherName = getOtherName(conversation.participants);
                   return (
                     <div
-                      key={conv.id}
-                      className={`${styles.conversationItem} ${activeConversationId === conv.id ? styles.active : ''}`}
-                      onClick={() => handleSelectConversation(conv.id)}
+                      key={conversation.id}
+                      className={`${styles.conversationItem} ${activeConversationId === conversation.id ? styles.active : ''}`}
+                      onClick={() => void handleSelectConversation(conversation.id)}
                     >
                       <div className={styles.avatarSmall}>{getInitials(otherName)}</div>
                       <div className={styles.convInfo}>
-                        <div className={styles.convName}>{otherName}</div>
+                        <div className={styles.convNameRow}>
+                          <div className={styles.convName}>{otherName}</div>
+                          {!conversation.is_writable && <span className={styles.lockBadge}>Только чтение</span>}
+                        </div>
                         <div className={styles.convPreview}>
-                          {conv.last_message?.content?.slice(0, 30) || 'Нет сообщений'}
+                          {conversation.last_message?.content?.slice(0, 30) || 'Нет сообщений'}
                         </div>
                       </div>
                       <div className={styles.convMeta}>
-                        {conv.last_message && (
-                          <span className={styles.convTime}>{formatTime(conv.last_message.created_at)}</span>
+                        {conversation.last_message && (
+                          <span className={styles.convTime}>{formatTime(conversation.last_message.created_at)}</span>
                         )}
-                        {conv.unread_count > 0 && (
-                          <span className={styles.unreadBadge}>{conv.unread_count}</span>
+                        {conversation.unread_count > 0 && (
+                          <span className={styles.unreadBadge}>{conversation.unread_count}</span>
                         )}
                       </div>
                     </div>
@@ -314,16 +440,82 @@ export const ChatSidePanel: FC = () => {
                 })
               )}
             </div>
+          ) : (
+            <div className={styles.requestsPane}>
+              <div className={styles.requestTabs}>
+                <button
+                  className={`${styles.requestTab} ${requestBox === 'inbox' ? styles.requestTabActive : ''}`}
+                  onClick={() => setRequestBox('inbox')}
+                >
+                  Входящие
+                </button>
+                <button
+                  className={`${styles.requestTab} ${requestBox === 'outbox' ? styles.requestTabActive : ''}`}
+                  onClick={() => setRequestBox('outbox')}
+                >
+                  Исходящие
+                </button>
+              </div>
+              <div className={styles.requestsList}>
+                {requests.length === 0 ? (
+                  <div className={styles.emptyList}>Запросов пока нет</div>
+                ) : (
+                  requests.map(request => {
+                    const counterpartName = requestBox === 'inbox'
+                      ? (request.requester_name || 'Без имени')
+                      : (request.target_name || 'Без имени');
+                    const isPendingInbox = requestBox === 'inbox' && request.status === 'pending';
+
+                    return (
+                      <div key={request.id} className={styles.requestCard}>
+                        <div className={styles.requestCardTop}>
+                          <div className={styles.avatarSmall}>{getInitials(counterpartName)}</div>
+                          <div className={styles.requestCardInfo}>
+                            <div className={styles.requestCardName}>{counterpartName}</div>
+                            <div className={styles.requestCardMeta}>{formatTime(request.created_at)}</div>
+                          </div>
+                          <span className={`${styles.requestStatus} ${styles[`status${request.status}`]}`}>
+                            {request.status === 'pending' ? 'В ожидании' : request.status === 'approved' ? 'Одобрен' : 'Отклонён'}
+                          </span>
+                        </div>
+                        <div className={styles.requestCardBody}>
+                          {request.message?.trim() || 'Без комментария'}
+                        </div>
+                        {isPendingInbox && (
+                          <div className={styles.requestActions}>
+                            <button
+                              className={styles.requestApproveBtn}
+                              disabled={requestActionId === request.id}
+                              onClick={() => void handleRequestAction(request, 'approve')}
+                            >
+                              Одобрить
+                            </button>
+                            <button
+                              className={styles.requestRejectBtn}
+                              disabled={requestActionId === request.id}
+                              onClick={() => void handleRequestAction(request, 'reject')}
+                            >
+                              Отклонить
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
           )}
         </div>
 
-        {/* Right pane: chat */}
-        <div className={`${styles.chatPane} ${!mobileShowChat ? styles.hidden : ''}`}>
-          {!activeConversationId ? (
+        <div className={`${styles.chatPane} ${activeTab !== 'chats' || !mobileShowChat ? styles.hidden : ''}`}>
+          {activeTab !== 'chats' ? (
+            <div className={styles.chatPlaceholder}>Запросы обрабатываются в левом столбце</div>
+          ) : !activeConversationId ? (
             <div className={styles.chatPlaceholder}>
               <button className={styles.iconBtn} onClick={closeChat} style={{ position: 'absolute', top: 12, right: 12 }}>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="18" height="18">
-                  <path d="M18 6L6 18M6 6l12 12"/>
+                  <path d="M18 6L6 18M6 6l12 12" />
                 </svg>
               </button>
               Выберите диалог
@@ -331,23 +523,25 @@ export const ChatSidePanel: FC = () => {
           ) : (
             <>
               <div className={styles.chatPaneHeader}>
-                <button
-                  className={`${styles.iconBtn} ${styles.backBtn}`}
-                  onClick={() => setMobileShowChat(false)}
-                >
+                <button className={`${styles.iconBtn} ${styles.backBtn}`} onClick={() => setMobileShowChat(false)}>
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="18" height="18">
-                    <path d="M15 18l-6-6 6-6"/>
+                    <path d="M15 18l-6-6 6-6" />
                   </svg>
                 </button>
                 <div className={styles.avatar}>
                   {getInitials(activeConversation ? getOtherName(activeConversation.participants) : '??')}
                 </div>
-                <span className={styles.headerName}>
-                  {activeConversation ? getOtherName(activeConversation.participants) : ''}
-                </span>
+                <div className={styles.headerBlock}>
+                  <span className={styles.headerName}>
+                    {activeConversation ? getOtherName(activeConversation.participants) : ''}
+                  </span>
+                  {!activeConversation?.is_writable && activeConversation?.write_lock_reason && (
+                    <span className={styles.headerLock}>{activeConversation.write_lock_reason}</span>
+                  )}
+                </div>
                 <button className={styles.iconBtn} onClick={closeChat} style={{ marginLeft: 'auto' }}>
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="18" height="18">
-                    <path d="M18 6L6 18M6 6l12 12"/>
+                    <path d="M18 6L6 18M6 6l12 12" />
                   </svg>
                 </button>
               </div>
@@ -358,26 +552,26 @@ export const ChatSidePanel: FC = () => {
                 ) : messages.length === 0 ? (
                   <div className={styles.chatPlaceholder}>Начните диалог</div>
                 ) : (
-                  messages.map((msg, idx) => {
-                    const isMine = msg.sender_id === profile?.id;
-                    const msgDate = new Date(msg.created_at).toDateString();
-                    const prevDate = idx > 0 ? new Date(messages[idx - 1].created_at).toDateString() : null;
-                    const showDate = idx === 0 || msgDate !== prevDate;
+                  messages.map((message, index) => {
+                    const isMine = message.sender_id === profile?.id;
+                    const messageDate = new Date(message.created_at).toDateString();
+                    const previousDate = index > 0 ? new Date(messages[index - 1].created_at).toDateString() : null;
+                    const showDate = index === 0 || messageDate !== previousDate;
 
                     return (
-                      <React.Fragment key={msg.id}>
+                      <React.Fragment key={message.id}>
                         {showDate && (
                           <div className={styles.dateSeparator}>
-                            <span className={styles.dateLabel}>{formatDateLabel(msg.created_at)}</span>
+                            <span className={styles.dateLabel}>{formatDateLabel(message.created_at)}</span>
                           </div>
                         )}
                         <div className={`${styles.message} ${isMine ? styles.mine : styles.theirs}`}>
                           <div className={styles.messageBubble}>
-                            <div className={styles.messageText}>{msg.content}</div>
+                            <div className={styles.messageText}>{message.content}</div>
                             <span className={styles.messageTime}>
-                              {new Date(msg.created_at).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
+                              {new Date(message.created_at).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
                               {isMine && (
-                                <CheckIcon double={msg.is_read} className={`${styles.readCheck} ${msg.is_read ? styles.readCheckRead : ''}`} />
+                                <CheckIcon double={message.is_read} className={`${styles.readCheck} ${message.is_read ? styles.readCheckRead : ''}`} />
                               )}
                             </span>
                           </div>
@@ -389,18 +583,29 @@ export const ChatSidePanel: FC = () => {
                 <div ref={messagesEndRef} />
               </div>
 
+              {!activeConversation?.is_writable && activeConversation?.write_lock_reason && (
+                <div className={styles.readOnlyNotice}>
+                  {activeConversation.write_lock_reason}
+                </div>
+              )}
+
               <div className={styles.inputArea}>
                 <textarea
                   className={styles.messageInput}
-                  placeholder="Сообщение..."
+                  placeholder={activeConversation?.is_writable ? 'Сообщение...' : 'Отправка недоступна'}
                   value={inputValue}
-                  onChange={e => setInputValue(e.target.value)}
+                  onChange={event => setInputValue(event.target.value)}
                   onKeyDown={handleKeyDown}
                   rows={1}
+                  disabled={!activeConversation?.is_writable}
                 />
-                <button className={styles.sendBtn} onClick={handleSend} disabled={!inputValue.trim()}>
+                <button
+                  className={styles.sendBtn}
+                  onClick={() => void handleSend()}
+                  disabled={!inputValue.trim() || !activeConversation?.is_writable}
+                >
                   <svg viewBox="0 0 24 24" fill="currentColor" width="18" height="18">
-                    <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
+                    <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
                   </svg>
                 </button>
               </div>

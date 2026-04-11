@@ -7,12 +7,14 @@ import type { IAccessPointSetting } from '../../types';
 interface IAccessPointsTabProps {
   connected: boolean | null;
   canEdit: boolean;
+  selectedConnection: 'internal' | 'external';
   setError: (error: string) => void;
 }
 
 export const AccessPointsTab: FC<IAccessPointsTabProps> = ({
   connected,
   canEdit,
+  selectedConnection,
   setError,
 }) => {
   const [accessPoints, setAccessPoints] = useState<string[]>([]);
@@ -26,9 +28,9 @@ export const AccessPointsTab: FC<IAccessPointsTabProps> = ({
 
   useEffect(() => {
     setApLoading(true);
-    skudService.getAccessPoints()
+    skudService.getAccessPoints(selectedConnection)
       .then(setAccessPoints)
-      .catch(() => {})
+      .catch(() => setError('Ошибка загрузки точек доступа'))
       .finally(() => setApLoading(false));
 
     skudService.getAccessPointSettings()
@@ -40,7 +42,7 @@ export const AccessPointsTab: FC<IAccessPointsTabProps> = ({
         setApSettings(map);
       })
       .catch(() => {});
-  }, []);
+  }, [selectedConnection, setError]);
 
   const filteredAccessPoints = useMemo(() => {
     if (!apSearch.trim()) return accessPoints;
@@ -81,7 +83,7 @@ export const AccessPointsTab: FC<IAccessPointsTabProps> = ({
     setError('');
     try {
       const oldSet = new Set(accessPoints);
-      const result = await skudService.syncAccessPoints();
+      const result = await skudService.syncAccessPoints(selectedConnection);
       setAccessPoints(result.accessPoints);
       if (result.removed.length > 0) {
         setApSettings(prev => {

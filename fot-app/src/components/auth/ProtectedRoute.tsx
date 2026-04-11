@@ -5,11 +5,13 @@ import type { EmployeePositionType } from '../../types';
 
 interface ProtectedRouteProps {
   requiredPosition?: EmployeePositionType;
+  requiredPage?: string | string[];
   children?: React.ReactNode;
 }
 
 export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
   requiredPosition,
+  requiredPage,
   children,
 }) => {
   const {
@@ -18,6 +20,7 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
     isTwoFactorEnabled,
     isTwoFactorVerified,
     canAccess,
+    canViewPage,
     loading,
   } = useAuth();
   const location = useLocation();
@@ -48,8 +51,18 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
   }
 
   // Check position access — redirect to appropriate page instead of error
+  if (requiredPage) {
+    const pageList = Array.isArray(requiredPage) ? requiredPage : [requiredPage];
+    if (!pageList.some(page => canViewPage(page))) {
+      if (location.pathname.startsWith('/employee') && canViewPage('/employee')) {
+        return <Navigate to="/employee" replace />;
+      }
+      return <Navigate to="/unauthorized" replace />;
+    }
+  }
+
   if (requiredPosition && !canAccess(requiredPosition)) {
-    return <Navigate to="/" replace />;
+    return <Navigate to="/unauthorized" replace />;
   }
 
   // All checks passed

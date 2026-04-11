@@ -1,5 +1,5 @@
-import { type FC, useEffect, useMemo, useState } from 'react';
-import { Plus, Save, Trash2 } from 'lucide-react';
+import { type FC, type KeyboardEvent, useEffect, useMemo, useState } from 'react';
+import { Pencil, Plus, Save, Trash2 } from 'lucide-react';
 import { skudService } from '../../services/skudService';
 import { travelTimeService } from '../../services/travelTimeService';
 import type { ITravelObject } from '../../types';
@@ -7,12 +7,16 @@ import '../../styles/TravelSettings.css';
 
 interface ITravelObjectsTabProps {
   canEdit: boolean;
+  selectedConnection: 'internal' | 'external';
   setError: (error: string) => void;
 }
 
 const normalizePoint = (value: string): string => value.trim();
+const arraysEqual = (left: string[], right: string[]): boolean => (
+  left.length === right.length && left.every((value, index) => value === right[index])
+);
 
-export const TravelObjectsTab: FC<ITravelObjectsTabProps> = ({ canEdit, setError }) => {
+export const TravelObjectsTab: FC<ITravelObjectsTabProps> = ({ canEdit, selectedConnection, setError }) => {
   const [objects, setObjects] = useState<ITravelObject[]>([]);
   const [accessPoints, setAccessPoints] = useState<string[]>([]);
   const [selectedObjectId, setSelectedObjectId] = useState<string | null>(null);
@@ -28,7 +32,7 @@ export const TravelObjectsTab: FC<ITravelObjectsTabProps> = ({ canEdit, setError
     try {
       const [loadedObjects, loadedAccessPoints] = await Promise.all([
         travelTimeService.getObjects(),
-        skudService.getAccessPoints(),
+        skudService.getAccessPoints(selectedConnection),
       ]);
       setObjects(loadedObjects);
       setAccessPoints([...new Set(loadedAccessPoints.map(normalizePoint))]);
@@ -44,7 +48,7 @@ export const TravelObjectsTab: FC<ITravelObjectsTabProps> = ({ canEdit, setError
 
   useEffect(() => {
     void loadData();
-  }, []);
+  }, [selectedConnection]);
 
   const selectedObject = useMemo(
     () => objects.find(object => object.id === selectedObjectId) || null,
@@ -78,6 +82,14 @@ export const TravelObjectsTab: FC<ITravelObjectsTabProps> = ({ canEdit, setError
   }, [accessPoints, search]);
 
   const selectedSet = useMemo(() => new Set(draftAccessPoints), [draftAccessPoints]);
+  const selectedObjectNameChanged = useMemo(
+    () => !!selectedObject && draftName.trim() !== selectedObject.name,
+    [draftName, selectedObject],
+  );
+  const selectedObjectAccessPointsChanged = useMemo(
+    () => !!selectedObject && !arraysEqual(draftAccessPoints, selectedObject.access_points),
+    [draftAccessPoints, selectedObject],
+  );
 
   const togglePoint = (accessPoint: string) => {
     setDraftAccessPoints(prev => (
@@ -103,13 +115,21 @@ export const TravelObjectsTab: FC<ITravelObjectsTabProps> = ({ canEdit, setError
     }
   };
 
+  const handleCreateObjectKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key !== 'Enter') return;
+    if (!canEdit || saving || !newObjectName.trim()) return;
+
+    event.preventDefault();
+    void handleCreateObject();
+  };
+
   const handleSaveObject = async () => {
-    if (!selectedObject || !draftName.trim()) return;
+    if (!selectedObject || !selectedObjectAccessPointsChanged) return;
     setSaving(true);
     setError('');
     try {
       await travelTimeService.updateObject(selectedObject.id, {
-        name: draftName.trim(),
+        name: selectedObject.name,
         access_points: draftAccessPoints,
       });
       const refreshedObjects = await travelTimeService.getObjects();
@@ -120,6 +140,33 @@ export const TravelObjectsTab: FC<ITravelObjectsTabProps> = ({ canEdit, setError
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleRenameObject = async () => {
+    if (!selectedObject || !draftName.trim() || !selectedObjectNameChanged) return;
+    setSaving(true);
+    setError('');
+    try {
+      await travelTimeService.updateObject(selectedObject.id, {
+        name: draftName.trim(),
+        access_points: selectedObject.access_points,
+      });
+      const refreshedObjects = await travelTimeService.getObjects();
+      setObjects(refreshedObjects);
+      setSelectedObjectId(selectedObject.id);
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'Ошибка переименования объекта');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleRenameObjectKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key !== 'Enter') return;
+    if (!canEdit || saving || !selectedObjectNameChanged || !draftName.trim()) return;
+
+    event.preventDefault();
+    void handleRenameObject();
   };
 
   const handleDeleteObject = async () => {
@@ -162,12 +209,20 @@ export const TravelObjectsTab: FC<ITravelObjectsTabProps> = ({ canEdit, setError
           placeholder="Новый объект"
           value={newObjectName}
           onChange={event => setNewObjectName(event.target.value)}
+          onKeyDown={handleCreateObjectKeyDown}
           disabled={!canEdit || saving}
         />
         <button className="sigur-btn sigur-btn-primary" onClick={handleCreateObject} disabled={!canEdit || saving || !newObjectName.trim()}>
           <Plus size={14} />
           Добавить объект
         </button>
+      </div>
+      <div className="travel-config-hint" style={{ marginTop: '-0.25rem', marginBottom: '0.75rem' }}>
+        {!canEdit
+          ? 'Для создания объектов нужны права на редактирование страницы настроек СКУД.'
+          : !newObjectName.trim()
+            ? 'Введите название объекта, и кнопка станет активной.'
+            : 'Нажмите "Добавить объект" или Enter.'}
       </div>
 
       {loading ? (
@@ -198,17 +253,33 @@ export const TravelObjectsTab: FC<ITravelObjectsTabProps> = ({ canEdit, setError
               <div className="travel-config-empty">Выберите объект слева или создайте новый</div>
             ) : (
               <>
+                <div className="travel-config-hint" style={{ marginBottom: '0.75rem' }}>
+                  Переименование объекта выполняется отдельно. Точки доступа сохраняются отдельной кнопкой ниже.
+                </div>
                 <div className="travel-config-actions">
                   <input
                     type="text"
                     className="travel-config-input"
                     value={draftName}
                     onChange={event => setDraftName(event.target.value)}
+                    onKeyDown={handleRenameObjectKeyDown}
                     disabled={!canEdit || saving}
                   />
-                  <button className="sigur-btn sigur-btn-primary" onClick={handleSaveObject} disabled={!canEdit || saving || !draftName.trim()}>
+                  <button
+                    className="sigur-btn"
+                    onClick={handleRenameObject}
+                    disabled={!canEdit || saving || !draftName.trim() || !selectedObjectNameChanged}
+                  >
+                    <Pencil size={14} />
+                    Переименовать
+                  </button>
+                  <button
+                    className="sigur-btn sigur-btn-primary"
+                    onClick={handleSaveObject}
+                    disabled={!canEdit || saving || !selectedObjectAccessPointsChanged}
+                  >
                     <Save size={14} />
-                    Сохранить
+                    Сохранить точки
                   </button>
                   <button className="sigur-btn" onClick={handleDeleteObject} disabled={!canEdit || saving}>
                     <Trash2 size={14} />

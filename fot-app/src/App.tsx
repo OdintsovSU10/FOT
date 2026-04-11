@@ -51,6 +51,7 @@ const HeaderEmployeesPage = lazy(() => import('./pages/employees/HeaderEmployees
 const SigurSettingsPage = lazy(() => import('./pages/skud/SigurSettingsPage').then(m => ({ default: m.SigurSettingsPage })));
 const SigurRawDataPage = lazy(() => import('./pages/skud/SigurRawDataPage').then(m => ({ default: m.SigurRawDataPage })));
 const SkudSupabasePage = lazy(() => import('./pages/skud/SkudSupabasePage').then(m => ({ default: m.SkudSupabasePage })));
+const SkudMonitorPage = lazy(() => import('./pages/skud/SkudMonitorPage').then(m => ({ default: m.SkudMonitorPage })));
 const TravelSegmentsPage = lazy(() => import('./pages/skud/TravelSegmentsPage').then(m => ({ default: m.TravelSegmentsPage })));
 
 // Timesheet
@@ -63,11 +64,9 @@ const DisciplineAnalyticsPage = lazy(() => import('./pages/DisciplineAnalyticsPa
 // Staff Control
 const StaffControlPage = lazy(() => import('./pages/StaffControlPage').then(m => ({ default: m.StaffControlPage })));
 
-// Profile
-const ProfilePage = lazy(() => import('./pages/profile/ProfilePage').then(m => ({ default: m.ProfilePage })));
-
 // Employee portal
 const EmployeeDashboardPage = lazy(() => import('./pages/employee/EmployeeDashboardPage').then(m => ({ default: m.EmployeeDashboardPage })));
+const ObjectWorkerDashboardPage = lazy(() => import('./pages/employee/ObjectWorkerDashboardPage').then(m => ({ default: m.ObjectWorkerDashboardPage })));
 const LeaveRequestsPage = lazy(() => import('./pages/employee/LeaveRequestsPage').then(m => ({ default: m.LeaveRequestsPage })));
 const PayslipsPage = lazy(() => import('./pages/employee/PayslipsPage').then(m => ({ default: m.PayslipsPage })));
 const PaymentsPage = lazy(() => import('./pages/employee/PaymentsPage').then(m => ({ default: m.PaymentsPage })));
@@ -86,19 +85,36 @@ const SalaryRaiseReviewPage = lazy(() => import('./pages/SalaryRaiseReviewPage')
 
 // Компонент для умного редиректа на основе должности
 const PositionBasedRedirect = () => {
-  const { positionType, canAccess } = useAuth();
-
-  if (!positionType) {
-    return <Navigate to="/employee" replace />;
-  }
-
-  // Header+ (руководитель, hr, админ, супер-админ) → дашборд
-  if (canAccess('header')) {
+  const { canViewPage } = useAuth();
+  if (canViewPage('/dashboard')) {
     return <Navigate to="/dashboard" replace />;
   }
+  if (canViewPage('/employee')) {
+    return <Navigate to="/employee" replace />;
+  }
+  return <Navigate to="/unauthorized" replace />;
+};
 
-  // Worker → личный кабинет сотрудника
-  return <Navigate to="/employee" replace />;
+const EmployeeHomeRoute = () => {
+  const { hasPermission } = useAuth();
+
+  if (hasPermission('portal.employee.variant.object')) {
+    return (
+      <EmployeeLayout title="Личный кабинет">
+        <ObjectWorkerDashboardPage />
+      </EmployeeLayout>
+    );
+  }
+
+  if (hasPermission('portal.employee.variant.office')) {
+    return (
+      <EmployeeLayout title="Личный кабинет">
+        <EmployeeDashboardPage />
+      </EmployeeLayout>
+    );
+  }
+
+  return <Navigate to="/unauthorized" replace />;
 };
 
 const AppRoutes = () => {
@@ -148,16 +164,22 @@ const AppRoutes = () => {
           <Route path="/" element={<PositionBasedRedirect />} />
         </Route>
 
-        {/* Employee portal routes (worker+) */}
-        <Route element={<ProtectedRoute />}>
+        <Route element={<ProtectedRoute requiredPage="/employee" />}>
           <Route
             path="/employee"
+            element={<EmployeeHomeRoute />}
+          />
+          <Route
+            path="/employee/*"
             element={
               <EmployeeLayout title="Личный кабинет">
-                <EmployeeDashboardPage />
+                <div style={{ padding: '28px' }}>Страница в разработке</div>
               </EmployeeLayout>
             }
           />
+        </Route>
+
+        <Route element={<ProtectedRoute requiredPage="/employee/requests" />}>
           <Route
             path="/employee/requests"
             element={
@@ -166,6 +188,9 @@ const AppRoutes = () => {
               </EmployeeLayout>
             }
           />
+        </Route>
+
+        <Route element={<ProtectedRoute requiredPage="/employee/payslips" />}>
           <Route
             path="/employee/payslips"
             element={
@@ -174,6 +199,9 @@ const AppRoutes = () => {
               </EmployeeLayout>
             }
           />
+        </Route>
+
+        <Route element={<ProtectedRoute requiredPage="/employee/payments" />}>
           <Route
             path="/employee/payments"
             element={
@@ -182,6 +210,9 @@ const AppRoutes = () => {
               </EmployeeLayout>
             }
           />
+        </Route>
+
+        <Route element={<ProtectedRoute requiredPage="/employee/documents" />}>
           <Route
             path="/employee/documents"
             element={
@@ -190,6 +221,9 @@ const AppRoutes = () => {
               </EmployeeLayout>
             }
           />
+        </Route>
+
+        <Route element={<ProtectedRoute requiredPage="/employee/timesheet" />}>
           <Route
             path="/employee/timesheet"
             element={
@@ -198,6 +232,9 @@ const AppRoutes = () => {
               </EmployeeLayout>
             }
           />
+        </Route>
+
+        <Route element={<ProtectedRoute requiredPage="/employee/history" />}>
           <Route
             path="/employee/history"
             element={
@@ -206,6 +243,9 @@ const AppRoutes = () => {
               </EmployeeLayout>
             }
           />
+        </Route>
+
+        <Route element={<ProtectedRoute requiredPage="/employee/salary-raise" />}>
           <Route
             path="/employee/salary-raise"
             element={
@@ -238,18 +278,9 @@ const AppRoutes = () => {
               </EmployeeLayout>
             }
           />
-          <Route
-            path="/employee/*"
-            element={
-              <EmployeeLayout title="Личный кабинет">
-                <div style={{ padding: '28px' }}>Страница в разработке</div>
-              </EmployeeLayout>
-            }
-          />
         </Route>
 
-        {/* Header+ routes (dashboard, timesheet, leave requests) */}
-        <Route element={<ProtectedRoute requiredPosition="header" />}>
+        <Route element={<ProtectedRoute requiredPage="/dashboard" />}>
           <Route
             path="/dashboard"
             element={
@@ -258,6 +289,9 @@ const AppRoutes = () => {
               </Layout>
             }
           />
+        </Route>
+
+        <Route element={<ProtectedRoute requiredPage="/timesheet" />}>
           <Route
             path="/timesheet"
             element={
@@ -266,6 +300,9 @@ const AppRoutes = () => {
               </Layout>
             }
           />
+        </Route>
+
+        <Route element={<ProtectedRoute requiredPage="/my-employees" />}>
           <Route
             path="/my-employees"
             element={
@@ -274,6 +311,9 @@ const AppRoutes = () => {
               </Layout>
             }
           />
+        </Route>
+
+        <Route element={<ProtectedRoute requiredPage="/leave-requests" />}>
           <Route
             path="/leave-requests"
             element={
@@ -282,6 +322,9 @@ const AppRoutes = () => {
               </Layout>
             }
           />
+        </Route>
+
+        <Route element={<ProtectedRoute requiredPage="/salary-raise-review" />}>
           <Route
             path="/salary-raise-review"
             element={
@@ -298,6 +341,9 @@ const AppRoutes = () => {
               </Layout>
             }
           />
+        </Route>
+
+        <Route element={<ProtectedRoute requiredPage={['/my-employees', '/tender', '/staff-control']} />}>
           <Route
             path="/tender/:id"
             element={
@@ -306,6 +352,9 @@ const AppRoutes = () => {
               </Layout>
             }
           />
+        </Route>
+
+        <Route element={<ProtectedRoute requiredPage="/discipline" />}>
           <Route
             path="/discipline"
             element={
@@ -314,6 +363,9 @@ const AppRoutes = () => {
               </Layout>
             }
           />
+        </Route>
+
+        <Route element={<ProtectedRoute requiredPage="/skud-travel" />}>
           <Route
             path="/skud-travel"
             element={
@@ -324,8 +376,7 @@ const AppRoutes = () => {
           />
         </Route>
 
-        {/* HR routes */}
-        <Route element={<ProtectedRoute requiredPosition="hr" />}>
+        <Route element={<ProtectedRoute requiredPage="/timesheet-hr" />}>
           <Route
             path="/timesheet-hr"
             element={
@@ -336,8 +387,7 @@ const AppRoutes = () => {
           />
         </Route>
 
-        {/* Admin+ routes (employees, SKUD) */}
-        <Route element={<ProtectedRoute requiredPosition="admin" />}>
+        <Route element={<ProtectedRoute requiredPage="/tender" />}>
           <Route
             path="/tender"
             element={
@@ -346,6 +396,9 @@ const AppRoutes = () => {
               </Layout>
             }
           />
+        </Route>
+
+        <Route element={<ProtectedRoute requiredPage="/skud-raw" />}>
           <Route
             path="/skud-raw"
             element={
@@ -354,6 +407,9 @@ const AppRoutes = () => {
               </Layout>
             }
           />
+        </Route>
+
+        <Route element={<ProtectedRoute requiredPage="/skud-db" />}>
           <Route
             path="/skud-db"
             element={
@@ -362,6 +418,20 @@ const AppRoutes = () => {
               </Layout>
             }
           />
+        </Route>
+
+        <Route element={<ProtectedRoute requiredPage="/skud-monitor" />}>
+          <Route
+            path="/skud-monitor"
+            element={
+              <Layout title="Монитор Sigur" theme={theme} onToggleTheme={toggleTheme}>
+                <SkudMonitorPage />
+              </Layout>
+            }
+          />
+        </Route>
+
+        <Route element={<ProtectedRoute requiredPage="/staff-control" />}>
           <Route
             path="/staff-control"
             element={
@@ -370,6 +440,9 @@ const AppRoutes = () => {
               </Layout>
             }
           />
+        </Route>
+
+        <Route element={<ProtectedRoute requiredPage="/admin/schedules" />}>
           <Route
             path="/admin/schedules"
             element={
@@ -380,20 +453,9 @@ const AppRoutes = () => {
           />
         </Route>
 
-        {/* Profile - for header+ */}
-        <Route element={<ProtectedRoute requiredPosition="header" />}>
-          <Route
-            path="/profile"
-            element={
-              <Layout title="Личный кабинет" theme={theme} onToggleTheme={toggleTheme}>
-                <ProfilePage />
-              </Layout>
-            }
-          />
-        </Route>
+        <Route path="/profile" element={<Navigate to="/employee" replace />} />
 
-        {/* Super Admin routes */}
-        <Route element={<ProtectedRoute requiredPosition="super_admin" />}>
+        <Route element={<ProtectedRoute requiredPage="/skud-settings" />}>
           <Route
             path="/skud-settings"
             element={
@@ -402,6 +464,9 @@ const AppRoutes = () => {
               </Layout>
             }
           />
+        </Route>
+
+        <Route element={<ProtectedRoute requiredPage="/admin/users" />}>
           <Route
             path="/admin/users"
             element={
@@ -410,7 +475,9 @@ const AppRoutes = () => {
               </Layout>
             }
           />
+        </Route>
 
+        <Route element={<ProtectedRoute requiredPage="/admin/audit" />}>
           <Route
             path="/admin/audit"
             element={
@@ -419,6 +486,9 @@ const AppRoutes = () => {
               </Layout>
             }
           />
+        </Route>
+
+        <Route element={<ProtectedRoute requiredPage="/admin/roles" />}>
           <Route
             path="/admin/roles"
             element={
@@ -427,6 +497,9 @@ const AppRoutes = () => {
               </Layout>
             }
           />
+        </Route>
+
+        <Route element={<ProtectedRoute requiredPage="/admin/settings" />}>
           <Route
             path="/admin/settings"
             element={
@@ -435,6 +508,9 @@ const AppRoutes = () => {
               </Layout>
             }
           />
+        </Route>
+
+        <Route element={<ProtectedRoute requiredPage="/admin/payslips" />}>
           <Route
             path="/admin/payslips"
             element={

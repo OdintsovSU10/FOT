@@ -91,7 +91,7 @@ export const ConnectionSettingsTab: FC<IConnectionSettingsTabProps> = ({
     try {
       const startTime = `${previewStart}T00:00:00`;
       const endTime = `${previewEnd}T23:59:59`;
-      const data = await sigurService.preview(startTime, endTime, previewDepartment || undefined);
+      const data = await sigurService.preview(startTime, endTime, previewDepartment || undefined, selectedConnection);
       setPreviewData(data);
     } catch {
       setError('Ошибка загрузки данных предпросмотра');
@@ -105,7 +105,7 @@ export const ConnectionSettingsTab: FC<IConnectionSettingsTabProps> = ({
     setDiscoverData(null);
     setError('');
     try {
-      const result = await sigurService.discover();
+      const result = await sigurService.discover(selectedConnection);
       setDiscoverData(result);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Ошибка диагностики API');

@@ -1,7 +1,15 @@
 /* eslint-disable react-refresh/only-export-components */
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { apiClient, ApiError } from '../api/client';
-import type { User, UserProfile, AuthState, LoginCredentials, RegisterData, EmployeePositionType, SystemRole } from '../types';
+import type {
+  User,
+  UserProfile,
+  AuthState,
+  LoginCredentials,
+  RegisterData,
+  EmployeePositionType,
+  SystemRole,
+} from '../types';
 
 interface AuthResponse {
   access_token: string;
@@ -27,6 +35,9 @@ interface AuthContextType extends AuthState {
   refreshProfile: () => Promise<void>;
   hasPosition: (positions: EmployeePositionType | EmployeePositionType[]) => boolean;
   canAccess: (requiredPosition?: EmployeePositionType) => boolean;
+  hasPermission: (permission: string) => boolean;
+  canViewPage: (pagePath: string) => boolean;
+  canEditPage: (pagePath: string) => boolean;
   getRoleLabel: (code: string) => string;
   // Deprecated aliases for compatibility
   role: EmployeePositionType | null;
@@ -215,6 +226,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return roles.find(r => r.code === code)?.name ?? code;
   }, [roles]);
 
+  const hasPermission = useCallback((permission: string): boolean => {
+    if (!state.isAuthenticated || !state.isApproved) return false;
+    if (state.isTwoFactorEnabled && !state.isTwoFactorVerified) return false;
+    return !!state.profile?.permissions?.includes(permission);
+  }, [state.isAuthenticated, state.isApproved, state.isTwoFactorEnabled, state.isTwoFactorVerified, state.profile?.permissions]);
+
+  const canViewPage = useCallback((pagePath: string): boolean => {
+    if (!state.isAuthenticated || !state.isApproved) return false;
+    if (state.isTwoFactorEnabled && !state.isTwoFactorVerified) return false;
+    return state.profile?.page_access?.[pagePath]?.can_view === true;
+  }, [state.isAuthenticated, state.isApproved, state.isTwoFactorEnabled, state.isTwoFactorVerified, state.profile?.page_access]);
+
+  const canEditPage = useCallback((pagePath: string): boolean => {
+    if (!state.isAuthenticated || !state.isApproved) return false;
+    if (state.isTwoFactorEnabled && !state.isTwoFactorVerified) return false;
+    return state.profile?.page_access?.[pagePath]?.can_edit === true;
+  }, [state.isAuthenticated, state.isApproved, state.isTwoFactorEnabled, state.isTwoFactorVerified, state.profile?.page_access]);
+
   // Check if user can access based on position hierarchy (dynamic from system_roles)
   const canAccess = useCallback((requiredPosition?: EmployeePositionType): boolean => {
     if (!state.isAuthenticated || !state.isApproved) return false;
@@ -236,6 +265,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     refreshProfile,
     hasPosition,
     canAccess,
+    hasPermission,
+    canViewPage,
+    canEditPage,
     getRoleLabel,
     // Deprecated aliases for compatibility
     role: effectivePositionType,

@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { leaveRequestsController } from '../controllers/leave-requests.controller.js';
-import { authenticate, requirePosition } from '../middleware/auth.js';
+import { authenticate, requirePageAccess } from '../middleware/auth.js';
 
 const router = Router();
 
@@ -9,49 +9,49 @@ router.use(authenticate);
 // POST /api/leave-requests — создание заявления (worker+)
 router.post(
   '/',
-  requirePosition('worker', 'header', 'hr', 'admin', 'super_admin'),
+  requirePageAccess('/employee/requests', 'edit'),
   leaveRequestsController.create
 );
 
 // GET /api/leave-requests/my — мои заявления (worker+)
 router.get(
   '/my',
-  requirePosition('worker', 'header', 'hr', 'admin', 'super_admin'),
+  requirePageAccess('/employee/requests', 'view'),
   leaveRequestsController.getMy
 );
 
 // GET /api/leave-requests/department — заявления отдела (header)
 router.get(
   '/department',
-  requirePosition('header', 'hr', 'admin', 'super_admin'),
+  requirePageAccess('/leave-requests', 'view'),
   leaveRequestsController.getDepartment
 );
 
 // GET /api/leave-requests — все заявления организации (hr/admin)
 router.get(
   '/',
-  requirePosition('hr', 'admin', 'super_admin'),
+  requirePageAccess('/leave-requests', 'view'),
   leaveRequestsController.getAll
 );
 
 // PATCH /api/leave-requests/:id/approve — одобрение (header/hr/admin)
 router.patch(
   '/:id/approve',
-  requirePosition('header', 'hr', 'admin', 'super_admin'),
+  requirePageAccess('/leave-requests', 'edit'),
   leaveRequestsController.approve
 );
 
 // PATCH /api/leave-requests/:id/reject — отклонение (header/hr/admin)
 router.patch(
   '/:id/reject',
-  requirePosition('header', 'hr', 'admin', 'super_admin'),
+  requirePageAccess('/leave-requests', 'edit'),
   leaveRequestsController.reject
 );
 
 // PATCH /api/leave-requests/:id/cancel — отмена (worker+)
 router.patch(
   '/:id/cancel',
-  requirePosition('worker', 'header', 'hr', 'admin', 'super_admin'),
+  requirePageAccess('/employee/requests', 'edit'),
   leaveRequestsController.cancel
 );
 

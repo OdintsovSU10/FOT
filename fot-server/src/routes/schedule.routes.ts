@@ -1,27 +1,27 @@
 import { Router } from 'express';
 import { scheduleController } from '../controllers/schedule.controller.js';
-import { authenticate, requirePosition } from '../middleware/auth.js';
+import { authenticate, requireAnyPageAccess } from '../middleware/auth.js';
 
 const router = Router();
 
 router.use(authenticate);
 
 // Шаблоны графиков
-router.get('/', requirePosition('header', 'hr', 'admin', 'super_admin'), scheduleController.list);
-router.get('/employees', requirePosition('header', 'hr', 'admin', 'super_admin'), scheduleController.listEmployeeAssignments);
-router.put('/employee/:employeeId', requirePosition('header', 'hr', 'admin', 'super_admin'), scheduleController.assignEmployee);
-router.delete('/employee/:employeeId', requirePosition('header', 'hr', 'admin', 'super_admin'), scheduleController.removeEmployeeAssignment);
-router.post('/', requirePosition('admin', 'super_admin'), scheduleController.create);
-router.put('/:id', requirePosition('admin', 'super_admin'), scheduleController.update);
-router.delete('/:id', requirePosition('admin', 'super_admin'), scheduleController.remove);
+router.get('/', requireAnyPageAccess(['/admin/schedules', '/staff-control'], 'view'), scheduleController.list);
+router.get('/employees', requireAnyPageAccess(['/admin/schedules', '/staff-control'], 'view'), scheduleController.listEmployeeAssignments);
+router.put('/employee/:employeeId', requireAnyPageAccess(['/admin/schedules', '/staff-control'], 'edit'), scheduleController.assignEmployee);
+router.delete('/employee/:employeeId', requireAnyPageAccess(['/admin/schedules', '/staff-control'], 'edit'), scheduleController.removeEmployeeAssignment);
+router.post('/', requireAnyPageAccess(['/admin/schedules', '/staff-control'], 'edit'), scheduleController.create);
+router.put('/:id', requireAnyPageAccess(['/admin/schedules', '/staff-control'], 'edit'), scheduleController.update);
+router.delete('/:id', requireAnyPageAccess(['/admin/schedules', '/staff-control'], 'edit'), scheduleController.remove);
 
 // Графики категорий труда
-router.get('/categories', requirePosition('header', 'hr', 'admin', 'super_admin'), scheduleController.listCategories);
-router.put('/category/:category', requirePosition('admin', 'super_admin'), scheduleController.assignCategory);
-router.delete('/category/:category', requirePosition('admin', 'super_admin'), scheduleController.removeCategoryAssignment);
+router.get('/categories', requireAnyPageAccess(['/admin/schedules', '/staff-control'], 'view'), scheduleController.listCategories);
+router.put('/category/:category', requireAnyPageAccess(['/admin/schedules', '/staff-control'], 'edit'), scheduleController.assignCategory);
+router.delete('/category/:category', requireAnyPageAccess(['/admin/schedules', '/staff-control'], 'edit'), scheduleController.removeCategoryAssignment);
 
 // Resolve
-router.get('/resolve/:empId', requirePosition('worker', 'header', 'hr', 'admin', 'super_admin'), scheduleController.resolve);
-router.get('/resolve-bulk', requirePosition('header', 'hr', 'admin', 'super_admin'), scheduleController.resolveBulk);
+router.get('/resolve/:empId', requireAnyPageAccess(['/employee/timesheet', '/timesheet', '/timesheet-hr', '/staff-control'], 'view'), scheduleController.resolve);
+router.get('/resolve-bulk', requireAnyPageAccess(['/timesheet', '/timesheet-hr', '/staff-control'], 'view'), scheduleController.resolveBulk);
 
 export default router;

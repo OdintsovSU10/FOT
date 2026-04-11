@@ -8,9 +8,42 @@ interface ISetting {
   updated_at: string;
 }
 
+export interface ISigurMonitorSettings {
+  enabled: boolean;
+  failureThreshold: number;
+  recoveryThreshold: number;
+  silenceWindowMinutes: number;
+  baselineLookbackDays: number;
+  baselineMinEvents: number;
+  alertCooldownMinutes: number;
+  timezone: string;
+}
+
+export const DEFAULT_SIGUR_MONITOR_SETTINGS: ISigurMonitorSettings = {
+  enabled: true,
+  failureThreshold: 2,
+  recoveryThreshold: 2,
+  silenceWindowMinutes: 15,
+  baselineLookbackDays: 28,
+  baselineMinEvents: 5,
+  alertCooldownMinutes: 60,
+  timezone: 'Europe/Moscow',
+};
+
 let cache: Map<string, string | null> = new Map();
 let cacheLoadedAt = 0;
 const CACHE_TTL = 60_000; // 60 сек
+
+const parseBoolean = (value: string | null | undefined, fallback: boolean): boolean => {
+  if (value == null) return fallback;
+  return value === 'true' || value === '1';
+};
+
+const parsePositiveInt = (value: string | null | undefined, fallback: number): number => {
+  if (value == null || value.trim() === '') return fallback;
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+};
 
 const loadCache = async () => {
   if (Date.now() - cacheLoadedAt < CACHE_TTL && cache.size > 0) return;
@@ -93,6 +126,90 @@ export const settingsService = {
       bucketName,
       enabled: !!(accountId && accessKeyId && secretAccessKey),
     };
+  },
+
+  async getSigurMonitorConfig(): Promise<ISigurMonitorSettings> {
+    const values = await this.getMultiple([
+      'sigur_monitor_enabled',
+      'sigur_monitor_failure_threshold',
+      'sigur_monitor_recovery_threshold',
+      'sigur_monitor_silence_window_minutes',
+      'sigur_monitor_baseline_lookback_days',
+      'sigur_monitor_baseline_min_events',
+      'sigur_monitor_alert_cooldown_minutes',
+      'sigur_monitor_timezone',
+    ]);
+
+    return {
+      enabled: parseBoolean(values.sigur_monitor_enabled, DEFAULT_SIGUR_MONITOR_SETTINGS.enabled),
+      failureThreshold: parsePositiveInt(values.sigur_monitor_failure_threshold, DEFAULT_SIGUR_MONITOR_SETTINGS.failureThreshold),
+      recoveryThreshold: parsePositiveInt(values.sigur_monitor_recovery_threshold, DEFAULT_SIGUR_MONITOR_SETTINGS.recoveryThreshold),
+      silenceWindowMinutes: parsePositiveInt(values.sigur_monitor_silence_window_minutes, DEFAULT_SIGUR_MONITOR_SETTINGS.silenceWindowMinutes),
+      baselineLookbackDays: parsePositiveInt(values.sigur_monitor_baseline_lookback_days, DEFAULT_SIGUR_MONITOR_SETTINGS.baselineLookbackDays),
+      baselineMinEvents: parsePositiveInt(values.sigur_monitor_baseline_min_events, DEFAULT_SIGUR_MONITOR_SETTINGS.baselineMinEvents),
+      alertCooldownMinutes: parsePositiveInt(values.sigur_monitor_alert_cooldown_minutes, DEFAULT_SIGUR_MONITOR_SETTINGS.alertCooldownMinutes),
+      timezone: values.sigur_monitor_timezone || DEFAULT_SIGUR_MONITOR_SETTINGS.timezone,
+    };
+  },
+
+  async setSigurMonitorConfig(config: Partial<ISigurMonitorSettings>, userId: string): Promise<ISigurMonitorSettings> {
+    const current = await this.getSigurMonitorConfig();
+    const next: ISigurMonitorSettings = {
+      enabled: config.enabled ?? current.enabled,
+      failureThreshold: config.failureThreshold ?? current.failureThreshold,
+      recoveryThreshold: config.recoveryThreshold ?? current.recoveryThreshold,
+      silenceWindowMinutes: config.silenceWindowMinutes ?? current.silenceWindowMinutes,
+      baselineLookbackDays: config.baselineLookbackDays ?? current.baselineLookbackDays,
+      baselineMinEvents: config.baselineMinEvents ?? current.baselineMinEvents,
+      alertCooldownMinutes: config.alertCooldownMinutes ?? current.alertCooldownMinutes,
+      timezone: config.timezone ?? current.timezone,
+    };
+
+    await this.setMultiple([
+      {
+        key: 'sigur_monitor_enabled',
+        value: String(next.enabled),
+        description: 'Включить мониторинг инцидентов Sigur',
+      },
+      {
+        key: 'sigur_monitor_failure_threshold',
+        value: String(next.failureThreshold),
+        description: 'Количество подряд неуспешных проверок для открытия инцидента',
+      },
+      {
+        key: 'sigur_monitor_recovery_threshold',
+        value: String(next.recoveryThreshold),
+        description: 'Количество подряд успешных проверок для закрытия инцидента',
+      },
+      {
+        key: 'sigur_monitor_silence_window_minutes',
+        value: String(next.silenceWindowMinutes),
+        description: 'Окно в минутах без событий для проверки тишины',
+      },
+      {
+        key: 'sigur_monitor_baseline_lookback_days',
+        value: String(next.baselineLookbackDays),
+        description: 'Глубина lookback в днях для baseline трафика событий',
+      },
+      {
+        key: 'sigur_monitor_baseline_min_events',
+        value: String(next.baselineMinEvents),
+        description: 'Минимальный baseline событий в слоте для детекции тишины',
+      },
+      {
+        key: 'sigur_monitor_alert_cooldown_minutes',
+        value: String(next.alertCooldownMinutes),
+        description: 'Cooldown между уведомлениями о повторных инцидентах Sigur',
+      },
+      {
+        key: 'sigur_monitor_timezone',
+        value: next.timezone,
+        description: 'IANA timezone для мониторинга Sigur',
+      },
+    ], userId);
+
+    this.invalidateCache();
+    return this.getSigurMonitorConfig();
   },
 
   invalidateCache() {

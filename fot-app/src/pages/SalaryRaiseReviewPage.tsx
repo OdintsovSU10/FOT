@@ -22,8 +22,8 @@ type FilterTab = 'pending' | 'all';
 
 export const SalaryRaiseReviewPage: FC = () => {
   const navigate = useNavigate();
-  const { canAccess } = useAuth();
-  const isHrPlus = canAccess('hr');
+  const { hasPermission } = useAuth();
+  const canViewAll = hasPermission('data.scope.all');
 
   const [requests, setRequests] = useState<ISalaryRaiseRequest[]>([]);
   const [loading, setLoading] = useState(true);
@@ -35,7 +35,7 @@ export const SalaryRaiseReviewPage: FC = () => {
       if (filter === 'pending') {
         const data = await salaryRaiseService.getPending();
         setRequests(data);
-      } else if (isHrPlus) {
+      } else if (canViewAll) {
         const data = await salaryRaiseService.getAll();
         setRequests(data);
       } else {
@@ -47,7 +47,7 @@ export const SalaryRaiseReviewPage: FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [filter, isHrPlus]);
+  }, [filter, canViewAll]);
 
   useEffect(() => { loadData(); }, [loadData]);
 
@@ -62,7 +62,7 @@ export const SalaryRaiseReviewPage: FC = () => {
           >
             Ожидающие
           </button>
-          {isHrPlus && (
+          {canViewAll && (
             <button
               className={`srr-filter-btn ${filter === 'all' ? 'active' : ''}`}
               onClick={() => setFilter('all')}

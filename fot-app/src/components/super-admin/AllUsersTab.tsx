@@ -1,10 +1,10 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import type { FC } from 'react';
 import { adminService } from '../../services/adminService';
 import { structureApi } from '../../api/structure';
 import { useToast } from '../../contexts/ToastContext';
 import { useAuth } from '../../contexts/AuthContext';
-import type { EmployeePositionType, TwoFactorData, OrgDepartmentNode } from '../../types';
+import type { ChatInboundMode, EmployeePositionType, TwoFactorData, OrgDepartmentNode } from '../../types';
 import styles from '../../pages/super-admin/SuperAdmin.module.css';
 
 export interface IUserFromApi {
@@ -18,6 +18,7 @@ export interface IUserFromApi {
   imported_position: string | null;
   employee_id: string | null;
   supervisor_id: string | null;
+  chat_inbound_mode: ChatInboundMode;
   is_approved: boolean;
   two_factor_enabled: boolean;
   approved_at: string | null;
@@ -61,12 +62,10 @@ const flattenDepts = (nodes: OrgDepartmentNode[], level = 0): IDeptFlat[] => {
   return result;
 };
 
-type RoleFilter = 'headers' | 'workers' | 'hr' | 'admins';
-
 export const AllUsersTab: FC<IAllUsersTabProps> = ({ allUsers, onReload }) => {
   const toast = useToast();
   const { roles, getRoleLabel } = useAuth();
-  const [roleFilter, setRoleFilter] = useState<RoleFilter>('headers');
+  const [roleFilter, setRoleFilter] = useState<EmployeePositionType | null>(null);
   const [expandedUserId, setExpandedUserId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState<{ userId: string; value: string } | null>(null);
   const [empSearch, setEmpSearch] = useState<IEmpSearch | null>(null);
@@ -86,6 +85,36 @@ export const AllUsersTab: FC<IAllUsersTabProps> = ({ allUsers, onReload }) => {
       }
     });
   }, []);
+
+  const roleOptions = useMemo(() => {
+    const codeSet = new Set<string>([
+      ...roles.map(role => role.code),
+      ...allUsers.map(user => user.position_type).filter(Boolean),
+    ]);
+
+    return Array.from(codeSet)
+      .map(code => ({
+        code,
+        role: roles.find(role => role.code === code) ?? null,
+        count: allUsers.filter(user => user.position_type === code).length,
+      }))
+      .sort((a, b) => {
+        const levelDiff = (a.role?.level ?? Number.MAX_SAFE_INTEGER) - (b.role?.level ?? Number.MAX_SAFE_INTEGER);
+        if (levelDiff !== 0) return levelDiff;
+        return getRoleLabel(a.code).localeCompare(getRoleLabel(b.code), 'ru');
+      });
+  }, [allUsers, getRoleLabel, roles]);
+
+  useEffect(() => {
+    if (!roleOptions.length) {
+      setRoleFilter(null);
+      return;
+    }
+
+    if (!roleFilter || !roleOptions.some(option => option.code === roleFilter)) {
+      setRoleFilter(roleOptions[0].code);
+    }
+  }, [roleFilter, roleOptions]);
 
   const toggleExpand = (userId: string) => {
     setExpandedUserId(prev => prev === userId ? null : userId);
@@ -157,6 +186,16 @@ export const AllUsersTab: FC<IAllUsersTabProps> = ({ allUsers, onReload }) => {
     }
   };
 
+  const handleChatInboundModeChange = async (userId: string, chatInboundMode: ChatInboundMode) => {
+    try {
+      await adminService.updateUserChatInboundMode(userId, chatInboundMode);
+      toast.success('Режим входящих сообщений обновлён');
+      await onReload();
+    } catch {
+      toast.error('Ошибка обновления режима входящих сообщений');
+    }
+  };
+
   const handleDeptChange = async (userId: string, deptId: string) => {
     try {
       await adminService.updateEmployeeDepartment(userId, deptId);
@@ -216,47 +255,24 @@ export const AllUsersTab: FC<IAllUsersTabProps> = ({ allUsers, onReload }) => {
     setTwoFactorModal({ visible: false, userId: '', userName: '', data: null, loading: false });
   };
 
-  const counts = {
-    headers: allUsers.filter(u => u.position_type === 'header').length,
-    workers: allUsers.filter(u => u.position_type === 'worker').length,
-    hr: allUsers.filter(u => u.position_type === 'hr').length,
-    admins: allUsers.filter(u => u.position_type === 'admin' || u.position_type === 'super_admin').length,
-  };
-
   const filteredUsers = allUsers.filter(u => {
-    if (roleFilter === 'headers') return u.position_type === 'header';
-    if (roleFilter === 'workers') return u.position_type === 'worker';
-    if (roleFilter === 'hr') return u.position_type === 'hr';
-    return u.position_type === 'admin' || u.position_type === 'super_admin';
+    if (!roleFilter) return true;
+    return u.position_type === roleFilter;
   });
 
   return (
     <>
       <div className={styles.roleTabs}>
-        <button
-          className={`${styles.roleTab} ${roleFilter === 'headers' ? styles.roleTabActive : ''}`}
-          onClick={() => setRoleFilter('headers')}
-        >
-          Руководители ({counts.headers})
-        </button>
-        <button
-          className={`${styles.roleTab} ${roleFilter === 'workers' ? styles.roleTabActive : ''}`}
-          onClick={() => setRoleFilter('workers')}
-        >
-          Сотрудники ({counts.workers})
-        </button>
-        <button
-          className={`${styles.roleTab} ${roleFilter === 'hr' ? styles.roleTabActive : ''}`}
-          onClick={() => setRoleFilter('hr')}
-        >
-          HR ({counts.hr})
-        </button>
-        <button
-          className={`${styles.roleTab} ${roleFilter === 'admins' ? styles.roleTabActive : ''}`}
-          onClick={() => setRoleFilter('admins')}
-        >
-          Администраторы ({counts.admins})
-        </button>
+        {roleOptions.map(option => (
+          <button
+            key={option.code}
+            className={`${styles.roleTab} ${roleFilter === option.code ? styles.roleTabActive : ''}`}
+            onClick={() => setRoleFilter(option.code)}
+          >
+            {getPositionName(option.code)}
+            {!option.role?.is_active ? ' (неакт.)' : ''} ({option.count})
+          </button>
+        ))}
       </div>
 
       <div className={styles.userListCompact}>
@@ -369,6 +385,18 @@ export const AllUsersTab: FC<IAllUsersTabProps> = ({ allUsers, onReload }) => {
                               <option key={r.code} value={r.code}>{r.name}</option>
                             ))
                           }
+                        </select>
+                      </div>
+
+                      <div className={styles.controlGroup}>
+                        <label>Входящий чат:</label>
+                        <select
+                          value={user.chat_inbound_mode || 'open'}
+                          onChange={(e) => handleChatInboundModeChange(user.id, e.target.value as ChatInboundMode)}
+                        >
+                          <option value="open">Открыт</option>
+                          <option value="requests_only">Только по запросу</option>
+                          <option value="disabled">Запрещён</option>
                         </select>
                       </div>
 

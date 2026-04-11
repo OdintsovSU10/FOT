@@ -1,5 +1,12 @@
 import { supabase } from '../config/database.js';
 import { encryptionService } from './encryption.service.js';
+import {
+  chatPolicyService,
+  type ChatAvailability,
+  type ChatRequestStatus,
+  type IChatPolicyDecision,
+} from './chat-policy.service.js';
+import { ChatError } from './chat.errors.js';
 
 export interface IChatConversation {
   id: string;
@@ -8,6 +15,8 @@ export interface IChatConversation {
   participants: { user_id: string; full_name: string | null }[];
   last_message: { content: string; sender_id: string; created_at: string } | null;
   unread_count: number;
+  is_writable: boolean;
+  write_lock_reason: string | null;
 }
 
 export interface IChatMessage {
@@ -19,11 +28,49 @@ export interface IChatMessage {
   created_at: string;
 }
 
-/**
- * Расшифровать контент или вернуть как есть (для старых незашифрованных сообщений)
- */
+export interface IChatUser {
+  id: string;
+  full_name: string | null;
+  position_type: string;
+  department_id: string | null;
+  availability: ChatAvailability;
+  availability_reason: string;
+  request_status: ChatRequestStatus;
+}
+
+export interface IChatContactRequest {
+  id: string;
+  requester_id: string;
+  requester_name: string | null;
+  target_user_id: string;
+  target_name: string | null;
+  message: string | null;
+  status: 'pending' | 'approved' | 'rejected';
+  created_at: string;
+  resolved_at: string | null;
+  resolved_by: string | null;
+  resolved_by_name: string | null;
+  direction: 'inbox' | 'outbox';
+}
+
+type ChatRequestRow = {
+  id: string;
+  requester_id: string;
+  target_user_id: string;
+  message: string | null;
+  status: 'pending' | 'approved' | 'rejected';
+  created_at: string;
+  resolved_at: string | null;
+  resolved_by: string | null;
+};
+
+type ConversationAccess = {
+  participantIds: string[];
+  is_writable: boolean;
+  write_lock_reason: string | null;
+};
+
 const decryptOrPassthrough = (content: string): string => {
-  // Encrypted format: hex:hex:hex (iv:authTag:encrypted)
   if (/^[0-9a-f]+:[0-9a-f]+:[0-9a-f]+$/i.test(content)) {
     try {
       return encryptionService.decrypt(content);
@@ -34,55 +81,164 @@ const decryptOrPassthrough = (content: string): string => {
   return content;
 };
 
+const toWriteState = (
+  participantIds: string[],
+  currentUserId: string,
+  decisions: Map<string, IChatPolicyDecision>,
+) => {
+  const otherParticipantId = participantIds.find(userId => userId !== currentUserId) || null;
+  if (!otherParticipantId) {
+    return { is_writable: false, write_lock_reason: 'Диалог больше не связан с доступным собеседником' };
+  }
+
+  const decision = decisions.get(otherParticipantId);
+  if (!decision) {
+    return { is_writable: false, write_lock_reason: 'Не удалось определить текущие права на диалог' };
+  }
+
+  if (decision.availability === 'direct') {
+    return { is_writable: true, write_lock_reason: null };
+  }
+
+  return {
+    is_writable: false,
+    write_lock_reason: decision.availability_reason,
+  };
+};
+
+async function getConversationParticipantIds(conversationId: string): Promise<string[]> {
+  const { data: participants, error } = await supabase
+    .from('chat_participants')
+    .select('user_id')
+    .eq('conversation_id', conversationId);
+
+  if (error) {
+    throw new Error('Failed to load conversation participants');
+  }
+
+  return (participants || []).map(participant => participant.user_id);
+}
+
+async function getOrCreateConversationRecord(userId1: string, userId2: string): Promise<string> {
+  const { data: existing, error: rpcError } = await supabase
+    .rpc('find_direct_conversation', { user1: userId1, user2: userId2 });
+
+  if (rpcError) {
+    throw new Error('Failed to search existing conversation');
+  }
+
+  if (existing && existing.length > 0) {
+    return existing[0].conversation_id;
+  }
+
+  const { data: conversation, error: conversationError } = await supabase
+    .from('chat_conversations')
+    .insert({})
+    .select('id')
+    .single();
+
+  if (conversationError || !conversation) {
+    throw new Error('Failed to create conversation');
+  }
+
+  const { error: participantsError } = await supabase
+    .from('chat_participants')
+    .insert([
+      { conversation_id: conversation.id, user_id: userId1 },
+      { conversation_id: conversation.id, user_id: userId2 },
+    ]);
+
+  if (participantsError) {
+    throw new Error('Failed to create conversation participants');
+  }
+
+  return conversation.id;
+}
+
+async function formatContactRequests(rows: ChatRequestRow[], currentUserId: string): Promise<IChatContactRequest[]> {
+  if (rows.length === 0) return [];
+
+  const profileIds = [...new Set(rows.flatMap(row => [row.requester_id, row.target_user_id, row.resolved_by]).filter(Boolean) as string[])];
+
+  const { data: profiles, error } = await supabase
+    .from('user_profiles')
+    .select('id, full_name')
+    .in('id', profileIds);
+
+  if (error) {
+    throw new Error('Failed to load request participants');
+  }
+
+  const profileById = new Map<string, { id: string; full_name: string | null }>();
+  (profiles || []).forEach(profile => profileById.set(profile.id, profile));
+
+  return rows.map(row => ({
+    id: row.id,
+    requester_id: row.requester_id,
+    requester_name: profileById.get(row.requester_id)?.full_name || null,
+    target_user_id: row.target_user_id,
+    target_name: profileById.get(row.target_user_id)?.full_name || null,
+    message: row.message,
+    status: row.status,
+    created_at: row.created_at,
+    resolved_at: row.resolved_at,
+    resolved_by: row.resolved_by,
+    resolved_by_name: row.resolved_by ? (profileById.get(row.resolved_by)?.full_name || null) : null,
+    direction: row.target_user_id === currentUserId ? 'inbox' : 'outbox',
+  }));
+}
+
 export const chatService = {
-  /**
-   * Получить или создать диалог между двумя пользователями
-   */
   async getOrCreateConversation(userId1: string, userId2: string): Promise<string> {
-    // Ищем существующий диалог между этими двумя пользователями
-    const { data: existing } = await supabase
-      .rpc('find_direct_conversation', { user1: userId1, user2: userId2 });
+    const decision = await chatPolicyService.getPairDecision(userId1, userId2);
 
-    if (existing && existing.length > 0) {
-      return existing[0].conversation_id;
+    if (decision.availability === 'request') {
+      throw new ChatError(decision.availability_reason, 403, 'CHAT_REQUEST_REQUIRED');
     }
 
-    // Создаём новый диалог
-    const { data: conv, error: convError } = await supabase
-      .from('chat_conversations')
-      .insert({})
-      .select('id')
-      .single();
-
-    if (convError || !conv) {
-      throw new Error('Failed to create conversation');
+    if (decision.availability !== 'direct') {
+      throw new ChatError(decision.availability_reason, 403, 'CHAT_FORBIDDEN');
     }
 
-    // Добавляем участников
-    await supabase
-      .from('chat_participants')
-      .insert([
-        { conversation_id: conv.id, user_id: userId1 },
-        { conversation_id: conv.id, user_id: userId2 },
-      ]);
-
-    return conv.id;
+    return getOrCreateConversationRecord(userId1, userId2);
   },
 
-  /**
-   * Отправить сообщение (шифрует контент перед сохранением)
-   */
-  async sendMessage(conversationId: string, senderId: string, content: string): Promise<IChatMessage> {
-    // Проверяем что отправитель — участник
-    const { data: participant } = await supabase
-      .from('chat_participants')
-      .select('id')
-      .eq('conversation_id', conversationId)
-      .eq('user_id', senderId)
-      .single();
+  async getConversationAccess(conversationId: string, userId: string): Promise<ConversationAccess> {
+    const participantIds = await getConversationParticipantIds(conversationId);
 
-    if (!participant) {
-      throw new Error('Not a participant of this conversation');
+    if (!participantIds.includes(userId)) {
+      throw new ChatError('Вы не участвуете в этом диалоге', 403, 'CHAT_ACCESS_DENIED');
+    }
+
+    if (participantIds.length !== 2) {
+      return {
+        participantIds,
+        is_writable: false,
+        write_lock_reason: 'Поддерживаются только личные диалоги',
+      };
+    }
+
+    const otherParticipantId = participantIds.find(participantId => participantId !== userId);
+    if (!otherParticipantId) {
+      return {
+        participantIds,
+        is_writable: false,
+        write_lock_reason: 'Собеседник не найден',
+      };
+    }
+
+    const decision = await chatPolicyService.getPairDecision(userId, otherParticipantId);
+    return {
+      participantIds,
+      is_writable: decision.availability === 'direct',
+      write_lock_reason: decision.availability === 'direct' ? null : decision.availability_reason,
+    };
+  },
+
+  async sendMessage(conversationId: string, senderId: string, content: string): Promise<IChatMessage> {
+    const access = await this.getConversationAccess(conversationId, senderId);
+    if (!access.is_writable) {
+      throw new ChatError(access.write_lock_reason || 'Отправка сообщений недоступна', 403, 'CHAT_WRITE_FORBIDDEN');
     }
 
     const plainContent = content.trim();
@@ -102,31 +258,16 @@ export const chatService = {
       throw new Error('Failed to send message');
     }
 
-    // Обновляем updated_at диалога
     await supabase
       .from('chat_conversations')
       .update({ updated_at: new Date().toISOString() })
       .eq('id', conversationId);
 
-    // Возвращаем с расшифрованным контентом для socket broadcast
     return { ...message, content: plainContent } as IChatMessage;
   },
 
-  /**
-   * Получить сообщения диалога (расшифровывает контент)
-   */
   async getMessages(conversationId: string, userId: string, limit = 50, offset = 0): Promise<IChatMessage[]> {
-    // Проверяем участие
-    const { data: participant } = await supabase
-      .from('chat_participants')
-      .select('id')
-      .eq('conversation_id', conversationId)
-      .eq('user_id', userId)
-      .single();
-
-    if (!participant) {
-      throw new Error('Not a participant');
-    }
+    await this.getConversationAccess(conversationId, userId);
 
     const { data, error } = await supabase
       .from('chat_messages')
@@ -137,111 +278,136 @@ export const chatService = {
 
     if (error) throw new Error('Failed to fetch messages');
 
-    return (data || []).map(msg => ({
-      ...msg,
-      content: decryptOrPassthrough(msg.content),
+    return (data || []).map(message => ({
+      ...message,
+      content: decryptOrPassthrough(message.content),
     })) as IChatMessage[];
   },
 
-  /**
-   * Получить список диалогов пользователя
-   */
   async getConversations(userId: string): Promise<IChatConversation[]> {
-    // 1) conversation_ids пользователя
-    const { data: participations } = await supabase
+    const { data: participations, error: participationsError } = await supabase
       .from('chat_participants')
       .select('conversation_id')
       .eq('user_id', userId);
 
+    if (participationsError) {
+      throw new Error('Failed to load conversations');
+    }
+
     if (!participations || participations.length === 0) return [];
 
-    const convIds = participations.map(p => p.conversation_id);
+    const conversationIds = participations.map(participation => participation.conversation_id);
 
-    // 2) Все диалоги одним запросом
-    const { data: conversations } = await supabase
+    const { data: conversations, error: conversationsError } = await supabase
       .from('chat_conversations')
       .select('id, created_at, updated_at')
-      .in('id', convIds)
+      .in('id', conversationIds)
       .order('updated_at', { ascending: false });
+
+    if (conversationsError) {
+      throw new Error('Failed to load conversations');
+    }
 
     if (!conversations || conversations.length === 0) return [];
 
-    // 3) Все участники всех диалогов одним запросом
-    const { data: allParts } = await supabase
+    const { data: allParticipants, error: allParticipantsError } = await supabase
       .from('chat_participants')
       .select('conversation_id, user_id')
-      .in('conversation_id', convIds);
+      .in('conversation_id', conversationIds);
 
-    const partsByConv = new Map<string, string[]>();
-    (allParts || []).forEach(p => {
-      const arr = partsByConv.get(p.conversation_id) || [];
-      arr.push(p.user_id);
-      partsByConv.set(p.conversation_id, arr);
+    if (allParticipantsError) {
+      throw new Error('Failed to load conversation participants');
+    }
+
+    const participantsByConversation = new Map<string, string[]>();
+    (allParticipants || []).forEach(participant => {
+      const existing = participantsByConversation.get(participant.conversation_id) || [];
+      existing.push(participant.user_id);
+      participantsByConversation.set(participant.conversation_id, existing);
     });
 
-    // 4) Все user_profiles одним запросом
-    const allUserIds = [...new Set((allParts || []).map(p => p.user_id))];
-    const { data: profiles } = await supabase
+    const allUserIds = [...new Set((allParticipants || []).map(participant => participant.user_id))];
+    const { data: profiles, error: profilesError } = await supabase
       .from('user_profiles')
       .select('id, full_name')
       .in('id', allUserIds);
 
-    const profileById = new Map<string, { id: string; full_name: string | null }>();
-    (profiles || []).forEach(p => profileById.set(p.id, p));
+    if (profilesError) {
+      throw new Error('Failed to load conversation profiles');
+    }
 
-    // 5) Все сообщения (только нужные колонки) одним запросом — берём по одному последнему на каждый диалог
-    // PostgREST не поддерживает DISTINCT ON, поэтому берём все сообщения за разумный лимит и группируем в JS
-    const { data: allMsgs } = await supabase
+    const profileById = new Map<string, { id: string; full_name: string | null }>();
+    (profiles || []).forEach(profile => profileById.set(profile.id, profile));
+
+    const { data: allMessages, error: allMessagesError } = await supabase
       .from('chat_messages')
       .select('conversation_id, content, sender_id, created_at, is_read')
-      .in('conversation_id', convIds)
+      .in('conversation_id', conversationIds)
       .order('created_at', { ascending: false })
-      .limit(convIds.length * 50);
+      .limit(conversationIds.length * 50);
 
-    const lastByConv = new Map<string, { content: string; sender_id: string; created_at: string }>();
-    const unreadByConv = new Map<string, number>();
-    (allMsgs || []).forEach(m => {
-      if (!lastByConv.has(m.conversation_id)) {
-        lastByConv.set(m.conversation_id, {
-          content: m.content,
-          sender_id: m.sender_id,
-          created_at: m.created_at,
+    if (allMessagesError) {
+      throw new Error('Failed to load conversation messages');
+    }
+
+    const lastMessageByConversation = new Map<string, { content: string; sender_id: string; created_at: string }>();
+    const unreadByConversation = new Map<string, number>();
+
+    (allMessages || []).forEach(message => {
+      if (!lastMessageByConversation.has(message.conversation_id)) {
+        lastMessageByConversation.set(message.conversation_id, {
+          content: message.content,
+          sender_id: message.sender_id,
+          created_at: message.created_at,
         });
       }
-      if (!m.is_read && m.sender_id !== userId) {
-        unreadByConv.set(m.conversation_id, (unreadByConv.get(m.conversation_id) || 0) + 1);
+
+      if (!message.is_read && message.sender_id !== userId) {
+        unreadByConversation.set(
+          message.conversation_id,
+          (unreadByConversation.get(message.conversation_id) || 0) + 1,
+        );
       }
     });
 
-    // 6) Сборка результата без дополнительных запросов
-    return conversations.map(conv => {
-      const participantIds = partsByConv.get(conv.id) || [];
-      const participants = participantIds
-        .map(uid => profileById.get(uid))
-        .filter((p): p is { id: string; full_name: string | null } => !!p)
-        .map(p => ({ user_id: p.id, full_name: p.full_name }));
+    const otherUserIds = [...new Set(
+      conversations
+        .flatMap(conversation => participantsByConversation.get(conversation.id) || [])
+        .filter(participantId => participantId !== userId),
+    )];
 
-      const lastMsg = lastByConv.get(conv.id);
+    const decisions = await chatPolicyService.getDecisionsForTargets(userId, otherUserIds);
+
+    return conversations.map(conversation => {
+      const participantIds = participantsByConversation.get(conversation.id) || [];
+      const participants = participantIds
+        .map(userIdValue => profileById.get(userIdValue))
+        .filter((profile): profile is { id: string; full_name: string | null } => !!profile)
+        .map(profile => ({ user_id: profile.id, full_name: profile.full_name }));
+
+      const lastMessage = lastMessageByConversation.get(conversation.id);
+      const writeState = toWriteState(participantIds, userId, decisions);
 
       return {
-        id: conv.id,
-        created_at: conv.created_at,
-        updated_at: conv.updated_at,
+        id: conversation.id,
+        created_at: conversation.created_at,
+        updated_at: conversation.updated_at,
         participants,
-        last_message: lastMsg ? {
-          content: decryptOrPassthrough(lastMsg.content),
-          sender_id: lastMsg.sender_id,
-          created_at: lastMsg.created_at,
+        last_message: lastMessage ? {
+          content: decryptOrPassthrough(lastMessage.content),
+          sender_id: lastMessage.sender_id,
+          created_at: lastMessage.created_at,
         } : null,
-        unread_count: unreadByConv.get(conv.id) || 0,
+        unread_count: unreadByConversation.get(conversation.id) || 0,
+        is_writable: writeState.is_writable,
+        write_lock_reason: writeState.write_lock_reason,
       };
     });
   },
 
-  /**
-   * Пометить сообщения как прочитанные
-   */
   async markAsRead(conversationId: string, userId: string): Promise<void> {
+    await this.getConversationAccess(conversationId, userId);
+
     await supabase
       .from('chat_messages')
       .update({ is_read: true })
@@ -250,47 +416,260 @@ export const chatService = {
       .neq('sender_id', userId);
   },
 
-  /**
-   * Получить общее количество непрочитанных сообщений для пользователя
-   */
   async getUnreadCount(userId: string): Promise<number> {
-    const { data: participations } = await supabase
+    const { data: participations, error: participationsError } = await supabase
       .from('chat_participants')
       .select('conversation_id')
       .eq('user_id', userId);
 
+    if (participationsError) {
+      throw new Error('Failed to load unread count');
+    }
+
     if (!participations || participations.length === 0) return 0;
 
-    const convIds = participations.map(p => p.conversation_id);
+    const conversationIds = participations.map(participation => participation.conversation_id);
 
-    const { count } = await supabase
+    const { count, error } = await supabase
       .from('chat_messages')
       .select('id', { count: 'exact', head: true })
-      .in('conversation_id', convIds)
+      .in('conversation_id', conversationIds)
       .eq('is_read', false)
       .neq('sender_id', userId);
+
+    if (error) {
+      throw new Error('Failed to load unread count');
+    }
 
     return count || 0;
   },
 
-  /**
-   * Поиск пользователей для начала диалога
-   */
-  async searchUsers(query: string, currentUserId: string): Promise<{ id: string; full_name: string | null }[]> {
-    let dbQuery = supabase
+  async searchUsers(query: string, currentUserId: string): Promise<IChatUser[]> {
+    let request = supabase
       .from('user_profiles')
-      .select('id, full_name')
+      .select('id')
       .neq('id', currentUserId)
       .eq('is_approved', true)
       .order('full_name', { ascending: true })
       .limit(50);
 
-    if (query && query.trim()) {
-      dbQuery = dbQuery.ilike('full_name', `%${query.trim()}%`);
+    if (query.trim()) {
+      request = request.ilike('full_name', `%${query.trim()}%`);
     }
 
-    const { data } = await dbQuery;
+    const { data: users, error } = await request;
+    if (error) {
+      throw new Error('Failed to search users');
+    }
 
-    return (data || []).map(u => ({ id: u.id, full_name: u.full_name }));
+    const candidateIds = (users || []).map(user => user.id);
+    if (candidateIds.length === 0) return [];
+
+    const [contexts, decisions] = await Promise.all([
+      chatPolicyService.getUserContexts([currentUserId, ...candidateIds]),
+      chatPolicyService.getDecisionsForTargets(currentUserId, candidateIds),
+    ]);
+
+    const results: IChatUser[] = [];
+    candidateIds.forEach(userIdValue => {
+      const context = contexts.get(userIdValue);
+      const decision = decisions.get(userIdValue);
+
+      if (!context || !decision || decision.availability === 'forbidden') {
+        return;
+      }
+
+      results.push({
+        id: context.id,
+        full_name: context.full_name,
+        position_type: context.position_type,
+        department_id: context.department_id,
+        availability: decision.availability,
+        availability_reason: decision.availability_reason,
+        request_status: decision.request_status,
+      });
+    });
+
+    return results;
+  },
+
+  async listContactRequests(userId: string, box: 'inbox' | 'outbox'): Promise<IChatContactRequest[]> {
+    const query = supabase
+      .from('chat_contact_requests')
+      .select('id, requester_id, target_user_id, message, status, created_at, resolved_at, resolved_by')
+      .order('created_at', { ascending: false });
+
+    const { data, error } = box === 'inbox'
+      ? await query.eq('target_user_id', userId)
+      : await query.eq('requester_id', userId);
+
+    if (error) {
+      throw new Error('Failed to load chat requests');
+    }
+
+    return formatContactRequests((data || []) as ChatRequestRow[], userId);
+  },
+
+  async createContactRequest(requesterId: string, targetUserId: string, message?: string | null): Promise<IChatContactRequest> {
+    if (requesterId === targetUserId) {
+      throw new ChatError('Нельзя отправить запрос самому себе', 400, 'CHAT_INVALID_TARGET');
+    }
+
+    const decision = await chatPolicyService.getPairDecision(requesterId, targetUserId);
+
+    if (decision.availability === 'direct') {
+      throw new ChatError('Прямой чат уже доступен без запроса', 400, 'CHAT_DIRECT_AVAILABLE');
+    }
+
+    if (decision.availability !== 'request') {
+      throw new ChatError(decision.availability_reason, 403, 'CHAT_FORBIDDEN');
+    }
+
+    const [existingOutgoing, existingIncoming] = await Promise.all([
+      supabase
+        .from('chat_contact_requests')
+        .select('id, requester_id, target_user_id, message, status, created_at, resolved_at, resolved_by')
+        .eq('requester_id', requesterId)
+        .eq('target_user_id', targetUserId)
+        .eq('status', 'pending')
+        .order('created_at', { ascending: false })
+        .limit(1),
+      supabase
+        .from('chat_contact_requests')
+        .select('id, requester_id, target_user_id, message, status, created_at, resolved_at, resolved_by')
+        .eq('requester_id', targetUserId)
+        .eq('target_user_id', requesterId)
+        .eq('status', 'pending')
+        .order('created_at', { ascending: false })
+        .limit(1),
+    ]);
+
+    const existingErrors = [existingOutgoing.error, existingIncoming.error].filter(Boolean);
+    if (existingErrors.length > 0) {
+      throw new Error('Failed to validate existing requests');
+    }
+
+    const existingRow = ((existingOutgoing.data || [])[0] || (existingIncoming.data || [])[0]) as ChatRequestRow | undefined;
+    if (existingRow) {
+      const requests = await formatContactRequests([existingRow], requesterId);
+      return requests[0];
+    }
+
+    const { data, error } = await supabase
+      .from('chat_contact_requests')
+      .insert({
+        requester_id: requesterId,
+        target_user_id: targetUserId,
+        message: message?.trim() || null,
+      })
+      .select('id, requester_id, target_user_id, message, status, created_at, resolved_at, resolved_by')
+      .single();
+
+    if (error || !data) {
+      throw new Error('Failed to create chat request');
+    }
+
+    const requests = await formatContactRequests([data as ChatRequestRow], requesterId);
+    return requests[0];
+  },
+
+  async approveContactRequest(requestId: string, currentUserId: string): Promise<{ request: IChatContactRequest; conversation_id: string }> {
+    const { data: requestRow, error } = await supabase
+      .from('chat_contact_requests')
+      .select('id, requester_id, target_user_id, message, status, created_at, resolved_at, resolved_by')
+      .eq('id', requestId)
+      .single();
+
+    if (error || !requestRow) {
+      throw new ChatError('Запрос не найден', 404, 'CHAT_REQUEST_NOT_FOUND');
+    }
+
+    if (requestRow.target_user_id !== currentUserId) {
+      throw new ChatError('Вы не можете обработать этот запрос', 403, 'CHAT_REQUEST_FORBIDDEN');
+    }
+
+    if (requestRow.status !== 'pending') {
+      throw new ChatError('Запрос уже обработан', 400, 'CHAT_REQUEST_ALREADY_RESOLVED');
+    }
+
+    const [userAId, userBId] = chatPolicyService.normalizePair(requestRow.requester_id, requestRow.target_user_id);
+
+    const { error: grantError } = await supabase
+      .from('chat_contact_grants')
+      .upsert({
+        user_a_id: userAId,
+        user_b_id: userBId,
+        source: 'request',
+        created_by: currentUserId,
+      }, { onConflict: 'user_a_id,user_b_id' });
+
+    if (grantError) {
+      throw new Error('Failed to create chat grant');
+    }
+
+    const now = new Date().toISOString();
+    const { data: updatedRequest, error: updateError } = await supabase
+      .from('chat_contact_requests')
+      .update({
+        status: 'approved',
+        resolved_by: currentUserId,
+        resolved_at: now,
+        updated_at: now,
+      })
+      .eq('id', requestId)
+      .select('id, requester_id, target_user_id, message, status, created_at, resolved_at, resolved_by')
+      .single();
+
+    if (updateError || !updatedRequest) {
+      throw new Error('Failed to approve chat request');
+    }
+
+    const conversationId = await getOrCreateConversationRecord(updatedRequest.requester_id, updatedRequest.target_user_id);
+    const requests = await formatContactRequests([updatedRequest as ChatRequestRow], currentUserId);
+
+    return {
+      request: requests[0],
+      conversation_id: conversationId,
+    };
+  },
+
+  async rejectContactRequest(requestId: string, currentUserId: string): Promise<IChatContactRequest> {
+    const { data: requestRow, error } = await supabase
+      .from('chat_contact_requests')
+      .select('id, requester_id, target_user_id, message, status, created_at, resolved_at, resolved_by')
+      .eq('id', requestId)
+      .single();
+
+    if (error || !requestRow) {
+      throw new ChatError('Запрос не найден', 404, 'CHAT_REQUEST_NOT_FOUND');
+    }
+
+    if (requestRow.target_user_id !== currentUserId) {
+      throw new ChatError('Вы не можете обработать этот запрос', 403, 'CHAT_REQUEST_FORBIDDEN');
+    }
+
+    if (requestRow.status !== 'pending') {
+      throw new ChatError('Запрос уже обработан', 400, 'CHAT_REQUEST_ALREADY_RESOLVED');
+    }
+
+    const now = new Date().toISOString();
+    const { data: updatedRequest, error: updateError } = await supabase
+      .from('chat_contact_requests')
+      .update({
+        status: 'rejected',
+        resolved_by: currentUserId,
+        resolved_at: now,
+        updated_at: now,
+      })
+      .eq('id', requestId)
+      .select('id, requester_id, target_user_id, message, status, created_at, resolved_at, resolved_by')
+      .single();
+
+    if (updateError || !updatedRequest) {
+      throw new Error('Failed to reject chat request');
+    }
+
+    const requests = await formatContactRequests([updatedRequest as ChatRequestRow], currentUserId);
+    return requests[0];
   },
 };

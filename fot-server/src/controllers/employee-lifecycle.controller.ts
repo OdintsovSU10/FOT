@@ -5,6 +5,7 @@ import { employeeChangesService } from '../services/employee-changes.service.js'
 import { loadStructureCache, decryptEmployee } from '../services/employee-mapper.service.js';
 import { employeeCache } from '../services/employee-cache.service.js';
 import type { AuthenticatedRequest, EmployeeEncrypted } from '../types/index.js';
+import { canAccessEmployeeInScope } from '../services/data-scope.service.js';
 
 // Явный набор колонок для lifecycle-операций
 const EMPLOYEE_LIFECYCLE_COLUMNS = 'id, full_name, last_name, first_name, middle_name, current_salary, salary_actual, salary_calculated, staff_units, birth_date, hire_date, country, pension_number, patent_issue_date, patent_expiry_date, email, org_department_id, org_company_id, position_id, sigur_employee_id, tab_number, current_status, permit_expiry_date, registration_cat1, registration_cat4, doc_receipt_date, work_object, employment_status, department_locked, is_archived, archived_at, created_at, updated_at, work_category';
@@ -15,6 +16,10 @@ const EMPLOYEE_LIFECYCLE_COLUMNS = 'id, full_name, last_name, first_name, middle
 export async function archive(req: AuthenticatedRequest, res: Response): Promise<void> {
   try {
     const { id } = req.params;
+    if (!(await canAccessEmployeeInScope(req, Number(id)))) {
+      res.status(403).json({ success: false, error: 'Нет доступа к сотруднику' });
+      return;
+    }
 
     const { data, error } = await supabase
       .from('employees')
@@ -50,6 +55,10 @@ export async function archive(req: AuthenticatedRequest, res: Response): Promise
 export async function restore(req: AuthenticatedRequest, res: Response): Promise<void> {
   try {
     const { id } = req.params;
+    if (!(await canAccessEmployeeInScope(req, Number(id)))) {
+      res.status(403).json({ success: false, error: 'Нет доступа к сотруднику' });
+      return;
+    }
 
     const { data, error } = await supabase
       .from('employees')
@@ -86,6 +95,10 @@ export async function restore(req: AuthenticatedRequest, res: Response): Promise
 export async function fire(req: AuthenticatedRequest, res: Response): Promise<void> {
   try {
     const { id } = req.params;
+    if (!(await canAccessEmployeeInScope(req, Number(id)))) {
+      res.status(403).json({ success: false, error: 'Нет доступа к сотруднику' });
+      return;
+    }
 
     const { data, error } = await supabase
       .from('employees')
@@ -129,6 +142,10 @@ export async function fire(req: AuthenticatedRequest, res: Response): Promise<vo
 export async function rehire(req: AuthenticatedRequest, res: Response): Promise<void> {
   try {
     const { id } = req.params;
+    if (!(await canAccessEmployeeInScope(req, Number(id)))) {
+      res.status(403).json({ success: false, error: 'Нет доступа к сотруднику' });
+      return;
+    }
 
     const { data, error } = await supabase
       .from('employees')
@@ -180,6 +197,10 @@ export async function rehire(req: AuthenticatedRequest, res: Response): Promise<
 export async function moveDepartment(req: AuthenticatedRequest, res: Response): Promise<void> {
   try {
     const { id } = req.params;
+    if (!(await canAccessEmployeeInScope(req, Number(id)))) {
+      res.status(403).json({ success: false, error: 'Нет доступа к сотруднику' });
+      return;
+    }
     const { org_department_id } = req.body as { org_department_id: string };
 
     if (!org_department_id) {
@@ -227,6 +248,10 @@ export async function moveDepartment(req: AuthenticatedRequest, res: Response): 
 export async function getHistory(req: AuthenticatedRequest, res: Response): Promise<void> {
   try {
     const { id } = req.params;
+    if (!(await canAccessEmployeeInScope(req, Number(id)))) {
+      res.status(403).json({ success: false, error: 'Нет доступа к сотруднику' });
+      return;
+    }
 
     const { data: emp } = await supabase.from('employees').select('id').eq('id', id).single();
 
@@ -299,6 +324,10 @@ export async function getHistory(req: AuthenticatedRequest, res: Response): Prom
 export async function updateHistoryEvent(req: AuthenticatedRequest, res: Response): Promise<void> {
   try {
     const employeeId = Number(req.params.id);
+    if (!(await canAccessEmployeeInScope(req, employeeId))) {
+      res.status(403).json({ success: false, error: 'Нет доступа к сотруднику' });
+      return;
+    }
     const eventId = req.params.eventId;
 
     if (eventId.startsWith('sal_')) {
@@ -331,6 +360,10 @@ export async function updateHistoryEvent(req: AuthenticatedRequest, res: Respons
 export async function deleteHistoryEvent(req: AuthenticatedRequest, res: Response): Promise<void> {
   try {
     const employeeId = Number(req.params.id);
+    if (!(await canAccessEmployeeInScope(req, employeeId))) {
+      res.status(403).json({ success: false, error: 'Нет доступа к сотруднику' });
+      return;
+    }
     const eventId = req.params.eventId;
 
     if (eventId.startsWith('sal_')) {

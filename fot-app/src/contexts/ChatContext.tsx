@@ -4,7 +4,7 @@ import { useAuth } from './AuthContext';
 import { useToast } from './ToastContext';
 import { wsService } from '../services/websocket';
 import { useChat } from '../hooks/useChat';
-import type { IChatConversation, IChatMessage } from '../services/chatService';
+import type { IChatConversation, IChatContactRequest, IChatMessage } from '../services/chatService';
 
 interface IChatContextType {
   isOpen: boolean;
@@ -14,12 +14,18 @@ interface IChatContextType {
   conversations: IChatConversation[];
   activeConversationId: string | null;
   messages: IChatMessage[];
+  incomingRequests: IChatContactRequest[];
+  outgoingRequests: IChatContactRequest[];
   loading: boolean;
   unreadTotal: number;
   selectConversation: (id: string) => Promise<void>;
   sendMessage: (content: string) => Promise<void>;
-  startConversation: (participantId: string) => Promise<string | null>;
+  startConversation: (participantId: string) => Promise<string>;
+  createRequest: (targetUserId: string, message?: string) => Promise<IChatContactRequest>;
+  approveRequest: (requestId: string) => Promise<{ request: IChatContactRequest; conversation_id: string }>;
+  rejectRequest: (requestId: string) => Promise<IChatContactRequest>;
   loadConversations: () => Promise<void>;
+  loadRequests: () => Promise<void>;
 }
 
 const ChatContext = createContext<IChatContextType | null>(null);
@@ -53,12 +59,18 @@ export const ChatProvider: FC<{ children: ReactNode }> = ({ children }) => {
     conversations,
     activeConversationId,
     messages,
+    incomingRequests,
+    outgoingRequests,
     loading,
     unreadTotal,
     selectConversation,
     sendMessage,
     startConversation,
+    createRequest,
+    approveRequest,
+    rejectRequest,
     loadConversations,
+    loadRequests,
     resetActiveChat,
   } = useChat(ws);
 
@@ -95,11 +107,16 @@ export const ChatProvider: FC<{ children: ReactNode }> = ({ children }) => {
   // Re-load conversations when user becomes authenticated (fixes empty list on new device)
   useEffect(() => {
     if (isAuthenticated && isApproved) {
-      loadConversations();
+      void loadConversations().catch(() => undefined);
+      void loadRequests().catch(() => undefined);
     }
-  }, [isAuthenticated, isApproved, loadConversations]);
+  }, [isAuthenticated, isApproved, loadConversations, loadRequests]);
 
-  const openChat = useCallback(() => { setIsOpen(true); loadConversations(); }, [loadConversations]);
+  const openChat = useCallback(() => {
+    setIsOpen(true);
+    void loadConversations().catch(() => undefined);
+    void loadRequests().catch(() => undefined);
+  }, [loadConversations, loadRequests]);
   const closeChat = useCallback(() => {
     setIsOpen(false);
     resetActiveChat();
@@ -115,12 +132,18 @@ export const ChatProvider: FC<{ children: ReactNode }> = ({ children }) => {
       conversations,
       activeConversationId,
       messages,
+      incomingRequests,
+      outgoingRequests,
       loading,
       unreadTotal,
       selectConversation,
       sendMessage,
       startConversation,
+      createRequest,
+      approveRequest,
+      rejectRequest,
       loadConversations,
+      loadRequests,
     }}>
       {children}
     </ChatContext.Provider>

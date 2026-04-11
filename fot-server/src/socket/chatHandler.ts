@@ -2,6 +2,7 @@ import { Server, Socket } from 'socket.io';
 import jwt from 'jsonwebtoken';
 import { env } from '../config/env.js';
 import { chatService } from '../services/chat.service.js';
+import { isChatError } from '../services/chat.errors.js';
 import { pushService } from '../services/push.service.js';
 import { notificationService } from '../services/notification.service.js';
 import type { JWTPayload } from '../types/index.js';
@@ -37,8 +38,20 @@ export const setupChatSocket = (io: Server) => {
     socket.join(`user:${userId}`);
 
     // Присоединение к диалогу
-    socket.on('join_conversation', (conversationId: string) => {
-      socket.join(`conv:${conversationId}`);
+    socket.on('join_conversation', async (conversationId: string, callback?: (response: unknown) => void) => {
+      try {
+        await chatService.getConversationAccess(conversationId, userId);
+        socket.join(`conv:${conversationId}`);
+        if (callback) callback({ success: true });
+      } catch (error) {
+        if (callback) {
+          callback({
+            success: false,
+            error: isChatError(error) ? error.message : 'Failed to join conversation',
+            code: isChatError(error) ? error.code : 'CHAT_ACCESS_DENIED',
+          });
+        }
+      }
     });
 
     // Выход из диалога
@@ -88,16 +101,29 @@ export const setupChatSocket = (io: Server) => {
 
         if (callback) callback({ success: true, data: message });
       } catch (error) {
-        if (callback) callback({ success: false, error: 'Failed to send message' });
+        if (callback) {
+          callback({
+            success: false,
+            error: isChatError(error) ? error.message : 'Failed to send message',
+            code: isChatError(error) ? error.code : 'CHAT_WRITE_FAILED',
+          });
+        }
       }
     });
 
     // Индикатор набора текста
-    socket.on('typing', (conversationId: string) => {
-      socket.to(`conv:${conversationId}`).emit('user_typing', {
-        conversationId,
-        userId,
-      });
+    socket.on('typing', async (conversationId: string) => {
+      try {
+        const access = await chatService.getConversationAccess(conversationId, userId);
+        if (!access.is_writable) return;
+
+        socket.to(`conv:${conversationId}`).emit('user_typing', {
+          conversationId,
+          userId,
+        });
+      } catch {
+        // ignore
+      }
     });
 
     // Пометить как прочитанное

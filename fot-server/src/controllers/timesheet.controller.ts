@@ -8,6 +8,7 @@ import { exportTimesheetMass } from './timesheet-mass-export.controller.js';
 import { resolveSchedulesForPeriod, isWorkingDay, needsSkudCheck, getScheduleForDate, getEffectiveLateThreshold, loadCalendarMonth } from '../services/schedule.service.js';
 import { getInternalAccessPoints } from '../services/skud-shared.service.js';
 import { getTravelHoursSummaryForRange, travelMinutesToHours } from '../services/skud-travel.service.js';
+import { canAccessEmployeeInScope, resolveRequestDataScope, resolveScopedDepartmentId } from '../services/data-scope.service.js';
 
 const validStatuses: TimeStatus[] = ['work', 'vacation', 'dayoff', 'remote', 'unpaid', 'absent', 'sick', 'business_trip', 'manual'];
 
@@ -60,10 +61,12 @@ export const timesheetController = {
   async getAll(req: AuthenticatedRequest, res: Response) {
     try {
       const { month } = req.query;
-      // Для header: принудительно фильтруем по его отделу
-      const department_id = req.user.position_type === 'header' && req.user.department_id
-        ? req.user.department_id
-        : req.query.department_id;
+      const scope = await resolveRequestDataScope(req);
+      if (!scope) {
+        return res.status(403).json({ success: false, error: 'Data scope не настроен для роли' });
+      }
+      const requestedDepartmentId = typeof req.query.department_id === 'string' ? req.query.department_id : null;
+      const department_id = await resolveScopedDepartmentId(req, requestedDepartmentId);
 
       if (!month || typeof month !== 'string' || !/^\d{4}-\d{2}$/.test(month)) {
         return res.status(400).json({ success: false, error: 'Параметр month обязателен (формат YYYY-MM)' });
@@ -79,7 +82,18 @@ export const timesheetController = {
 
       const hasDeptFilter = department_id && typeof department_id === 'string';
 
-      if (!hasDeptFilter) {
+      if (scope === 'self' && !req.user.employee_id) {
+        return res.json({
+          success: true,
+          data: {
+            employees: [],
+            entries: [],
+            stats: { employeeCount: 0, workingDays: getWorkingDaysUpToToday(year, mon), normHours: getWorkingDaysUpToToday(year, mon) * 8, actualHours: 0, deviations: { late: 0, absent: 0, sick: 0 } },
+          },
+        });
+      }
+
+      if (scope !== 'self' && !hasDeptFilter) {
         return res.json({
           success: true,
           data: {
@@ -98,7 +112,9 @@ export const timesheetController = {
         .eq('is_archived', false)
         .order('full_name');
 
-      if (hasDeptFilter) {
+      if (scope === 'self' && req.user.employee_id) {
+        empQuery = empQuery.eq('id', req.user.employee_id);
+      } else if (hasDeptFilter) {
         empQuery = empQuery.eq('org_department_id', department_id as string);
       }
 
@@ -515,6 +531,9 @@ export const timesheetController = {
   async create(req: AuthenticatedRequest, res: Response) {
     try {
       const parsed = createEntrySchema.parse(req.body);
+      if (!(await canAccessEmployeeInScope(req, parsed.employee_id))) {
+        return res.status(403).json({ success: false, error: 'Нет доступа к сотруднику' });
+      }
 
       const { data, error } = await supabase
         .from('tender_timesheet')
@@ -561,6 +580,18 @@ export const timesheetController = {
       if (isNaN(id)) return res.status(400).json({ success: false, error: 'Некорректный ID' });
 
       const parsed = updateEntrySchema.parse(req.body);
+      const { data: existing, error: existingError } = await supabase
+        .from('tender_timesheet')
+        .select('employee_id')
+        .eq('id', id)
+        .single();
+
+      if (existingError || !existing) {
+        return res.status(404).json({ success: false, error: 'Запись не найдена' });
+      }
+      if (!(await canAccessEmployeeInScope(req, existing.employee_id))) {
+        return res.status(403).json({ success: false, error: 'Нет доступа к сотруднику' });
+      }
 
       const { data, error } = await supabase
         .from('tender_timesheet')

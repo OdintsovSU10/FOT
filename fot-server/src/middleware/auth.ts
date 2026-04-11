@@ -2,7 +2,14 @@ import { Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { env } from '../config/env.js';
 import { CRITICAL_2FA_ENABLED } from '../config/features.js';
+import type { AccessAction } from '../config/access-control.js';
 import type { AuthenticatedRequest, JWTPayload, EmployeePositionType } from '../types/index.js';
+import {
+  hasAnyPermission,
+  hasPageEdit,
+  hasPageView,
+  hasPermission,
+} from '../services/access-control.service.js';
 import { getHierarchyLevel } from '../services/roles-cache.service.js';
 
 /**
@@ -113,6 +120,102 @@ export const requirePosition = (...allowedPositions: EmployeePositionType[]) => 
     }
 
     next();
+  };
+};
+
+export const requirePermission = (permission: string) => {
+  return async (req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> => {
+    if (!req.user) {
+      res.status(401).json({ success: false, error: 'Authentication required' });
+      return;
+    }
+
+    try {
+      if (!(await hasPermission(req.user.position_type, permission))) {
+        res.status(403).json({ success: false, error: 'Insufficient permissions' });
+        return;
+      }
+
+      next();
+    } catch (error) {
+      console.error('requirePermission error:', error);
+      res.status(500).json({ success: false, error: 'Authorization check failed' });
+    }
+  };
+};
+
+export const requireAnyPermission = (permissions: string[]) => {
+  return async (req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> => {
+    if (!req.user) {
+      res.status(401).json({ success: false, error: 'Authentication required' });
+      return;
+    }
+
+    try {
+      if (!(await hasAnyPermission(req.user.position_type, permissions))) {
+        res.status(403).json({ success: false, error: 'Insufficient permissions' });
+        return;
+      }
+
+      next();
+    } catch (error) {
+      console.error('requireAnyPermission error:', error);
+      res.status(500).json({ success: false, error: 'Authorization check failed' });
+    }
+  };
+};
+
+export const requirePageAccess = (pagePath: string, action: AccessAction = 'view') => {
+  return async (req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> => {
+    if (!req.user) {
+      res.status(401).json({ success: false, error: 'Authentication required' });
+      return;
+    }
+
+    try {
+      const hasAccess = action === 'edit'
+        ? await hasPageEdit(req.user.position_type, pagePath)
+        : await hasPageView(req.user.position_type, pagePath);
+
+      if (!hasAccess) {
+        res.status(403).json({ success: false, error: 'Insufficient permissions' });
+        return;
+      }
+
+      next();
+    } catch (error) {
+      console.error('requirePageAccess error:', error);
+      res.status(500).json({ success: false, error: 'Authorization check failed' });
+    }
+  };
+};
+
+export const requireAnyPageAccess = (pagePaths: string[], action: AccessAction = 'view') => {
+  return async (req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> => {
+    if (!req.user) {
+      res.status(401).json({ success: false, error: 'Authentication required' });
+      return;
+    }
+
+    try {
+      const checks = await Promise.all(
+        pagePaths.map(pagePath => (
+          action === 'edit'
+            ? hasPageEdit(req.user.position_type, pagePath)
+            : hasPageView(req.user.position_type, pagePath)
+        )),
+      );
+
+      if (!checks.some(Boolean)) {
+        res.status(403).json({ success: false, error: 'Insufficient permissions' });
+        return;
+      }
+
+      next();
+    } catch (error) {
+      console.error('requireAnyPageAccess error:', error);
+      res.status(500).json({ success: false, error: 'Authorization check failed' });
+    }
   };
 };
 

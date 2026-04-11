@@ -101,14 +101,16 @@ export const skudWriteController = {
    */
   async syncAccessPoints(_req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
+      const connection = (_req.query.connection as 'external' | 'internal') || undefined;
       deleteAccessPointCacheEntry('__all__');
+      if (connection) deleteAccessPointCacheEntry(`__all__:${connection}`);
 
       if (!sigurService.isConfigured()) {
         res.status(400).json({ success: false, error: 'Sigur не настроен' });
         return;
       }
 
-      const sigurAPs = await sigurService.getAccessPoints();
+      const sigurAPs = await sigurService.getAccessPoints(connection);
       const freshNames = [...new Set(
         (sigurAPs as Record<string, unknown>[])
           .map(ap => ((ap.name as string) || '').trim())
@@ -131,6 +133,7 @@ export const skudWriteController = {
       }
 
       setAccessPointCacheEntry('__all__', freshNames);
+      if (connection) setAccessPointCacheEntry(`__all__:${connection}`, freshNames);
 
       res.json({
         success: true,

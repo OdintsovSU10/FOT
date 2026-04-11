@@ -33,9 +33,10 @@ export const sigurService = {
     return apiClient.get<ISigurTestResult>(`/sigur/test${params}`);
   },
 
-  async preview(startTime: string, endTime: string, departmentId?: string): Promise<ISigurPreviewResult> {
+  async preview(startTime: string, endTime: string, departmentId?: string, connection?: 'internal' | 'external'): Promise<ISigurPreviewResult> {
     const params = new URLSearchParams({ startTime, endTime });
     if (departmentId) params.append('departmentId', departmentId);
+    if (connection) params.append('connection', connection);
     const result = await apiClient.get<ISigurPreviewResult>(`/sigur/preview?${params.toString()}`);
     return result;
   },
@@ -120,8 +121,9 @@ export const sigurService = {
     return response.data;
   },
 
-  async discover(): Promise<Record<string, unknown>> {
-    const response = await apiClient.get<ApiResponse<Record<string, unknown>>>('/sigur/discover');
+  async discover(connection?: 'internal' | 'external'): Promise<Record<string, unknown>> {
+    const params = connection ? `?connection=${connection}` : '';
+    const response = await apiClient.get<ApiResponse<Record<string, unknown>>>(`/sigur/discover${params}`);
     return response.data;
   },
 

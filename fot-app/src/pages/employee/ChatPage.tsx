@@ -1,12 +1,15 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
+import { ApiError } from '../../api/client';
 import { useAuth } from '../../contexts/AuthContext';
+import { useToast } from '../../contexts/ToastContext';
 import { useSocket } from '../../hooks/useSocket';
 import { useChat } from '../../hooks/useChat';
 import { chatService, type IChatUser } from '../../services/chatService';
 import styles from './ChatPage.module.css';
 
 export const ChatPage: React.FC = () => {
-  const { profile, token } = useAuth();
+  const { profile, token, getRoleLabel } = useAuth();
+  const toast = useToast();
   const ws = useSocket(token);
   const {
     conversations,
@@ -16,6 +19,7 @@ export const ChatPage: React.FC = () => {
     selectConversation,
     sendMessage,
     startConversation,
+    createRequest,
   } = useChat(ws);
 
   const [inputValue, setInputValue] = useState('');
@@ -45,10 +49,15 @@ export const ChatPage: React.FC = () => {
   }, [searchQuery, searchOpen]);
 
   const handleSend = async () => {
-    if (!inputValue.trim()) return;
+    if (!inputValue.trim() || !activeConversation?.is_writable) return;
     const text = inputValue;
     setInputValue('');
-    await sendMessage(text);
+    try {
+      await sendMessage(text);
+    } catch (error) {
+      setInputValue(text);
+      toast.error(error instanceof Error ? error.message : 'Не удалось отправить сообщение');
+    }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -59,11 +68,21 @@ export const ChatPage: React.FC = () => {
   };
 
   const handleStartChat = async (user: IChatUser) => {
-    setSearchOpen(false);
-    setSearchQuery('');
-    setSearchResults([]);
-    await startConversation(user.id);
-    setMobileShowChat(true);
+    try {
+      setSearchOpen(false);
+      setSearchQuery('');
+      setSearchResults([]);
+      if (user.availability === 'direct') {
+        await startConversation(user.id);
+        setMobileShowChat(true);
+        return;
+      }
+      await createRequest(user.id);
+      toast.success('Запрос на контакт отправлен');
+    } catch (error) {
+      const message = error instanceof ApiError ? error.message : 'Не удалось выполнить действие';
+      toast.error(message);
+    }
   };
 
   const handleSelectConversation = async (convId: string) => {
@@ -130,10 +149,32 @@ export const ChatPage: React.FC = () => {
                   <div
                     key={user.id}
                     className={styles.searchItem}
-                    onClick={() => handleStartChat(user)}
                   >
                     <div className={styles.avatar}>{getInitials(user.full_name || '??')}</div>
-                    <span>{user.full_name}</span>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div>{user.full_name}</div>
+                      <div style={{ fontSize: 12, opacity: 0.7 }}>
+                        {getRoleLabel(user.position_type)} · {user.availability_reason}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => void handleStartChat(user)}
+                      style={{
+                        border: '1px solid var(--border-color, #1e1e2e)',
+                        background: 'var(--bg-secondary, #12121a)',
+                        color: 'var(--text-primary, #e0e0e0)',
+                        borderRadius: 999,
+                        padding: '6px 10px',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      {user.availability === 'direct'
+                        ? 'Написать'
+                        : user.request_status === 'outgoing_pending'
+                          ? 'Ожидает'
+                          : 'Запросить'}
+                    </button>
                   </div>
                 ))
               )}
@@ -198,6 +239,9 @@ export const ChatPage: React.FC = () => {
               <span className={styles.chatHeaderName}>
                 {activeConversation ? getOtherName(activeConversation.participants) : ''}
               </span>
+              {!activeConversation?.is_writable && activeConversation?.write_lock_reason && (
+                <span style={{ fontSize: 12, opacity: 0.7 }}>{activeConversation.write_lock_reason}</span>
+              )}
             </div>
 
             <div className={styles.messagesContainer}>
@@ -227,16 +271,17 @@ export const ChatPage: React.FC = () => {
             <div className={styles.inputArea}>
               <textarea
                 className={styles.messageInput}
-                placeholder="Напишите сообщение..."
+                placeholder={activeConversation?.is_writable ? 'Напишите сообщение...' : 'Отправка недоступна'}
                 value={inputValue}
                 onChange={e => setInputValue(e.target.value)}
                 onKeyDown={handleKeyDown}
                 rows={1}
+                disabled={!activeConversation?.is_writable}
               />
               <button
                 className={styles.sendBtn}
                 onClick={handleSend}
-                disabled={!inputValue.trim()}
+                disabled={!inputValue.trim() || !activeConversation?.is_writable}
               >
                 <svg viewBox="0 0 24 24" fill="currentColor" width="20" height="20">
                   <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>

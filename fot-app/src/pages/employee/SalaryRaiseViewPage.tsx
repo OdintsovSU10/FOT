@@ -45,7 +45,7 @@ export const SalaryRaiseViewPage: FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { id } = useParams<{ id: string }>();
-  const { user, canAccess } = useAuth();
+  const { user, canEditPage } = useAuth();
   const isReviewContext = location.pathname.startsWith('/salary-raise-review');
   const backPath = isReviewContext ? '/salary-raise-review' : '/employee/salary-raise';
 
@@ -84,9 +84,10 @@ export const SalaryRaiseViewPage: FC = () => {
   const canEdit = isAuthor && request.status === 'draft';
 
   // Determine review permissions
-  const showSupervisorForm = request.status === 'supervisor_review' && (canAccess('header') || canAccess('admin'));
-  const showHrForm = request.status === 'hr_review' && canAccess('hr');
-  const showFinanceForm = request.status === 'finance_review' && canAccess('admin');
+  const canReview = canEditPage('/salary-raise-review');
+  const showSupervisorForm = request.status === 'supervisor_review' && canReview;
+  const showHrForm = request.status === 'hr_review' && canReview;
+  const showFinanceForm = request.status === 'finance_review' && canReview;
 
   const handleReview = async (
     type: 'supervisor' | 'hr' | 'finance',

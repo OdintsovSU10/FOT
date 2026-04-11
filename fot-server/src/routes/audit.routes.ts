@@ -1,12 +1,12 @@
 import { Router } from 'express';
 import { auditController } from '../controllers/audit.controller.js';
-import { authenticate, requirePosition } from '../middleware/auth.js';
+import { authenticate, requirePageAccess } from '../middleware/auth.js';
 
 const router = Router();
 
 // Все роуты требуют аутентификации и позиции admin или super_admin
 router.use(authenticate);
-router.use(requirePosition('admin', 'super_admin'));
+router.use(requirePageAccess('/admin/audit', 'view'));
 
 // Запуск полного аудита
 router.get('/run', auditController.runFullAudit);

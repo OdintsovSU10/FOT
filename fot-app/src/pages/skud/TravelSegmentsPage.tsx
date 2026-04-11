@@ -1,25 +1,15 @@
-import { type FC, useCallback, useEffect, useMemo, useState } from 'react';
+import { type FC, useMemo, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, RefreshCw, Route, Search } from 'lucide-react';
-import { apiClient } from '../../api/client';
 import { useAuth } from '../../contexts/AuthContext';
+import { useStructureTree } from '../../hooks/useStructure';
 import { travelTimeService } from '../../services/travelTimeService';
-import type { ITravelSegment, TravelSegmentStatus } from '../../types';
+import type { OrgDepartmentNode, TravelSegmentStatus } from '../../types';
 import './TravelSegmentsPage.css';
 
 interface IDeptOption {
   id: string;
   name: string;
-}
-
-interface IDbDepartment {
-  id: string;
-  name: string;
-  children: IDbDepartment[];
-}
-
-interface IApiStructureResponse {
-  success: boolean;
-  data?: { departments: IDbDepartment[] };
 }
 
 const STATUS_OPTIONS: Array<{ value: TravelSegmentStatus | 'all' | 'problem'; label: string }> = [
@@ -38,7 +28,7 @@ const STATUS_LABELS: Record<TravelSegmentStatus, string> = {
   needs_route: 'Нет маршрута',
 };
 
-const flattenTree = (nodes: IDbDepartment[]): IDeptOption[] => {
+const flattenTree = (nodes: OrgDepartmentNode[]): IDeptOption[] => {
   const result: IDeptOption[] = [];
   for (const node of nodes) {
     result.push({ id: node.id, name: node.name });
@@ -79,57 +69,44 @@ const statusClassName = (status: TravelSegmentStatus): string => {
 };
 
 export const TravelSegmentsPage: FC = () => {
-  const { positionType, profile } = useAuth();
-  const isHeaderOnly = positionType === 'header';
+  const { hasPermission, profile } = useAuth();
+  const queryClient = useQueryClient();
+  const structureQuery = useStructureTree();
+  const isDepartmentScope = hasPermission('data.scope.department') && !hasPermission('data.scope.all');
+  const scopePending = isDepartmentScope && !profile?.department_id;
   const now = new Date();
   const initialMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 
   const [month, setMonth] = useState(initialMonth);
   const [status, setStatus] = useState<TravelSegmentStatus | 'all' | 'problem'>('problem');
   const [search, setSearch] = useState('');
-  const [segments, setSegments] = useState<ITravelSegment[]>([]);
-  const [deptOptions, setDeptOptions] = useState<IDeptOption[]>([]);
   const [selectedDeptId, setSelectedDeptId] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
   const [rebuilding, setRebuilding] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
-  useEffect(() => {
-    apiClient.get<IApiStructureResponse>('/structure')
-      .then(response => {
-        const departments = response.data?.departments || [];
-        setDeptOptions(flattenTree(departments));
-      })
-      .catch(() => {});
-  }, []);
+  const effectiveDepartmentId = isDepartmentScope
+    ? (profile?.department_id || null)
+    : selectedDeptId;
+  const deptOptions = useMemo(
+    () => flattenTree(structureQuery.data?.departments || []),
+    [structureQuery.data],
+  );
 
-  useEffect(() => {
-    if (isHeaderOnly && profile?.department_id) {
-      setSelectedDeptId(profile.department_id);
-    }
-  }, [isHeaderOnly, profile?.department_id]);
+  const segmentsQuery = useQuery({
+    queryKey: ['travel-segments', month, effectiveDepartmentId || 'all', status],
+    queryFn: () => travelTimeService.getSegments({
+      month,
+      department_id: effectiveDepartmentId || undefined,
+      status,
+    }),
+    enabled: !scopePending,
+    staleTime: 60_000,
+    placeholderData: previousData => previousData,
+  });
 
-  const loadSegments = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const data = await travelTimeService.getSegments({
-        month,
-        department_id: selectedDeptId || undefined,
-        status,
-      });
-      setSegments(data);
-    } catch (fetchError) {
-      setError(fetchError instanceof Error ? fetchError.message : 'Ошибка загрузки передвижений');
-      setSegments([]);
-    } finally {
-      setLoading(false);
-    }
-  }, [month, selectedDeptId, status]);
-
-  useEffect(() => {
-    void loadSegments();
-  }, [loadSegments]);
+  const segments = segmentsQuery.data || [];
+  const loading = scopePending || (segmentsQuery.isLoading && !segmentsQuery.data);
+  const error = actionError || (segmentsQuery.error instanceof Error ? segmentsQuery.error.message : null);
 
   const filteredSegments = useMemo(() => {
     if (!search.trim()) return segments;
@@ -162,15 +139,15 @@ export const TravelSegmentsPage: FC = () => {
 
   const handleRebuild = async () => {
     setRebuilding(true);
-    setError(null);
+    setActionError(null);
     try {
       await travelTimeService.rebuildSegments({
         month,
-        department_id: selectedDeptId || undefined,
+        department_id: effectiveDepartmentId || undefined,
       });
-      await loadSegments();
+      await queryClient.invalidateQueries({ queryKey: ['travel-segments'] });
     } catch (rebuildError) {
-      setError(rebuildError instanceof Error ? rebuildError.message : 'Ошибка пересчёта');
+      setActionError(rebuildError instanceof Error ? rebuildError.message : 'Ошибка пересчёта');
     } finally {
       setRebuilding(false);
     }
@@ -196,7 +173,7 @@ export const TravelSegmentsPage: FC = () => {
             <input type="month" value={month} onChange={event => setMonth(event.target.value)} />
           </label>
 
-          {!isHeaderOnly && (
+          {!isDepartmentScope && (
             <label>
               <span>Отдел</span>
               <select value={selectedDeptId || ''} onChange={event => setSelectedDeptId(event.target.value || null)}>
@@ -285,7 +262,9 @@ export const TravelSegmentsPage: FC = () => {
               </tr>
             ) : filteredSegments.length === 0 ? (
               <tr>
-                <td colSpan={9} className="travel-segments-empty">Нет данных по текущим фильтрам</td>
+                <td colSpan={9} className="travel-segments-empty">
+                  Нет данных по текущим фильтрам. Если сегменты ещё не рассчитаны, нажмите «Пересчитать».
+                </td>
               </tr>
             ) : filteredSegments.map(segment => (
               <tr key={segment.id}>

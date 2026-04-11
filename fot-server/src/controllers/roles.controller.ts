@@ -1,50 +1,23 @@
 import { Response } from 'express';
 import { z } from 'zod';
 import { supabase } from '../config/database.js';
+import {
+  AVAILABLE_PAGES,
+  PAGE_ACCESS_KEYS,
+  PERMISSION_GROUPS,
+  normalizePageAccessEntry,
+  normalizePermissions,
+  validateRoleConfiguration,
+} from '../config/access-control.js';
 import type { AuthenticatedRequest } from '../types/index.js';
-import { invalidateRolesCache } from '../services/roles-cache.service.js';
-
-// Список доступных страниц системы (для матрицы доступа)
-const AVAILABLE_PAGES = [
-  // Личный кабинет
-  { path: '/employee',              label: 'Личный кабинет сотрудника' },
-  { path: '/employee/requests',     label: 'Заявления (ЛК)' },
-  { path: '/employee/payslips',     label: 'Расчётные листки' },
-  { path: '/employee/payments',     label: 'История выплат' },
-  { path: '/employee/documents',    label: 'Документы' },
-  { path: '/employee/timesheet',    label: 'Табель сотрудника' },
-  { path: '/employee/history',      label: 'Моя история' },
-  { path: '/employee/salary-raise', label: 'Заявки на повышение оклада' },
-  // Руководитель
-  { path: '/dashboard',             label: 'Дашборд' },
-  { path: '/my-employees',          label: 'Мои сотрудники' },
-  { path: '/leave-requests',        label: 'Заявления' },
-  { path: '/timesheet',             label: 'Табель' },
-  { path: '/salary-raise-review',   label: 'Проверка заявок на повышение' },
-  { path: '/discipline',            label: 'Дисциплина' },
-  { path: '/profile',               label: 'Профиль' },
-  // HR
-  { path: '/timesheet-review',      label: 'Проверка табелей' },
-  // Админ
-  { path: '/tender',                label: 'Сотрудники (список)' },
-  { path: '/skud-raw',              label: 'СКУД — сырые данные' },
-  { path: '/skud-db',               label: 'СКУД — база данных' },
-  { path: '/staff-control',         label: 'Управление кадрами' },
-  // Супер-админ
-  { path: '/skud-settings',         label: 'Настройки СКУД' },
-  { path: '/admin/users',           label: 'Управление пользователями' },
-  { path: '/admin/audit',           label: 'Аудит данных' },
-  { path: '/admin/roles',           label: 'Управление ролями' },
-  { path: '/admin/settings',        label: 'Системные настройки' },
-  { path: '/admin/production-calendar', label: 'Производственный календарь' },
-  { path: '/admin/payslips',        label: 'Управление расчётными листками' },
-];
+import { invalidateAccessControlCache } from '../services/access-control.service.js';
 
 const createRoleSchema = z.object({
   code: z.string().min(1).max(50).regex(/^[a-z_]+$/, 'Только строчные буквы и подчёркивание'),
   name: z.string().min(1).max(100),
   description: z.string().max(500).nullable().optional(),
   level: z.number().int().min(0).max(100),
+  permissions: z.array(z.string()).optional().default([]),
 });
 
 const updateRoleSchema = z.object({
@@ -52,6 +25,7 @@ const updateRoleSchema = z.object({
   description: z.string().max(500).nullable().optional(),
   level: z.number().int().min(0).max(100),
   is_active: z.boolean().optional(),
+  permissions: z.array(z.string()).optional(),
 });
 
 const pageAccessItemSchema = z.object({
@@ -61,8 +35,38 @@ const pageAccessItemSchema = z.object({
   can_edit: z.boolean().optional().default(false),
 });
 
+async function loadPageAccessMatrix(): Promise<Record<string, Record<string, { can_view: boolean; can_edit: boolean }>>> {
+  const { data, error } = await supabase
+    .from('role_page_access')
+    .select('role_code, page_path, can_view, can_edit');
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  const matrix: Record<string, Record<string, { can_view: boolean; can_edit: boolean }>> = {};
+  for (const entry of data || []) {
+    if (!matrix[entry.role_code]) {
+      matrix[entry.role_code] = {};
+    }
+    matrix[entry.role_code][entry.page_path] = {
+      can_view: !!entry.can_view || !!entry.can_edit,
+      can_edit: !!entry.can_edit,
+    };
+  }
+
+  return matrix;
+}
+
+function validatePageAccessItems(items: { role_code: string; page_path: string; can_view: boolean; can_edit: boolean }[]): string | null {
+  const invalidPage = items.find(item => !PAGE_ACCESS_KEYS.has(item.page_path));
+  if (invalidPage) {
+    return `Неизвестная страница в матрице доступа: ${invalidPage.page_path}`;
+  }
+  return null;
+}
+
 export const rolesController = {
-  // GET /api/roles
   async getRoles(_req: AuthenticatedRequest, res: Response): Promise<void> {
     const { data, error } = await supabase
       .from('system_roles')
@@ -77,7 +81,10 @@ export const rolesController = {
     res.json({ success: true, data });
   },
 
-  // POST /api/roles
+  async getPermissionCatalog(_req: AuthenticatedRequest, res: Response): Promise<void> {
+    res.json({ success: true, data: PERMISSION_GROUPS });
+  },
+
   async createRole(req: AuthenticatedRequest, res: Response): Promise<void> {
     const parsed = createRoleSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -86,10 +93,24 @@ export const rolesController = {
     }
 
     const { code, name, description, level } = parsed.data;
+    const permissions = normalizePermissions(parsed.data.permissions);
+    const configError = validateRoleConfiguration(code, permissions, {});
+    if (configError) {
+      res.status(400).json({ success: false, error: configError });
+      return;
+    }
 
     const { data, error } = await supabase
       .from('system_roles')
-      .insert({ code, name, description: description ?? null, permissions: [], level, is_active: true, is_system: false })
+      .insert({
+        code,
+        name,
+        description: description ?? null,
+        permissions,
+        level,
+        is_active: true,
+        is_system: false,
+      })
       .select()
       .single();
 
@@ -102,23 +123,44 @@ export const rolesController = {
       return;
     }
 
-    invalidateRolesCache();
+    invalidateAccessControlCache();
     res.status(201).json({ success: true, data });
   },
 
-  // PUT /api/roles/:code
   async updateRole(req: AuthenticatedRequest, res: Response): Promise<void> {
     const { code } = req.params;
-
     const parsed = updateRoleSchema.safeParse(req.body);
     if (!parsed.success) {
       res.status(400).json({ success: false, error: parsed.error.errors[0].message });
       return;
     }
 
+    const { data: currentRole, error: fetchError } = await supabase
+      .from('system_roles')
+      .select('permissions')
+      .eq('code', code)
+      .single();
+
+    if (fetchError || !currentRole) {
+      res.status(404).json({ success: false, error: 'Роль не найдена' });
+      return;
+    }
+
+    const permissions = parsed.data.permissions !== undefined
+      ? normalizePermissions(parsed.data.permissions)
+      : normalizePermissions(currentRole.permissions);
+
+    const pageAccessMatrix = await loadPageAccessMatrix();
+    const configError = validateRoleConfiguration(code, permissions, pageAccessMatrix[code] ?? {});
+    if (configError) {
+      res.status(400).json({ success: false, error: configError });
+      return;
+    }
+
     const updates: Record<string, unknown> = {
       name: parsed.data.name,
       level: parsed.data.level,
+      permissions,
       updated_at: new Date().toISOString(),
     };
     if (parsed.data.description !== undefined) updates.description = parsed.data.description;
@@ -140,15 +182,13 @@ export const rolesController = {
       return;
     }
 
-    invalidateRolesCache();
+    invalidateAccessControlCache();
     res.json({ success: true, data });
   },
 
-  // DELETE /api/roles/:code
   async deleteRole(req: AuthenticatedRequest, res: Response): Promise<void> {
     const { code } = req.params;
 
-    // Проверяем что роль не системная
     const { data: role, error: fetchError } = await supabase
       .from('system_roles')
       .select('is_system')
@@ -175,15 +215,16 @@ export const rolesController = {
       return;
     }
 
-    invalidateRolesCache();
+    invalidateAccessControlCache();
     res.json({ success: true });
   },
 
-  // GET /api/roles/page-access
   async getPageAccess(_req: AuthenticatedRequest, res: Response): Promise<void> {
     const { data, error } = await supabase
       .from('role_page_access')
-      .select('*');
+      .select('*')
+      .order('role_code', { ascending: true })
+      .order('page_path', { ascending: true });
 
     if (error) {
       res.status(500).json({ success: false, error: error.message });
@@ -193,7 +234,6 @@ export const rolesController = {
     res.json({ success: true, data });
   },
 
-  // PUT /api/roles/page-access
   async updatePageAccess(req: AuthenticatedRequest, res: Response): Promise<void> {
     const parsed = z.array(pageAccessItemSchema).safeParse(req.body);
     if (!parsed.success) {
@@ -201,12 +241,50 @@ export const rolesController = {
       return;
     }
 
-    const items = parsed.data.map(item => ({
+    const items = parsed.data.map(item => normalizePageAccessEntry({
       role_code: item.role_code,
       page_path: item.page_path,
       can_view: item.can_view,
       can_edit: item.can_edit ?? false,
     }));
+
+    const itemValidationError = validatePageAccessItems(items);
+    if (itemValidationError) {
+      res.status(400).json({ success: false, error: itemValidationError });
+      return;
+    }
+
+    const currentMatrix = await loadPageAccessMatrix();
+    for (const item of items) {
+      if (!currentMatrix[item.role_code]) {
+        currentMatrix[item.role_code] = {};
+      }
+      currentMatrix[item.role_code][item.page_path] = {
+        can_view: item.can_view,
+        can_edit: item.can_edit,
+      };
+    }
+
+    const { data: roles, error: rolesError } = await supabase
+      .from('system_roles')
+      .select('code, permissions');
+
+    if (rolesError) {
+      res.status(500).json({ success: false, error: rolesError.message });
+      return;
+    }
+
+    for (const role of roles || []) {
+      const configError = validateRoleConfiguration(
+        role.code,
+        role.permissions,
+        currentMatrix[role.code] ?? {},
+      );
+      if (configError) {
+        res.status(400).json({ success: false, error: configError });
+        return;
+      }
+    }
 
     const { error } = await supabase
       .from('role_page_access')
@@ -217,10 +295,10 @@ export const rolesController = {
       return;
     }
 
+    invalidateAccessControlCache();
     res.json({ success: true });
   },
 
-  // GET /api/roles/available-pages
   async getAvailablePages(_req: AuthenticatedRequest, res: Response): Promise<void> {
     res.json({ success: true, data: AVAILABLE_PAGES });
   },

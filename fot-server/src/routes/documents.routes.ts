@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { documentsController } from '../controllers/documents.controller.js';
-import { authenticate, requirePosition } from '../middleware/auth.js';
+import { authenticate, requireAnyPageAccess, requirePageAccess } from '../middleware/auth.js';
 
 const router = Router();
 
@@ -9,42 +9,42 @@ router.use(authenticate);
 // POST /api/documents/upload-url — получить presigned URL
 router.post(
   '/upload-url',
-  requirePosition('worker', 'header', 'hr', 'admin', 'super_admin'),
+  requirePageAccess('/employee/documents', 'edit'),
   documentsController.getUploadUrl
 );
 
 // POST /api/documents/confirm — подтвердить загрузку
 router.post(
   '/confirm',
-  requirePosition('worker', 'header', 'hr', 'admin', 'super_admin'),
+  requirePageAccess('/employee/documents', 'edit'),
   documentsController.confirmUpload
 );
 
 // GET /api/documents/my — мои документы
 router.get(
   '/my',
-  requirePosition('worker', 'header', 'hr', 'admin', 'super_admin'),
+  requirePageAccess('/employee/documents', 'view'),
   documentsController.getMy
 );
 
 // GET /api/documents/employee/:empId — документы сотрудника
 router.get(
   '/employee/:empId',
-  requirePosition('header', 'hr', 'admin', 'super_admin'),
+  requireAnyPageAccess(['/my-employees', '/tender', '/staff-control'], 'view'),
   documentsController.getByEmployee
 );
 
 // GET /api/documents/:id/download — скачать
 router.get(
   '/:id/download',
-  requirePosition('worker', 'header', 'hr', 'admin', 'super_admin'),
+  requireAnyPageAccess(['/employee/documents', '/my-employees', '/tender', '/staff-control'], 'view'),
   documentsController.getDownloadUrl
 );
 
 // DELETE /api/documents/:id — удалить
 router.delete(
   '/:id',
-  requirePosition('hr', 'admin', 'super_admin'),
+  requireAnyPageAccess(['/employee/documents', '/my-employees', '/tender', '/staff-control'], 'edit'),
   documentsController.remove
 );
 

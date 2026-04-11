@@ -1,7 +1,40 @@
 import { Response } from 'express';
 import { z } from 'zod';
 import { chatService } from '../services/chat.service.js';
+import { isChatError } from '../services/chat.errors.js';
 import type { AuthenticatedRequest } from '../types/index.js';
+
+const createConversationSchema = z.object({
+  participantId: z.string().uuid(),
+});
+
+const sendMessageSchema = z.object({
+  content: z.string().min(1).max(5000),
+});
+
+const createRequestSchema = z.object({
+  targetUserId: z.string().uuid(),
+  message: z.string().trim().max(1000).optional().nullable(),
+});
+
+const requestsQuerySchema = z.object({
+  box: z.enum(['inbox', 'outbox']).default('inbox'),
+});
+
+const respondWithChatError = (res: Response, error: unknown, fallbackMessage: string): void => {
+  if (error instanceof z.ZodError) {
+    res.status(400).json({ success: false, error: error.errors[0].message });
+    return;
+  }
+
+  if (isChatError(error)) {
+    res.status(error.status).json({ success: false, error: error.message, code: error.code });
+    return;
+  }
+
+  console.error(fallbackMessage, error);
+  res.status(500).json({ success: false, error: fallbackMessage });
+};
 
 export const chatController = {
   /**
@@ -12,8 +45,7 @@ export const chatController = {
       const conversations = await chatService.getConversations(req.user.id);
       res.json({ success: true, data: conversations });
     } catch (error) {
-      console.error('Get conversations error:', error);
-      res.status(500).json({ success: false, error: 'Failed to fetch conversations' });
+      respondWithChatError(res, error, 'Failed to fetch conversations');
     }
   },
 
@@ -23,7 +55,7 @@ export const chatController = {
    */
   async createConversation(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
-      const { participantId } = z.object({ participantId: z.string().uuid() }).parse(req.body);
+      const { participantId } = createConversationSchema.parse(req.body);
 
       if (participantId === req.user.id) {
         res.status(400).json({ success: false, error: 'Cannot create conversation with yourself' });
@@ -33,12 +65,7 @@ export const chatController = {
       const conversationId = await chatService.getOrCreateConversation(req.user.id, participantId);
       res.json({ success: true, data: { id: conversationId } });
     } catch (error) {
-      if (error instanceof z.ZodError) {
-        res.status(400).json({ success: false, error: error.errors[0].message });
-        return;
-      }
-      console.error('Create conversation error:', error);
-      res.status(500).json({ success: false, error: 'Failed to create conversation' });
+      respondWithChatError(res, error, 'Failed to create conversation');
     }
   },
 
@@ -54,8 +81,7 @@ export const chatController = {
       const messages = await chatService.getMessages(id, req.user.id, limit, offset);
       res.json({ success: true, data: messages });
     } catch (error) {
-      console.error('Get messages error:', error);
-      res.status(500).json({ success: false, error: 'Failed to fetch messages' });
+      respondWithChatError(res, error, 'Failed to fetch messages');
     }
   },
 
@@ -66,17 +92,12 @@ export const chatController = {
   async sendMessage(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
       const { id } = req.params;
-      const { content } = z.object({ content: z.string().min(1).max(5000) }).parse(req.body);
+      const { content } = sendMessageSchema.parse(req.body);
 
       const message = await chatService.sendMessage(id, req.user.id, content);
       res.json({ success: true, data: message });
     } catch (error) {
-      if (error instanceof z.ZodError) {
-        res.status(400).json({ success: false, error: error.errors[0].message });
-        return;
-      }
-      console.error('Send message error:', error);
-      res.status(500).json({ success: false, error: 'Failed to send message' });
+      respondWithChatError(res, error, 'Failed to send message');
     }
   },
 
@@ -89,8 +110,7 @@ export const chatController = {
       await chatService.markAsRead(id, req.user.id);
       res.json({ success: true });
     } catch (error) {
-      console.error('Mark as read error:', error);
-      res.status(500).json({ success: false, error: 'Failed to mark as read' });
+      respondWithChatError(res, error, 'Failed to mark as read');
     }
   },
 
@@ -102,8 +122,7 @@ export const chatController = {
       const count = await chatService.getUnreadCount(req.user.id);
       res.json({ success: true, data: { count } });
     } catch (error) {
-      console.error('Get unread count error:', error);
-      res.status(500).json({ success: false, error: 'Failed to get unread count' });
+      respondWithChatError(res, error, 'Failed to get unread count');
     }
   },
 
@@ -117,8 +136,47 @@ export const chatController = {
       const users = await chatService.searchUsers(q, req.user.id);
       res.json({ success: true, data: users });
     } catch (error) {
-      console.error('Search users error:', error);
-      res.status(500).json({ success: false, error: 'Failed to search users' });
+      respondWithChatError(res, error, 'Failed to search users');
+    }
+  },
+
+  async getRequests(req: AuthenticatedRequest, res: Response): Promise<void> {
+    try {
+      const { box } = requestsQuerySchema.parse(req.query);
+      const requests = await chatService.listContactRequests(req.user.id, box);
+      res.json({ success: true, data: requests });
+    } catch (error) {
+      respondWithChatError(res, error, 'Failed to fetch contact requests');
+    }
+  },
+
+  async createRequest(req: AuthenticatedRequest, res: Response): Promise<void> {
+    try {
+      const { targetUserId, message } = createRequestSchema.parse(req.body);
+      const request = await chatService.createContactRequest(req.user.id, targetUserId, message);
+      res.status(201).json({ success: true, data: request });
+    } catch (error) {
+      respondWithChatError(res, error, 'Failed to create contact request');
+    }
+  },
+
+  async approveRequest(req: AuthenticatedRequest, res: Response): Promise<void> {
+    try {
+      const { id } = req.params;
+      const result = await chatService.approveContactRequest(id, req.user.id);
+      res.json({ success: true, data: result });
+    } catch (error) {
+      respondWithChatError(res, error, 'Failed to approve contact request');
+    }
+  },
+
+  async rejectRequest(req: AuthenticatedRequest, res: Response): Promise<void> {
+    try {
+      const { id } = req.params;
+      const request = await chatService.rejectContactRequest(id, req.user.id);
+      res.json({ success: true, data: request });
+    } catch (error) {
+      respondWithChatError(res, error, 'Failed to reject contact request');
     }
   },
 };

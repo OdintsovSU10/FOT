@@ -16,6 +16,7 @@ import {
 } from '../services/skud-shared.service.js';
 import { skudWriteController } from './skud-write.controller.js';
 import { skudTravelController } from './skud-travel.controller.js';
+import { canAccessEmployeeInScope, resolveScopedDepartmentId, resolveRequestDataScope } from '../services/data-scope.service.js';
 
 const skudReadController = {
   /**
@@ -23,9 +24,10 @@ const skudReadController = {
    */
   async getDashboardStats(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
-      const departmentId = req.user.position_type === 'header' && req.user.department_id
-        ? req.user.department_id
-        : (typeof req.query.department_id === 'string' ? req.query.department_id : null);
+      const departmentId = await resolveScopedDepartmentId(
+        req,
+        typeof req.query.department_id === 'string' ? req.query.department_id : null,
+      );
       const period = (req.query.period as string) || 'today';
       const month = typeof req.query.month === 'string' ? req.query.month : undefined;
 
@@ -102,11 +104,9 @@ const skudReadController = {
         return;
       }
 
-      if (req.user?.position_type === 'worker') {
-        if (!req.user.employee_id || req.user.employee_id !== employeeId) {
-          res.status(403).json({ success: false, error: 'Access denied' });
-          return;
-        }
+      if (!(await canAccessEmployeeInScope(req, employeeId))) {
+        res.status(403).json({ success: false, error: 'Access denied' });
+        return;
       }
 
       const { startDate, endDate } = req.query;
@@ -223,11 +223,12 @@ const skudReadController = {
   /**
    * GET /api/skud/access-points
    */
-  async getAccessPoints(_req: AuthenticatedRequest, res: Response): Promise<void> {
+  async getAccessPoints(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
+      const connection = (req.query.connection as 'internal' | 'external') || undefined;
       if (sigurService.isConfigured()) {
         try {
-          const sigurAPs = await sigurService.getAccessPoints();
+          const sigurAPs = await sigurService.getAccessPoints(connection);
           const names = (sigurAPs as Record<string, unknown>[])
             .map(ap => ((ap.name as string) || '').trim())
             .filter(Boolean);
@@ -239,7 +240,7 @@ const skudReadController = {
         }
       }
 
-      const cacheKey = '__all__';
+      const cacheKey = connection ? `__all__:${connection}` : '__all__';
       const cached = getAccessPointCacheEntry(cacheKey);
       if (cached) {
         res.json({ success: true, data: cached });
@@ -274,9 +275,35 @@ const skudReadController = {
    */
   async getAccessPointSettings(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
-      const departmentId = typeof req.query.department_id === 'string' ? req.query.department_id : null;
+      const departmentId = await resolveScopedDepartmentId(
+        req,
+        typeof req.query.department_id === 'string' ? req.query.department_id : null,
+      );
 
       if (!departmentId) {
+        const scope = await resolveRequestDataScope(req);
+        if (scope === 'department' && req.user.department_id) {
+          const { data, error } = await supabase
+            .from('skud_access_point_settings')
+            .select('access_point_name, is_internal')
+            .eq('department_id', req.user.department_id);
+
+          if (error) {
+            console.error('Get access point settings error:', error);
+            res.status(500).json({ success: false, error: 'Ошибка получения настроек' });
+            return;
+          }
+
+          res.json({
+            success: true,
+            data: (data || []).map(row => ({
+              access_point_name: row.access_point_name,
+              is_internal: row.is_internal,
+            })),
+          });
+          return;
+        }
+
         const { data, error } = await supabase
           .from('skud_access_point_settings')
           .select('access_point_name, is_internal');
@@ -357,6 +384,29 @@ const skudReadController = {
       }
 
       const data = await getDisciplineViolations({ startMonth, endMonth });
+      const scope = await resolveRequestDataScope(req);
+
+      if (scope === 'department' && req.user.department_id) {
+        const filteredEmployeeIds = Object.entries(data.employees)
+          .filter(([, employee]) => employee.department_id === req.user.department_id)
+          .map(([employeeId]) => Number(employeeId));
+        const employeeIdSet = new Set(filteredEmployeeIds);
+        const filteredEmployees = Object.fromEntries(
+          Object.entries(data.employees).filter(([employeeId]) => employeeIdSet.has(Number(employeeId))),
+        );
+        const filteredViolations = data.violations.filter(item => employeeIdSet.has(item.employee_id));
+
+        res.json({
+          success: true,
+          data: {
+            ...data,
+            employees: filteredEmployees,
+            violations: filteredViolations,
+          },
+        });
+        return;
+      }
+
       res.json({ success: true, data });
     } catch (error) {
       console.error('getDisciplineViolations error:', error);
@@ -369,9 +419,10 @@ const skudReadController = {
    */
   async getPresence(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
-      const departmentId = req.user.position_type === 'header' && req.user.department_id
-        ? req.user.department_id
-        : (typeof req.query.department_id === 'string' ? req.query.department_id : null);
+      const departmentId = await resolveScopedDepartmentId(
+        req,
+        typeof req.query.department_id === 'string' ? req.query.department_id : null,
+      );
 
       const data = await getPresence({ departmentId });
       res.json({ success: true, data });

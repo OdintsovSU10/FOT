@@ -100,8 +100,8 @@ const DEFAULT_STATS: ITimesheetStats = {
 };
 
 export const TimesheetPage: FC = () => {
-  const { positionType, profile } = useAuth();
-  const isHeaderOnly = positionType === 'header';
+  const { hasPermission, profile } = useAuth();
+  const isDepartmentScope = hasPermission('data.scope.department') && !hasPermission('data.scope.all');
   const now = new Date();
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth() + 1);
@@ -154,12 +154,12 @@ export const TimesheetPage: FC = () => {
         setDeptOptions(flat);
 
         // Для header: автоматически выбрать свой отдел
-        if (isHeaderOnly && profile?.department_id && !selectedDeptId) {
+        if (isDepartmentScope && profile?.department_id && !selectedDeptId) {
           setSelectedDeptId(profile.department_id);
         }
       })
       .catch(() => {});
-  }, [isHeaderOnly, profile?.department_id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isDepartmentScope, profile?.department_id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Close dept dropdown on outside click
   useEffect(() => {
@@ -313,7 +313,7 @@ export const TimesheetPage: FC = () => {
             </button>
           </div>
           <div className="ts-dept-wrap" ref={deptRef}>
-            {isHeaderOnly ? (
+            {isDepartmentScope ? (
               <button className="ts-dept-btn" style={{ cursor: 'default', opacity: 0.8 }}>
                 {selectedDeptName}
               </button>

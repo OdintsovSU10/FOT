@@ -10,16 +10,21 @@ import { useAuth } from '../../contexts/AuthContext';
 import type { SettingsTab } from '../../components/skud/sigur-settings.types';
 import '../../styles/SigurSettingsPage.css';
 
+const SIGUR_CONNECTION_STORAGE_KEY = 'sigur_selected_connection';
+
 export const SigurSettingsPage = () => {
-  const { hasPosition } = useAuth();
-  const canEdit = hasPosition(['header', 'admin', 'super_admin']);
+  const { canEditPage } = useAuth();
+  const canEdit = canEditPage('/skud-settings');
 
   const [activeTab, setActiveTab] = useState<SettingsTab>('settings');
 
   // Подключение
   const [connected, setConnected] = useState<boolean | null>(null);
   const [checking, setChecking] = useState(false);
-  const [selectedConnection, setSelectedConnection] = useState<'internal' | 'external'>('internal');
+  const [selectedConnection, setSelectedConnection] = useState<'internal' | 'external'>(() => {
+    const saved = localStorage.getItem(SIGUR_CONNECTION_STORAGE_KEY);
+    return saved === 'internal' || saved === 'external' ? saved : 'external';
+  });
   const [availableConnections, setAvailableConnections] = useState<{ internal: boolean; external: boolean }>({ internal: false, external: false });
   const [error, setError] = useState('');
 
@@ -31,6 +36,10 @@ export const SigurSettingsPage = () => {
       .then(filter => setSyncFilterCount(filter.length))
       .catch(() => setSyncFilterCount(null));
   }, []);
+
+  useEffect(() => {
+    localStorage.setItem(SIGUR_CONNECTION_STORAGE_KEY, selectedConnection);
+  }, [selectedConnection]);
 
   const checkConnection = useCallback(async (connType?: 'internal' | 'external') => {
     setChecking(true);
@@ -64,15 +73,6 @@ export const SigurSettingsPage = () => {
       <div className="sigur-header">
         <Settings size={24} />
         <h1>Настройки СКУД (Sigur)</h1>
-        <a
-          href={import.meta.env.VITE_SUPABASE_URL || '#'}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="sigur-btn sigur-btn-supabase"
-        >
-          <Database size={14} />
-          Supabase
-        </a>
       </div>
 
       <div className="sigur-tabs">
@@ -148,6 +148,7 @@ export const SigurSettingsPage = () => {
         <AccessPointsTab
           connected={connected}
           canEdit={canEdit}
+          selectedConnection={selectedConnection}
           setError={setError}
         />
       )}
@@ -155,6 +156,7 @@ export const SigurSettingsPage = () => {
       {activeTab === 'objects' && (
         <TravelObjectsTab
           canEdit={canEdit}
+          selectedConnection={selectedConnection}
           setError={setError}
         />
       )}

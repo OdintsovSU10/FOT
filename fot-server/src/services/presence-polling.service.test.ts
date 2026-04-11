@@ -26,6 +26,10 @@ const mockedState = vi.hoisted(() => ({
     isConfigured: vi.fn(() => true),
     getEvents: vi.fn<(...args: unknown[]) => Promise<Array<Record<string, unknown>>>>(async () => []),
   },
+  sigurMonitorMock: {
+    recordSigurMonitorSuccess: vi.fn(async () => undefined),
+    recordSigurMonitorFailure: vi.fn(async () => undefined),
+  },
 }));
 
 function createBuilder(table: string) {
@@ -86,6 +90,11 @@ vi.mock('./skud-backfill.service.js', () => ({
   backfillUnmatchedEvents: vi.fn(async () => undefined),
 }));
 
+vi.mock('./sigur-monitor.service.js', () => ({
+  recordSigurMonitorSuccess: mockedState.sigurMonitorMock.recordSigurMonitorSuccess,
+  recordSigurMonitorFailure: mockedState.sigurMonitorMock.recordSigurMonitorFailure,
+}));
+
 import {
   POLL_OVERLAP_MS,
   pollEventsOnce,
@@ -136,6 +145,8 @@ describe('presence-polling.service', () => {
     mockedState.sigurServiceMock.isConfigured.mockReturnValue(true);
     mockedState.sigurServiceMock.getEvents.mockReset();
     mockedState.sigurServiceMock.getEvents.mockResolvedValue([] as Array<Record<string, unknown>>);
+    mockedState.sigurMonitorMock.recordSigurMonitorSuccess.mockClear();
+    mockedState.sigurMonitorMock.recordSigurMonitorFailure.mockClear();
     resetPresencePollingStateForTests();
   });
 

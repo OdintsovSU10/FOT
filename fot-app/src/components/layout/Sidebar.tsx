@@ -1,7 +1,7 @@
 import type { FC } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
-import type { EmployeePositionType } from '../../types';
+import type { EmployeePositionType } from '../../types/auth';
 import styles from './Sidebar.module.css';
 import {
   GridIcon,
@@ -23,8 +23,7 @@ interface INavItem {
   label: string;
   icon: FC<{ className?: string }>;
   badge?: number;
-  requiredPosition?: EmployeePositionType;
-  exactPosition?: EmployeePositionType;  // точное совпадение роли (без иерархии)
+  requiredPage?: string | string[];
 }
 
 interface INavGroup {
@@ -36,41 +35,42 @@ const navGroups: INavGroup[] = [
   {
     label: 'Моё',
     items: [
-      { id: 'my-cabinet', path: '/employee', label: 'Личный кабинет', icon: UserIcon, requiredPosition: 'header' },
-      { id: 'overview', path: '/', label: 'Обзор', icon: GridIcon },
-      { id: 'leave-requests', path: '/leave-requests', label: 'Заявления', icon: ClipboardCheckIcon, requiredPosition: 'header' },
+      { id: 'my-cabinet', path: '/employee', label: 'Личный кабинет', icon: UserIcon, requiredPage: '/employee' },
+      { id: 'overview', path: '/', label: 'Обзор', icon: GridIcon, requiredPage: '/dashboard' },
+      { id: 'leave-requests', path: '/leave-requests', label: 'Заявления', icon: ClipboardCheckIcon, requiredPage: '/leave-requests' },
     ]
   },
   {
     label: 'Сотрудники и табель',
     items: [
-      { id: 'header-employees', path: '/my-employees', label: 'Сотрудники', icon: UsersIcon, exactPosition: 'header' },
-      { id: 'employees', path: '/tender', label: 'Сотрудники', icon: UsersIcon, requiredPosition: 'admin' },
-      { id: 'staff-control', path: '/staff-control', label: 'Управление кадрами', icon: UsersIcon, requiredPosition: 'admin' },
-      { id: 'timesheet', path: '/timesheet', label: 'Табель', icon: CalendarIcon },
-      { id: 'timesheet-hr', path: '/timesheet-hr', label: 'Табели HR', icon: CalendarIcon, requiredPosition: 'hr' },
-      { id: 'discipline', path: '/discipline', label: 'Аналитика', icon: BarChartIcon, requiredPosition: 'header' },
-      { id: 'salary-raise-review', path: '/salary-raise-review', label: 'Повышение оклада', icon: DollarIcon, requiredPosition: 'header' },
+      { id: 'header-employees', path: '/my-employees', label: 'Сотрудники', icon: UsersIcon, requiredPage: '/my-employees' },
+      { id: 'employees', path: '/tender', label: 'Сотрудники', icon: UsersIcon, requiredPage: '/tender' },
+      { id: 'staff-control', path: '/staff-control', label: 'Управление кадрами', icon: UsersIcon, requiredPage: '/staff-control' },
+      { id: 'timesheet', path: '/timesheet', label: 'Табель', icon: CalendarIcon, requiredPage: '/timesheet' },
+      { id: 'timesheet-hr', path: '/timesheet-hr', label: 'Табели HR', icon: CalendarIcon, requiredPage: '/timesheet-hr' },
+      { id: 'discipline', path: '/discipline', label: 'Аналитика', icon: BarChartIcon, requiredPage: '/discipline' },
+      { id: 'salary-raise-review', path: '/salary-raise-review', label: 'Повышение оклада', icon: DollarIcon, requiredPage: '/salary-raise-review' },
     ]
   },
   {
     label: 'СКУД',
     items: [
-      { id: 'skud-travel', path: '/skud-travel', label: 'Передвижения', icon: FileTextIcon, requiredPosition: 'header' },
-      { id: 'skud-raw', path: '/skud-raw', label: 'Просмотр СКУД', icon: FileTextIcon, requiredPosition: 'admin' },
-      { id: 'skud-db', path: '/skud-db', label: 'СКУД (база)', icon: DatabaseIcon, requiredPosition: 'admin' },
-      { id: 'sigur-settings', path: '/skud-settings', label: 'Настройки СКУД', icon: SettingsIcon, requiredPosition: 'super_admin' },
+      { id: 'skud-travel', path: '/skud-travel', label: 'Передвижения', icon: FileTextIcon, requiredPage: '/skud-travel' },
+      { id: 'skud-raw', path: '/skud-raw', label: 'Просмотр СКУД', icon: FileTextIcon, requiredPage: '/skud-raw' },
+      { id: 'skud-db', path: '/skud-db', label: 'СКУД (база)', icon: DatabaseIcon, requiredPage: '/skud-db' },
+      { id: 'skud-monitor', path: '/skud-monitor', label: 'Монитор Sigur', icon: BarChartIcon, requiredPage: '/skud-monitor' },
+      { id: 'sigur-settings', path: '/skud-settings', label: 'Настройки СКУД', icon: SettingsIcon, requiredPage: '/skud-settings' },
     ]
   },
   {
     label: 'Администрирование',
     items: [
-      { id: 'admin-schedules', path: '/admin/schedules', label: 'Графики работы', icon: CalendarIcon, requiredPosition: 'admin' },
-      { id: 'admin-payslips', path: '/admin/payslips', label: 'Расчётные листки', icon: FileTextIcon, requiredPosition: 'admin' },
-      { id: 'admin-users', path: '/admin/users', label: 'Пользователи', icon: SettingsIcon, requiredPosition: 'super_admin' },
-      { id: 'admin-roles', path: '/admin/roles', label: 'Роли', icon: ShieldIcon, requiredPosition: 'super_admin' },
-      { id: 'admin-settings', path: '/admin/settings', label: 'Настройки', icon: SettingsIcon, requiredPosition: 'super_admin' },
-      { id: 'admin-audit', path: '/admin/audit', label: 'Аудит данных', icon: ClipboardCheckIcon, requiredPosition: 'super_admin' },
+      { id: 'admin-schedules', path: '/admin/schedules', label: 'Графики работы', icon: CalendarIcon, requiredPage: '/admin/schedules' },
+      { id: 'admin-payslips', path: '/admin/payslips', label: 'Расчётные листки', icon: FileTextIcon, requiredPage: '/admin/payslips' },
+      { id: 'admin-users', path: '/admin/users', label: 'Пользователи', icon: SettingsIcon, requiredPage: '/admin/users' },
+      { id: 'admin-roles', path: '/admin/roles', label: 'Роли', icon: ShieldIcon, requiredPage: '/admin/roles' },
+      { id: 'admin-settings', path: '/admin/settings', label: 'Настройки', icon: SettingsIcon, requiredPage: '/admin/settings' },
+      { id: 'admin-audit', path: '/admin/audit', label: 'Аудит данных', icon: ClipboardCheckIcon, requiredPage: '/admin/audit' },
     ]
   }
 ];
@@ -84,7 +84,7 @@ interface ISidebarProps {
 export const Sidebar: FC<ISidebarProps> = ({ theme = 'dark', isOpen, onClose }) => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { profile, logout, canAccess, positionType, getRoleLabel } = useAuth();
+  const { profile, logout, canViewPage, getRoleLabel } = useAuth();
 
   const logoSrc = theme === 'dark' ? '/fot-logo-dark.svg' : '/fot-logo-light.svg';
 
@@ -151,11 +151,10 @@ export const Sidebar: FC<ISidebarProps> = ({ theme = 'dark', isOpen, onClose }) 
 
       <nav className={styles.nav}>
         {navGroups.map(group => {
-          // Filter items based on position
           const visibleItems = group.items.filter(item => {
-            if (item.exactPosition) return positionType === item.exactPosition;
-            if (!item.requiredPosition) return true;
-            return canAccess(item.requiredPosition);
+            const pages = item.requiredPage ?? item.path;
+            const pageList = Array.isArray(pages) ? pages : [pages];
+            return pageList.some(page => canViewPage(page));
           });
 
           if (visibleItems.length === 0) return null;

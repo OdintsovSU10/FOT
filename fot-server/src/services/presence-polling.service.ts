@@ -6,6 +6,7 @@ import { backfillUnmatchedEvents } from './skud-backfill.service.js';
 import { normalizePersonName } from './sigur-sync-shared.js';
 import { invalidatePresenceCache } from './skud-presence.service.js';
 import { invalidateDashboardCache } from './skud-dashboard.service.js';
+import { recordSigurMonitorFailure, recordSigurMonitorSuccess } from './sigur-monitor.service.js';
 
 const POLL_INTERVAL = 60_000;
 const EMPLOYEE_CACHE_TTL = 10 * 60_000;
@@ -189,10 +190,13 @@ export function resetPresencePollingStateForTests(): void {
 }
 
 export async function pollEventsOnce(now = new Date()): Promise<void> {
+  const cycleStartedAt = Date.now();
+  let window: PollingWindow | null = null;
+
   try {
     if (!sigurService.isConfigured()) return;
 
-    const window = await resolvePollingWindow(now);
+    window = await resolvePollingWindow(now);
     console.log(
       `[presence-polling] window source=${window.checkpointSource} start=${window.startTime} end=${window.endTime}`,
     );
@@ -299,8 +303,38 @@ export async function pollEventsOnce(now = new Date()): Promise<void> {
     console.log(
       `[presence-polling] cycle done source=${window.checkpointSource} start=${window.startTime} end=${window.endTime} fetched=${rawEvents.length} inserted=${totalInserted} unmatched=${storedUnmatched} summaries=${summariesToUpdate.size}`,
     );
+    void recordSigurMonitorSuccess({
+      source: 'presence_polling',
+      checkedAt: now,
+      responseMs: Date.now() - cycleStartedAt,
+      eventsLastWindow: rawEvents.length,
+      meta: {
+        checkpointSource: window.checkpointSource,
+        windowStart: window.startTime,
+        windowEnd: window.endTime,
+        fetched: rawEvents.length,
+        inserted: totalInserted,
+        unmatched: storedUnmatched,
+        summaries: summariesToUpdate.size,
+      },
+    }).catch(error => {
+      console.error('[presence-polling] monitor success hook error:', (error as Error).message);
+    });
   } catch (error) {
     console.error('[presence-polling] error:', (error as Error).message);
+    void recordSigurMonitorFailure({
+      source: 'presence_polling',
+      checkedAt: now,
+      responseMs: Date.now() - cycleStartedAt,
+      errorMessage: (error as Error).message,
+      meta: {
+        checkpointSource: window?.checkpointSource || null,
+        windowStart: window?.startTime || null,
+        windowEnd: window?.endTime || null,
+      },
+    }).catch(monitorError => {
+      console.error('[presence-polling] monitor failure hook error:', (monitorError as Error).message);
+    });
   }
 }
 

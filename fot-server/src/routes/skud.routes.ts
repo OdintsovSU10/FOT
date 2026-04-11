@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import multer from 'multer';
 import { skudController } from '../controllers/skud.controller.js';
-import { authenticate, requireMinPosition, requireCritical2FA } from '../middleware/auth.js';
+import { authenticate, requireAnyPageAccess, requirePageAccess, requireCritical2FA } from '../middleware/auth.js';
 import { importLimiter } from '../middleware/rateLimit.js';
 import { cacheResponse } from '../middleware/cacheResponse.js';
 
@@ -42,14 +42,14 @@ router.use(authenticate);
 // GET /api/skud/organizations - организации с событиями СКУД (super_admin)
 router.get(
   '/organizations',
-  requireMinPosition('super_admin'),
+  requirePageAccess('/skud-settings', 'view'),
   skudController.getOrganizations
 );
 
 // GET /api/skud/dashboard-stats - аналитика дашборда (header+, кэш 60с)
 router.get(
   '/dashboard-stats',
-  requireMinPosition('header'),
+  requirePageAccess('/dashboard', 'view'),
   dashboardCache,
   skudController.getDashboardStats
 );
@@ -57,133 +57,136 @@ router.get(
 // GET /api/skud/discipline - аналитика дисциплины по всей организации (header+)
 router.get(
   '/discipline',
-  requireMinPosition('header'),
+  requirePageAccess('/discipline', 'view'),
   skudController.getDisciplineViolations
 );
 
 // GET /api/skud/daily-summary - дневные сводки (header+)
 router.get(
   '/daily-summary',
-  requireMinPosition('header'),
+  requirePageAccess('/skud-db', 'view'),
   skudController.getDailySummary
 );
 
 // GET /api/skud/employee-events/:employeeId - события конкретного сотрудника (worker+)
 router.get(
   '/employee-events/:employeeId',
-  requireMinPosition('worker'),
+  requireAnyPageAccess(
+    ['/employee', '/employee/timesheet', '/employee/history', '/my-employees', '/tender', '/staff-control'],
+    'view',
+  ),
   skudController.getEmployeeEvents
 );
 
 // GET /api/skud/events - события СКУД (header+)
 router.get(
   '/events',
-  requireMinPosition('header'),
+  requirePageAccess('/skud-db', 'view'),
   skudController.getEvents
 );
 
 // GET /api/skud/access-points - точки доступа (header+)
 router.get(
   '/access-points',
-  requireMinPosition('header'),
+  requireAnyPageAccess(['/skud-settings', '/skud-travel'], 'view'),
   skudController.getAccessPoints
 );
 
 // GET /api/skud/access-point-settings - настройки точек доступа для отдела (worker+)
 router.get(
   '/access-point-settings',
-  requireMinPosition('worker'),
+  requireAnyPageAccess(['/employee', '/employee/timesheet', '/my-employees', '/tender', '/staff-control', '/skud-settings'], 'view'),
   skudController.getAccessPointSettings
 );
 
 // GET /api/skud/travel-objects - объекты для группировки точек доступа (header+)
 router.get(
   '/travel-objects',
-  requireMinPosition('header'),
+  requirePageAccess('/skud-settings', 'view'),
   skudController.getTravelObjects
 );
 
 // POST /api/skud/travel-objects - создать объект (admin+)
 router.post(
   '/travel-objects',
-  requireMinPosition('admin'),
+  requirePageAccess('/skud-settings', 'edit'),
   skudController.createTravelObject
 );
 
 // PUT /api/skud/travel-objects/:id - обновить объект и его точки доступа (admin+)
 router.put(
   '/travel-objects/:id',
-  requireMinPosition('admin'),
+  requirePageAccess('/skud-settings', 'edit'),
   skudController.updateTravelObject
 );
 
 // DELETE /api/skud/travel-objects/:id - удалить объект (admin+)
 router.delete(
   '/travel-objects/:id',
-  requireMinPosition('admin'),
+  requirePageAccess('/skud-settings', 'edit'),
   skudController.deleteTravelObject
 );
 
 // GET /api/skud/travel-routes - маршруты между объектами (header+)
 router.get(
   '/travel-routes',
-  requireMinPosition('header'),
+  requirePageAccess('/skud-settings', 'view'),
   skudController.getTravelRoutes
 );
 
 // POST /api/skud/travel-routes - создать маршрут (admin+)
 router.post(
   '/travel-routes',
-  requireMinPosition('admin'),
+  requirePageAccess('/skud-settings', 'edit'),
   skudController.createTravelRoute
 );
 
 // PUT /api/skud/travel-routes/:id - обновить маршрут (admin+)
 router.put(
   '/travel-routes/:id',
-  requireMinPosition('admin'),
+  requirePageAccess('/skud-settings', 'edit'),
   skudController.updateTravelRoute
 );
 
 // DELETE /api/skud/travel-routes/:id - удалить маршрут (admin+)
 router.delete(
   '/travel-routes/:id',
-  requireMinPosition('admin'),
+  requirePageAccess('/skud-settings', 'edit'),
   skudController.deleteTravelRoute
 );
 
 // GET /api/skud/travel-segments - предрасчитанные передвижения сотрудников (header+)
 router.get(
   '/travel-segments',
-  requireMinPosition('header'),
+  requirePageAccess('/skud-travel', 'view'),
   skudController.getTravelSegments
 );
 
 // POST /api/skud/travel-segments/rebuild - принудительный пересчёт передвижений (header+)
 router.post(
   '/travel-segments/rebuild',
-  requireMinPosition('header'),
+  requirePageAccess('/skud-travel', 'edit'),
   skudController.rebuildTravelSegments
 );
 
 // PUT /api/skud/access-point-settings - сохранение настроек точек доступа (admin+)
 router.put(
   '/access-point-settings',
-  requireMinPosition('admin'),
+  requirePageAccess('/skud-settings', 'edit'),
   skudController.saveAccessPointSettings
 );
 
 // POST /api/skud/sync-access-points - обновление точек доступа из Sigur (admin+)
 router.post(
   '/sync-access-points',
-  requireMinPosition('admin'),
+  requirePageAccess('/skud-settings', 'edit'),
   skudController.syncAccessPoints
 );
 
 // GET /api/skud/presence - статус присутствия сотрудников (header+, кэш 30с)
 router.get(
   '/presence',
-  requireMinPosition('header'),
+  requireAnyPageAccess(['/dashboard', '/my-employees', '/tender', '/staff-control'], 'view'),
   presenceCache,
   skudController.getPresence
 );
@@ -191,7 +194,7 @@ router.get(
 // POST /api/skud/import - импорт (admin+, требуется 2FA)
 router.post(
   '/import',
-  requireMinPosition('admin'),
+  requirePageAccess('/skud-settings', 'edit'),
   requireCritical2FA,
   importLimiter,
   upload.single('file'),
@@ -201,14 +204,14 @@ router.post(
 // POST /api/skud/sync-employee - синхронизация событий одного сотрудника из Sigur (admin+)
 router.post(
   '/sync-employee',
-  requireMinPosition('admin'),
+  requireAnyPageAccess(['/tender', '/staff-control'], 'edit'),
   skudController.syncEmployee
 );
 
 // POST /api/skud/clean-duplicates - бэкфилл хэшей + удаление дублей (super_admin, требуется 2FA)
 router.post(
   '/clean-duplicates',
-  requireMinPosition('super_admin'),
+  requirePageAccess('/skud-settings', 'edit'),
   requireCritical2FA,
   skudController.cleanDuplicates
 );
@@ -216,7 +219,7 @@ router.post(
 // DELETE /api/skud/clear - очистка данных (super_admin, требуется 2FA)
 router.delete(
   '/clear',
-  requireMinPosition('super_admin'),
+  requirePageAccess('/skud-settings', 'edit'),
   requireCritical2FA,
   skudController.clear
 );

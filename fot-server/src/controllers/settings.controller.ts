@@ -100,9 +100,52 @@ const testR2 = async (_req: AuthenticatedRequest, res: Response): Promise<void> 
   }
 };
 
+const getSigurMonitorSettings = async (_req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const config = await settingsService.getSigurMonitorConfig();
+    res.json({ success: true, data: config });
+  } catch (err) {
+    console.error('settings.getSigurMonitorSettings error:', err);
+    res.status(500).json({ success: false, error: 'Ошибка получения настроек мониторинга Sigur' });
+  }
+};
+
+const saveSigurMonitorSettings = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const {
+      enabled,
+      failureThreshold,
+      recoveryThreshold,
+      silenceWindowMinutes,
+      baselineLookbackDays,
+      baselineMinEvents,
+      alertCooldownMinutes,
+      timezone,
+    } = req.body as Record<string, unknown>;
+
+    const config = await settingsService.setSigurMonitorConfig({
+      enabled: typeof enabled === 'boolean' ? enabled : undefined,
+      failureThreshold: typeof failureThreshold === 'number' ? failureThreshold : undefined,
+      recoveryThreshold: typeof recoveryThreshold === 'number' ? recoveryThreshold : undefined,
+      silenceWindowMinutes: typeof silenceWindowMinutes === 'number' ? silenceWindowMinutes : undefined,
+      baselineLookbackDays: typeof baselineLookbackDays === 'number' ? baselineLookbackDays : undefined,
+      baselineMinEvents: typeof baselineMinEvents === 'number' ? baselineMinEvents : undefined,
+      alertCooldownMinutes: typeof alertCooldownMinutes === 'number' ? alertCooldownMinutes : undefined,
+      timezone: typeof timezone === 'string' ? timezone : undefined,
+    }, req.user.id);
+
+    res.json({ success: true, data: config });
+  } catch (err) {
+    console.error('settings.saveSigurMonitorSettings error:', err);
+    res.status(500).json({ success: false, error: 'Ошибка сохранения настроек мониторинга Sigur' });
+  }
+};
+
 export const settingsController = {
   getAll,
   getR2Status,
   saveR2,
   testR2,
+  getSigurMonitorSettings,
+  saveSigurMonitorSettings,
 };

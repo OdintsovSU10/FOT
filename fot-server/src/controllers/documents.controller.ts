@@ -2,6 +2,7 @@ import type { Response } from 'express';
 import { supabase } from '../config/database.js';
 import { r2Service } from '../services/r2.service.js';
 import type { AuthenticatedRequest } from '../types/index.js';
+import { canAccessEmployeeInScope } from '../services/data-scope.service.js';
 
 const DOCUMENT_CATEGORIES = ['certificate', 'scan', 'approval', 'payslip', 'other'] as const;
 
@@ -20,6 +21,10 @@ const getUploadUrl = async (req: AuthenticatedRequest, res: Response): Promise<v
     }
     if (!DOCUMENT_CATEGORIES.includes(category)) {
       res.status(400).json({ success: false, error: 'Недопустимая категория документа' });
+      return;
+    }
+    if (!(await canAccessEmployeeInScope(req, Number(employee_id)))) {
+      res.status(403).json({ success: false, error: 'Нет доступа к сотруднику' });
       return;
     }
 
@@ -50,6 +55,10 @@ const confirmUpload = async (req: AuthenticatedRequest, res: Response): Promise<
     const { r2_key, employee_id, file_name, file_size, mime_type, category, leave_request_id } = req.body;
     if (!r2_key || !employee_id || !file_name || !file_size || !mime_type || !category) {
       res.status(400).json({ success: false, error: 'Все поля обязательны' });
+      return;
+    }
+    if (!(await canAccessEmployeeInScope(req, Number(employee_id)))) {
+      res.status(403).json({ success: false, error: 'Нет доступа к сотруднику' });
       return;
     }
 
@@ -96,8 +105,7 @@ const getDownloadUrl = async (req: AuthenticatedRequest, res: Response): Promise
       return;
     }
 
-    // Проверка доступа: worker видит только свои
-    if (req.user.position_type === 'worker' && doc.employee_id !== req.user.employee_id) {
+    if (!(await canAccessEmployeeInScope(req, doc.employee_id))) {
       res.status(403).json({ success: false, error: 'Нет доступа' });
       return;
     }
@@ -136,12 +144,20 @@ const getMy = async (req: AuthenticatedRequest, res: Response): Promise<void> =>
 /** Документы сотрудника (header/hr/admin) */
 const getByEmployee = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
-    const { empId } = req.params;
+    const employeeId = Number(req.params.empId);
+    if (!employeeId || Number.isNaN(employeeId)) {
+      res.status(400).json({ success: false, error: 'Некорректный employee id' });
+      return;
+    }
+    if (!(await canAccessEmployeeInScope(req, employeeId))) {
+      res.status(403).json({ success: false, error: 'Нет доступа к сотруднику' });
+      return;
+    }
 
     const { data, error } = await supabase
       .from('documents')
       .select('id, employee_id, leave_request_id, category, file_name, file_size, mime_type, r2_key, uploaded_by, created_at')
-      .eq('employee_id', empId)
+      .eq('employee_id', employeeId)
       .order('created_at', { ascending: false });
 
     if (error) throw error;
@@ -159,12 +175,16 @@ const remove = async (req: AuthenticatedRequest, res: Response): Promise<void> =
 
     const { data: doc, error: fetchErr } = await supabase
       .from('documents')
-      .select('r2_key')
+      .select('r2_key, employee_id')
       .eq('id', id)
       .single();
 
     if (fetchErr || !doc) {
       res.status(404).json({ success: false, error: 'Документ не найден' });
+      return;
+    }
+    if (!(await canAccessEmployeeInScope(req, doc.employee_id))) {
+      res.status(403).json({ success: false, error: 'Нет доступа к сотруднику' });
       return;
     }
 

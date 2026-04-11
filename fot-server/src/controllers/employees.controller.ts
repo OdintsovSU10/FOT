@@ -7,6 +7,7 @@ import { employeeCache } from '../services/employee-cache.service.js';
 import { parseFIO } from '../utils/fio.utils.js';
 import { employeeChangesService } from '../services/employee-changes.service.js';
 import type { AuthenticatedRequest, EmployeeEncrypted } from '../types/index.js';
+import { canAccessEmployeeInScope, resolveRequestDataScope, resolveScopedDepartmentId } from '../services/data-scope.service.js';
 
 // Полный список колонок employees для getById / lifecycle-хэндлеров
 const EMPLOYEE_FULL_COLUMNS = 'id, full_name, last_name, first_name, middle_name, current_salary, salary_actual, salary_calculated, staff_units, birth_date, hire_date, country, pension_number, patent_issue_date, patent_expiry_date, email, org_department_id, position_id, sigur_employee_id, tab_number, current_status, permit_expiry_date, registration_cat1, registration_cat4, doc_receipt_date, work_object, employment_status, department_locked, is_archived, archived_at, created_at, updated_at, work_category';
@@ -50,10 +51,16 @@ export const employeesController = {
   async getAll(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
       const t0 = Date.now();
+      const scope = await resolveRequestDataScope(req);
+      if (!scope) {
+        res.status(403).json({ success: false, error: 'Data scope не настроен для роли' });
+        return;
+      }
       const showArchived = req.query.archived === 'true';
-      const departmentId = req.user.position_type === 'header' && req.user.department_id
-        ? req.user.department_id
-        : req.query.department_id as string | undefined;
+      const departmentId = await resolveScopedDepartmentId(
+        req,
+        typeof req.query.department_id === 'string' ? req.query.department_id : null,
+      );
       const isListView = req.query.view === 'list';
       const listColumns = 'id, full_name, position_id, email, org_department_id, employment_status, department_locked, is_archived, archived_at, created_at, updated_at, work_category';
       const staffColumns = listColumns + ', salary_actual, salary_calculated, current_salary';
@@ -76,7 +83,19 @@ export const employeesController = {
           .order('full_name')
           .range(offset, offset + pageSize - 1);
 
-        if (departmentId) q = q.eq('org_department_id', departmentId);
+        if (scope === 'self') {
+          if (!req.user.employee_id) {
+            res.json({
+              success: true,
+              data: [],
+              meta: { page, pageSize, total: 0, totalPages: 0 },
+            });
+            return;
+          }
+          q = q.eq('id', req.user.employee_id);
+        } else if (departmentId) {
+          q = q.eq('org_department_id', departmentId);
+        }
         if (search) q = q.ilike('full_name', `%${search}%`);
         if (status === 'fired') q = q.eq('employment_status', 'fired');
         else if (status === 'active' || !status) q = q.neq('employment_status', 'fired');
@@ -122,7 +141,14 @@ export const employeesController = {
           .order('id')
           .range(from, from + INTERNAL_PAGE - 1);
 
-        if (departmentId) q = q.eq('org_department_id', departmentId);
+        if (scope === 'self') {
+          if (!req.user.employee_id) {
+            break;
+          }
+          q = q.eq('id', req.user.employee_id);
+        } else if (departmentId) {
+          q = q.eq('org_department_id', departmentId);
+        }
 
         const { data, error } = await q;
         if (error) {
@@ -159,6 +185,11 @@ export const employeesController = {
    */
   async getCounts(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
+      const scope = await resolveRequestDataScope(req);
+      if (!scope) {
+        res.status(403).json({ success: false, error: 'Data scope не настроен для роли' });
+        return;
+      }
       const showArchived = req.query.archived === 'true';
       const cacheKey = `counts:${showArchived ? 'archived' : 'active'}`;
       const cached = countsCache.get(cacheKey);
@@ -168,10 +199,24 @@ export const employeesController = {
         return;
       }
 
-      const { data: rows } = await supabase
+      const scopedDepartmentId = await resolveScopedDepartmentId(req, null);
+      let rowsQuery = supabase
         .from('employees')
-        .select('org_department_id, employment_status')
+        .select('id, org_department_id, employment_status')
         .eq('is_archived', showArchived);
+
+      if (scope === 'self') {
+        if (!req.user.employee_id) {
+          res.setHeader('Cache-Control', 'private, max-age=30');
+          res.json({ success: true, data: { byDepartment: {}, byStatus: { active: 0, fired: 0 } } });
+          return;
+        }
+        rowsQuery = rowsQuery.eq('id', req.user.employee_id);
+      } else if (scopedDepartmentId) {
+        rowsQuery = rowsQuery.eq('org_department_id', scopedDepartmentId);
+      }
+
+      const { data: rows } = await rowsQuery;
 
       const byDepartment: Record<string, number> = {};
       const byStatus = { active: 0, fired: 0 };
@@ -206,6 +251,10 @@ export const employeesController = {
       const idNum = Number(req.params.id);
       if (!idNum || Number.isNaN(idNum)) {
         res.status(400).json({ success: false, error: 'Invalid employee id' });
+        return;
+      }
+      if (!(await canAccessEmployeeInScope(req, idNum))) {
+        res.status(403).json({ success: false, error: 'Нет доступа к сотруднику' });
         return;
       }
 
@@ -253,6 +302,18 @@ export const employeesController = {
   async create(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
       const validated = createEmployeeSchema.parse(req.body);
+      const scope = await resolveRequestDataScope(req);
+      if (!scope || scope === 'self') {
+        res.status(403).json({ success: false, error: 'Недостаточно прав для создания сотрудника' });
+        return;
+      }
+      if (scope === 'department' && req.user.department_id) {
+        if (validated.org_department_id && validated.org_department_id !== req.user.department_id) {
+          res.status(403).json({ success: false, error: 'Можно создавать сотрудников только в своём отделе' });
+          return;
+        }
+        validated.org_department_id = req.user.department_id;
+      }
 
       const fio = parseFIO(validated.full_name);
 
@@ -310,6 +371,16 @@ export const employeesController = {
     try {
       const { id } = req.params;
       const validated = updateEmployeeSchema.parse(req.body);
+      const employeeId = Number(id);
+      if (!(await canAccessEmployeeInScope(req, employeeId))) {
+        res.status(403).json({ success: false, error: 'Нет доступа к сотруднику' });
+        return;
+      }
+      const scope = await resolveRequestDataScope(req);
+      if (scope === 'department' && req.user.department_id && validated.org_department_id && validated.org_department_id !== req.user.department_id) {
+        res.status(403).json({ success: false, error: 'Нельзя перевести сотрудника в другой отдел при department scope' });
+        return;
+      }
 
       const { data: existing } = await supabase
         .from('employees')
@@ -404,6 +475,10 @@ export const employeesController = {
   async delete(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
       const { id } = req.params;
+      if (!(await canAccessEmployeeInScope(req, Number(id)))) {
+        res.status(403).json({ success: false, error: 'Нет доступа к сотруднику' });
+        return;
+      }
 
       const { error } = await supabase
         .from('employees')
@@ -434,6 +509,10 @@ export const employeesController = {
   async changeSalary(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
       const { id } = req.params;
+      if (!(await canAccessEmployeeInScope(req, Number(id)))) {
+        res.status(403).json({ success: false, error: 'Нет доступа к сотруднику' });
+        return;
+      }
       const { salary, reason, effective_date } = req.body as { salary: number; reason?: string; effective_date?: string };
 
       if (!salary || salary <= 0) {
@@ -466,6 +545,10 @@ export const employeesController = {
   async changePosition(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
       const { id } = req.params;
+      if (!(await canAccessEmployeeInScope(req, Number(id)))) {
+        res.status(403).json({ success: false, error: 'Нет доступа к сотруднику' });
+        return;
+      }
       const { position_name, reason, effective_date } = req.body as { position_name: string; reason?: string; effective_date?: string };
 
       if (!position_name?.trim()) {
@@ -520,6 +603,10 @@ export const employeesController = {
   async changeCategory(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
       const { id } = req.params;
+      if (!(await canAccessEmployeeInScope(req, Number(id)))) {
+        res.status(403).json({ success: false, error: 'Нет доступа к сотруднику' });
+        return;
+      }
       const { work_category } = req.body as { work_category: string | null };
 
       // Валидация: если задано — должна существовать и быть активной

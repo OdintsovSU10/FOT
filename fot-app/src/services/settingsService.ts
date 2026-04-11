@@ -13,6 +13,17 @@ export interface IR2TestResult {
   error?: string;
 }
 
+export interface ISigurMonitorSettings {
+  enabled: boolean;
+  failureThreshold: number;
+  recoveryThreshold: number;
+  silenceWindowMinutes: number;
+  baselineLookbackDays: number;
+  baselineMinEvents: number;
+  alertCooldownMinutes: number;
+  timezone: string;
+}
+
 interface ApiResponse<T> {
   data: T;
 }
@@ -35,6 +46,16 @@ export const settingsService = {
 
   testR2: async (): Promise<IR2TestResult> => {
     const res = await apiClient.post<ApiResponse<IR2TestResult>>('/settings/r2/test', {});
+    return res.data;
+  },
+
+  getSigurMonitorSettings: async (): Promise<ISigurMonitorSettings> => {
+    const res = await apiClient.get<ApiResponse<ISigurMonitorSettings>>('/settings/sigur-monitor');
+    return res.data;
+  },
+
+  saveSigurMonitorSettings: async (data: ISigurMonitorSettings): Promise<ISigurMonitorSettings> => {
+    const res = await apiClient.put<ApiResponse<ISigurMonitorSettings>>('/settings/sigur-monitor', data);
     return res.data;
   },
 };

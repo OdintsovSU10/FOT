@@ -25,8 +25,8 @@ const STATUS_ICONS: Record<LeaveRequestStatus, FC<{ size?: number }>> = {
 };
 
 export const LeaveRequestsManagePage: FC = () => {
-  const { positionType } = useAuth();
-  const isHeader = positionType === 'header';
+  const { hasPermission } = useAuth();
+  const isDepartmentScope = hasPermission('data.scope.department') && !hasPermission('data.scope.all');
 
   const [requests, setRequests] = useState<ILeaveRequest[]>([]);
   const [employeeMap, setEmployeeMap] = useState<Map<number, string>>(new Map());
@@ -38,7 +38,7 @@ export const LeaveRequestsManagePage: FC = () => {
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const data = isHeader
+      const data = isDepartmentScope
         ? await leaveRequestService.getDepartment()
         : await leaveRequestService.getAll(filter === 'pending' ? 'pending' : undefined);
       setRequests(data);
@@ -54,7 +54,7 @@ export const LeaveRequestsManagePage: FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [isHeader, filter]);
+  }, [isDepartmentScope, filter]);
 
   useEffect(() => { loadData(); }, [loadData]);
 
@@ -83,7 +83,7 @@ export const LeaveRequestsManagePage: FC = () => {
   const formatDate = (date: string) =>
     new Date(date).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' });
 
-  const filteredRequests = filter === 'pending' && isHeader
+  const filteredRequests = filter === 'pending' && isDepartmentScope
     ? requests.filter(r => r.status === 'pending')
     : requests;
 

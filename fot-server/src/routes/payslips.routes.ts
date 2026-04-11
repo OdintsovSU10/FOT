@@ -1,15 +1,15 @@
 import { Router } from 'express';
 import { payslipsController } from '../controllers/payslips.controller.js';
-import { authenticate, requirePosition } from '../middleware/auth.js';
+import { authenticate, requirePageAccess } from '../middleware/auth.js';
 
 const router = Router();
 
 router.use(authenticate);
 
-router.get('/my', requirePosition('worker', 'header', 'hr', 'admin', 'super_admin'), payslipsController.getMy);
-router.get('/employee/:empId', requirePosition('hr', 'admin', 'super_admin'), payslipsController.getByEmployee);
-router.post('/', requirePosition('hr', 'admin', 'super_admin'), payslipsController.create);
-router.post('/import', requirePosition('hr', 'admin', 'super_admin'), payslipsController.importBatch);
-router.post('/generate', requirePosition('admin', 'super_admin'), payslipsController.generate);
+router.get('/my', requirePageAccess('/employee/payslips', 'view'), payslipsController.getMy);
+router.get('/employee/:empId', requirePageAccess('/admin/payslips', 'view'), payslipsController.getByEmployee);
+router.post('/', requirePageAccess('/admin/payslips', 'edit'), payslipsController.create);
+router.post('/import', requirePageAccess('/admin/payslips', 'edit'), payslipsController.importBatch);
+router.post('/generate', requirePageAccess('/admin/payslips', 'edit'), payslipsController.generate);
 
 export default router;

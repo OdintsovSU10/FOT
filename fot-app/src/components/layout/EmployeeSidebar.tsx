@@ -11,6 +11,7 @@ interface INavItem {
   icon: ReactNode;
   badge?: number;
   badgeType?: 'pending' | 'new';
+  requiredPage?: string;
 }
 
 interface INavGroup {
@@ -26,6 +27,7 @@ const navGroups: INavGroup[] = [
         id: 'home',
         path: '/employee',
         label: 'Главная',
+        requiredPage: '/employee',
         icon: (
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <rect x="3" y="3" width="7" height="7" rx="2"/>
@@ -39,6 +41,7 @@ const navGroups: INavGroup[] = [
         id: 'requests',
         path: '/employee/requests',
         label: 'Мои заявления',
+        requiredPage: '/employee/requests',
         icon: (
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
@@ -52,6 +55,7 @@ const navGroups: INavGroup[] = [
         id: 'timesheet',
         path: '/employee/timesheet',
         label: 'Мой табель',
+        requiredPage: '/employee/timesheet',
         icon: (
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <rect x="3" y="4" width="18" height="18" rx="2"/>
@@ -65,6 +69,7 @@ const navGroups: INavGroup[] = [
         id: 'history',
         path: '/employee/history',
         label: 'Моя история',
+        requiredPage: '/employee/history',
         icon: (
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/>
@@ -81,6 +86,7 @@ const navGroups: INavGroup[] = [
         id: 'salary-raise',
         path: '/employee/salary-raise',
         label: 'Повышение оклада',
+        requiredPage: '/employee/salary-raise',
         icon: (
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/>
@@ -92,6 +98,7 @@ const navGroups: INavGroup[] = [
         id: 'payslips',
         path: '/employee/payslips',
         label: 'Расчётные листки',
+        requiredPage: '/employee/payslips',
         icon: (
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <rect x="2" y="6" width="20" height="12" rx="2"/>
@@ -104,6 +111,7 @@ const navGroups: INavGroup[] = [
         id: 'payments',
         path: '/employee/payments',
         label: 'История выплат',
+        requiredPage: '/employee/payments',
         icon: (
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
@@ -119,6 +127,7 @@ const navGroups: INavGroup[] = [
         id: 'documents',
         path: '/employee/documents',
         label: 'Мои документы',
+        requiredPage: '/employee/documents',
         icon: (
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
@@ -129,6 +138,7 @@ const navGroups: INavGroup[] = [
         id: 'certificates',
         path: '/employee/certificates',
         label: 'Справки и выписки',
+        requiredPage: '/employee/certificates',
         icon: (
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <circle cx="12" cy="12" r="10"/>
@@ -150,7 +160,7 @@ interface IEmployeeSidebarProps {
 export const EmployeeSidebar: FC<IEmployeeSidebarProps> = ({ isOpen, onClose, theme = 'dark' }) => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { profile, logout, canAccess } = useAuth();
+  const { profile, logout, canViewPage } = useAuth();
   const { status: presenceStatus } = useMyPresence();
 
   const logoSrc = theme === 'dark' ? '/fot-logo-dark.svg' : '/fot-logo-light.svg';
@@ -222,7 +232,7 @@ export const EmployeeSidebar: FC<IEmployeeSidebarProps> = ({ isOpen, onClose, th
       </div>
 
       <nav className={styles.nav}>
-        {canAccess('header') && (
+        {canViewPage('/dashboard') && (
           <div className={styles.navGroup}>
             <div className={styles.navLabel}>Управление</div>
             <div
@@ -242,7 +252,7 @@ export const EmployeeSidebar: FC<IEmployeeSidebarProps> = ({ isOpen, onClose, th
         {navGroups.map(group => (
           <div key={group.label} className={styles.navGroup}>
             <div className={styles.navLabel}>{group.label}</div>
-            {group.items.map(item => (
+            {group.items.filter(item => canViewPage(item.requiredPage || item.path)).map(item => (
               <div
                 key={item.id}
                 className={`${styles.navItem} ${activeItem === item.id ? styles.active : ''}`}

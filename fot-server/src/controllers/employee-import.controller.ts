@@ -2,12 +2,19 @@ import { Response } from 'express';
 import { supabase } from '../config/database.js';
 import { auditService } from '../services/audit.service.js';
 import type { AuthenticatedRequest } from '../types/index.js';
+import { resolveRequestDataScope } from '../services/data-scope.service.js';
 
 /**
  * DELETE /api/employees/all
  */
 export async function deleteAll(req: AuthenticatedRequest, res: Response): Promise<void> {
   try {
+    const scope = await resolveRequestDataScope(req);
+    if (scope !== 'all') {
+      res.status(403).json({ success: false, error: 'Эта операция доступна только для all-scope ролей' });
+      return;
+    }
+
     const { count: beforeCount } = await supabase
       .from('employees')
       .select('*', { count: 'exact', head: true });

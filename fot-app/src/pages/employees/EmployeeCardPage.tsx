@@ -118,8 +118,8 @@ export const EmployeeCardPage: FC = () => {
     if (backPath) return navigate(backPath);
     navigate(-1);
   };
-  const { canAccess } = useAuth();
-  const canEdit = canAccess('admin');
+  const { canEditPage } = useAuth();
+  const canEdit = canEditPage('/tender') || canEditPage('/staff-control');
 
   // Deep-link: ?tab=skud&date=2026-03-18
   const urlTab = searchParams.get('tab') as Tab | null;

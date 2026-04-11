@@ -13,6 +13,7 @@ import {
   updateTravelObject,
   updateTravelRoute,
 } from '../services/skud-travel.service.js';
+import { resolveScopedDepartmentId } from '../services/data-scope.service.js';
 
 const monthRegex = /^\d{4}-\d{2}$/;
 
@@ -176,9 +177,10 @@ export const skudTravelController = {
     try {
       const raw = segmentQuerySchema.parse({
         month: req.query.month,
-        department_id: req.user.position_type === 'header' && req.user.department_id
-          ? req.user.department_id
-          : req.query.department_id,
+        department_id: await resolveScopedDepartmentId(
+          req,
+          typeof req.query.department_id === 'string' ? req.query.department_id : null,
+        ) || undefined,
         employee_id: req.query.employee_id,
         status: req.query.status,
       });
@@ -206,9 +208,10 @@ export const skudTravelController = {
     try {
       const raw = segmentQuerySchema.parse({
         month: req.body?.month,
-        department_id: req.user.position_type === 'header' && req.user.department_id
-          ? req.user.department_id
-          : req.body?.department_id,
+        department_id: await resolveScopedDepartmentId(
+          req,
+          typeof req.body?.department_id === 'string' ? req.body.department_id : null,
+        ) || undefined,
         employee_id: req.body?.employee_id,
       });
 

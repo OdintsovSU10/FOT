@@ -16,8 +16,8 @@ const PAGE_SIZE = 50;
 export const EmployeesPage: FC = () => {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { canAccess } = useAuth();
-  const canEdit = canAccess('header');
+  const { canEditPage } = useAuth();
+  const canEdit = canEditPage('/tender') || canEditPage('/staff-control');
 
   // Data
   const [employees, setEmployees] = useState<Employee[]>([]);

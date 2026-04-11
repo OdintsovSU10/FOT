@@ -97,7 +97,7 @@ async function main() {
     .insert({
       organization_id: org.id,
       code: code,
-      position_type: 'worker',
+      position_type: 'worker_office',
       created_by: admin.id,
       expires_at: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(), // 30 дней
     })
@@ -113,7 +113,7 @@ async function main() {
   console.log('ТЕСТОВЫЙ КОД СОЗДАН!');
   console.log('========================================');
   console.log(`Код: ${linkCode.code}`);
-  console.log(`Должность: worker (Сотрудник)`);
+  console.log(`Должность: worker_office (Офисный сотрудник)`);
   console.log(`Организация: ${org.name}`);
   console.log(`Действителен до: ${new Date(linkCode.expires_at).toLocaleDateString('ru-RU')}`);
   console.log('========================================\n');

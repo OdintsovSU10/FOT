@@ -4,9 +4,9 @@ import type { AuthenticatedRequest, SalaryRaiseStatus } from '../types/index.js'
 import { employeeChangesService } from '../services/employee-changes.service.js';
 import { pushService } from '../services/push.service.js';
 import { notificationService } from '../services/notification.service.js';
-import { getHierarchyLevel } from '../services/roles-cache.service.js';
 import { r2Service } from '../services/r2.service.js';
 import { getIo } from '../socket/io-instance.js';
+import { canAccessEmployeeInScope, resolveRequestDataScope } from '../services/data-scope.service.js';
 
 const REQUEST_TYPES = ['performance', 'market_adjustment', 'promotion', 'new_responsibilities', 'retention', 'other'] as const;
 
@@ -272,66 +272,39 @@ const getMy = async (req: AuthenticatedRequest, res: Response): Promise<void> =>
 /** На рассмотрении (header+) — заявки, ожидающие действия текущего пользователя */
 const getPending = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
-    const userLevel = await getHierarchyLevel(req.user.position_type);
-    const results: unknown[] = [];
+    const scope = await resolveRequestDataScope(req);
+    if (!scope) {
+      res.status(403).json({ success: false, error: 'Data scope не настроен для роли' });
+      return;
+    }
+    const results: Record<string, unknown>[] = [];
+    const { data: pendingRequests, error } = await supabase
+      .from('salary_raise_requests')
+      .select('*')
+      .in('status', ['supervisor_review', 'hr_review', 'finance_review'])
+      .order('created_at', { ascending: false });
 
-    // Supervisor review: заявки где текущий user — supervisor, header отдела, или hr+/admin+
-    if (userLevel >= 2) {
-      const { data: supervisorRequests } = await supabase
-        .from('salary_raise_requests')
-        .select('*')
-        .eq('status', 'supervisor_review')
-        .order('created_at', { ascending: false });
+    if (error) {
+      throw error;
+    }
 
-      if (supervisorRequests) {
-        // HR+ и admin+ видят все заявки на этапе supervisor_review
-        if (userLevel >= 3) {
-          results.push(...supervisorRequests);
-        } else {
-          for (const r of supervisorRequests) {
-            const supervisorId = await getSupervisorUserId(r.employee_id);
-            if (supervisorId === req.user.id) {
-              results.push(r);
-              continue;
-            }
-            // Header того же отдела (или если supervisor не назначен)
-            if (req.user.department_id) {
-              const { data: emp } = await supabase
-                .from('employees')
-                .select('org_department_id')
-                .eq('id', r.employee_id)
-                .single();
-              if (emp?.org_department_id === req.user.department_id) {
-                results.push(r);
-              }
-            }
-          }
-        }
+    for (const request of pendingRequests || []) {
+      const supervisorId = await getSupervisorUserId(request.employee_id);
+      const isAssignedSupervisor = supervisorId === req.user.id;
+      if (isAssignedSupervisor || await canAccessEmployeeInScope(req, request.employee_id)) {
+        results.push(request);
       }
     }
 
-    // HR review
-    if (userLevel >= 3) {
-      const { data: hrRequests } = await supabase
-        .from('salary_raise_requests')
-        .select('*')
-        .eq('status', 'hr_review')
-        .order('created_at', { ascending: false });
-      if (hrRequests) results.push(...hrRequests);
-    }
-
-    // Finance review (admin+)
-    if (userLevel >= 4) {
-      const { data: finRequests } = await supabase
-        .from('salary_raise_requests')
-        .select('*')
-        .eq('status', 'finance_review')
-        .order('created_at', { ascending: false });
-      if (finRequests) results.push(...finRequests);
+    const scopedResults: Record<string, unknown>[] = [];
+    for (const request of results) {
+      if (await canAccessEmployeeInScope(req, request.employee_id as number)) {
+        scopedResults.push(request);
+      }
     }
 
     // Enrich с ФИО
-    const enriched = await enrichWithNames(results as Record<string, unknown>[]);
+    const enriched = await enrichWithNames(scopedResults);
     res.json({ success: true, data: enriched });
   } catch (err) {
     console.error('salary-raise.getPending error:', err);
@@ -353,7 +326,14 @@ const getAll = async (req: AuthenticatedRequest, res: Response): Promise<void> =
     const { data, error } = await query;
     if (error) throw error;
 
-    const enriched = await enrichWithNames(data || []);
+    const scoped = [];
+    for (const request of data || []) {
+      if (await canAccessEmployeeInScope(req, request.employee_id)) {
+        scoped.push(request);
+      }
+    }
+
+    const enriched = await enrichWithNames(scoped);
     res.json({ success: true, data: enriched });
   } catch (err) {
     console.error('salary-raise.getAll error:', err);
@@ -373,6 +353,10 @@ const getById = async (req: AuthenticatedRequest, res: Response): Promise<void> 
 
     if (error || !data) {
       res.status(404).json({ success: false, error: 'Заявка не найдена' });
+      return;
+    }
+    if (data.author_user_id !== req.user.id && !(await canAccessEmployeeInScope(req, data.employee_id))) {
+      res.status(403).json({ success: false, error: 'Нет доступа к заявке' });
       return;
     }
 
@@ -508,18 +492,9 @@ const supervisorReview = async (req: AuthenticatedRequest, res: Response): Promi
     const supervisorId = await getSupervisorUserId(request.employee_id);
     let hasAccess = supervisorId === req.user.id;
 
-    if (!hasAccess && req.user.position_type === 'header' && req.user.department_id) {
-      const { data: emp } = await supabase
-        .from('employees')
-        .select('org_department_id')
-        .eq('id', request.employee_id)
-        .single();
-      hasAccess = emp?.org_department_id === req.user.department_id;
+    if (!hasAccess && await canAccessEmployeeInScope(req, request.employee_id)) {
+      hasAccess = true;
     }
-
-    // admin+ всегда может
-    const userLevel = await getHierarchyLevel(req.user.position_type);
-    if (userLevel >= 4) hasAccess = true;
 
     if (!hasAccess) {
       res.status(403).json({ success: false, error: 'Нет прав на рецензирование этой заявки' });

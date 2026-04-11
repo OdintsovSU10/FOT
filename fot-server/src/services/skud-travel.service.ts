@@ -1,8 +1,10 @@
 import { supabase } from '../config/database.js';
 import { getInternalAccessPoints } from './skud-shared.service.js';
+import { createCache } from '../utils/cache.js';
 
 const DEFAULT_CREDIT_MULTIPLIER = 1.5;
 const BATCH_SIZE = 500;
+const TRAVEL_SEGMENTS_CACHE_TTL_MS = 60_000;
 
 export type TravelSegmentStatus = 'auto_approved' | 'delayed' | 'needs_object' | 'needs_route';
 
@@ -154,20 +156,49 @@ interface IRebuildTravelParams {
   endDate: string;
 }
 
+interface ITravelFeatureErrorCandidate {
+  code?: string;
+  message?: string | null;
+  details?: string | null;
+  hint?: string | null;
+}
+
+const getTravelFeatureErrorCandidate = (error: unknown): ITravelFeatureErrorCandidate | null => {
+  if (!error || typeof error !== 'object') return null;
+  return error as ITravelFeatureErrorCandidate;
+};
+
 const isMissingTableError = (error: unknown): boolean => {
-  if (!error || typeof error !== 'object') return false;
-  const candidate = error as { code?: string; message?: string; details?: string };
+  const candidate = getTravelFeatureErrorCandidate(error);
+  if (!candidate) return false;
+
   return candidate.code === '42P01'
+    || candidate.code === 'PGRST205'
     || candidate.message?.includes('does not exist')
+    || candidate.message?.includes('schema cache')
     || candidate.details?.includes('does not exist')
     || false;
 };
 
 const formatTravelFeatureError = (error: unknown): Error => {
   if (isMissingTableError(error)) {
-    return new Error('Таблицы передвижений не созданы. Примените миграцию 013_skud_travel_segments.sql');
+    return new Error(
+      'Таблицы передвижений не видны через Supabase API. '
+      + 'Примените миграцию 013_skud_travel_segments.sql в текущую базу. '
+      + 'Если миграция уже применена, обновите schema cache Supabase или перезапустите API.',
+    );
   }
   if (error instanceof Error) return error;
+
+  const candidate = getTravelFeatureErrorCandidate(error);
+  if (candidate?.message) {
+    const details = [candidate.details, candidate.hint]
+      .filter((value): value is string => !!value)
+      .join(' ');
+
+    return new Error(details ? `${candidate.message} ${details}` : candidate.message);
+  }
+
   return new Error('Ошибка работы с передвижениями');
 };
 
@@ -190,6 +221,23 @@ const normalizeAccessPoint = (value: string | null | undefined): string | null =
 
 const routeKey = (fromObjectId: string, toObjectId: string): string => `${fromObjectId}__${toObjectId}`;
 const dayKey = (employeeId: number, workDate: string): string => `${employeeId}_${workDate}`;
+const segmentKey = ({
+  employee_id,
+  work_date,
+  exit_time,
+  entry_time,
+  from_access_point_name,
+  to_access_point_name,
+}: Pick<ICalculatedTravelSegment, 'employee_id' | 'work_date' | 'exit_time' | 'entry_time' | 'from_access_point_name' | 'to_access_point_name'>): string => (
+  [
+    employee_id,
+    work_date,
+    exit_time,
+    entry_time,
+    from_access_point_name || '',
+    to_access_point_name || '',
+  ].join('__')
+);
 
 const timeToMinutes = (value: string): number => {
   const [hours = 0, minutes = 0, seconds = 0] = value.split(':').map(Number);
@@ -205,6 +253,32 @@ const dedupeAccessPoints = (accessPoints: string[]): string[] => {
     if (normalized) unique.add(normalized);
   }
   return [...unique].sort((a, b) => a.localeCompare(b, 'ru'));
+};
+
+const travelSegmentsCache = createCache<{ data: ITravelSegmentListItem[] }>({
+  ttlMs: TRAVEL_SEGMENTS_CACHE_TTL_MS,
+  max: 100,
+});
+
+const travelSegmentsInFlight = new Map<string, Promise<ITravelSegmentListItem[]>>();
+
+const buildTravelSegmentsCacheKey = ({
+  month,
+  departmentId,
+  employeeId,
+  status,
+}: ITravelScopeParams & { status?: TravelSegmentStatus | 'problem' }): string => (
+  [
+    month,
+    departmentId || 'all-departments',
+    employeeId || 'all-employees',
+    status || 'all-statuses',
+  ].join('|')
+);
+
+export const invalidateTravelSegmentsCache = (): void => {
+  travelSegmentsCache.clear();
+  travelSegmentsInFlight.clear();
 };
 
 const fetchTravelObjectsRaw = async (): Promise<ITravelObjectRow[]> => {
@@ -305,6 +379,80 @@ const fetchEventsForEmployees = async ({
   return events;
 };
 
+const fetchStoredTravelSegments = async ({
+  employeeIds,
+  startDate,
+  endDate,
+  status,
+}: IRebuildTravelParams & { status?: TravelSegmentStatus | 'problem' }): Promise<ITravelSegmentRow[]> => {
+  if (employeeIds.length === 0) return [];
+
+  const segments: ITravelSegmentRow[] = [];
+  for (let index = 0; index < employeeIds.length; index += BATCH_SIZE) {
+    const batch = employeeIds.slice(index, index + BATCH_SIZE);
+    let query = supabase
+      .from('skud_travel_segments')
+      .select([
+        'id',
+        'employee_id',
+        'work_date',
+        'from_object_id',
+        'to_object_id',
+        'from_access_point_name',
+        'to_access_point_name',
+        'exit_time',
+        'entry_time',
+        'actual_minutes',
+        'norm_minutes',
+        'max_credit_minutes',
+        'credited_minutes',
+        'delay_minutes',
+        'status',
+        'created_at',
+        'updated_at',
+      ].join(', '))
+      .in('employee_id', batch)
+      .gte('work_date', startDate)
+      .lte('work_date', endDate)
+      .order('work_date', { ascending: false })
+      .order('exit_time', { ascending: true })
+      .order('employee_id', { ascending: true });
+
+    if (status && status !== 'problem') {
+      query = query.eq('status', status);
+    }
+
+    const { data, error } = await query;
+    if (error) throw formatTravelFeatureError(error);
+
+    segments.push(...((data || []) as unknown as ITravelSegmentRow[]));
+  }
+
+  if (status === 'problem') {
+    return segments
+      .filter(segment => segment.status !== 'auto_approved')
+      .sort((left, right) => {
+        const byDate = right.work_date.localeCompare(left.work_date);
+        if (byDate !== 0) return byDate;
+
+        const byExit = left.exit_time.localeCompare(right.exit_time);
+        if (byExit !== 0) return byExit;
+
+        return left.employee_id - right.employee_id;
+      });
+  }
+
+  return segments.sort((left, right) => {
+    const byDate = right.work_date.localeCompare(left.work_date);
+    if (byDate !== 0) return byDate;
+
+    const byExit = left.exit_time.localeCompare(right.exit_time);
+    if (byExit !== 0) return byExit;
+
+    return left.employee_id - right.employee_id;
+  });
+};
+
 const buildTravelSegments = ({
   events,
   internalPoints,
@@ -398,7 +546,7 @@ const syncSegmentsToDatabase = async ({
   startDate,
   endDate,
   segments,
-}: IRebuildTravelParams & { segments: ICalculatedTravelSegment[] }): Promise<void> => {
+}: IRebuildTravelParams & { segments: ICalculatedTravelSegment[] }): Promise<string> => {
   for (let index = 0; index < employeeIds.length; index += BATCH_SIZE) {
     const batch = employeeIds.slice(index, index + BATCH_SIZE);
     const { error } = await supabase
@@ -411,22 +559,25 @@ const syncSegmentsToDatabase = async ({
     if (error) throw formatTravelFeatureError(error);
   }
 
-  if (segments.length === 0) return;
+  const syncedAt = new Date().toISOString();
+  if (segments.length === 0) return syncedAt;
 
-  const nowIso = new Date().toISOString();
   for (let index = 0; index < segments.length; index += BATCH_SIZE) {
     const batch = segments.slice(index, index + BATCH_SIZE).map(segment => ({
       ...segment,
-      created_at: nowIso,
-      updated_at: nowIso,
+      updated_at: syncedAt,
     }));
 
     const { error } = await supabase
       .from('skud_travel_segments')
-      .insert(batch);
+      .upsert(batch, {
+        onConflict: 'employee_id,work_date,exit_time,entry_time,from_access_point_name,to_access_point_name',
+      });
 
     if (error) throw formatTravelFeatureError(error);
   }
+
+  return syncedAt;
 };
 
 const summarizeSegmentsByDay = (segments: ICalculatedTravelSegment[]): Map<string, ITravelDaySummary> => {
@@ -458,9 +609,10 @@ export const calculateAndSyncTravelSegments = async ({
 }: IRebuildTravelParams): Promise<{
   segments: ICalculatedTravelSegment[];
   summaryByDay: Map<string, ITravelDaySummary>;
+  syncedAt: string;
 }> => {
   if (employeeIds.length === 0) {
-    return { segments: [], summaryByDay: new Map() };
+    return { segments: [], summaryByDay: new Map(), syncedAt: new Date().toISOString() };
   }
 
   const [internalPoints, mappings, routes, events] = await Promise.all([
@@ -488,11 +640,12 @@ export const calculateAndSyncTravelSegments = async ({
     routeMap,
   });
 
-  await syncSegmentsToDatabase({ employeeIds, startDate, endDate, segments });
+  const syncedAt = await syncSegmentsToDatabase({ employeeIds, startDate, endDate, segments });
 
   return {
     segments,
     summaryByDay: summarizeSegmentsByDay(segments),
+    syncedAt,
   };
 };
 
@@ -530,6 +683,7 @@ export const createTravelObject = async (name: string): Promise<ITravelObject> =
   if (error) throw formatTravelFeatureError(error);
 
   const object = data as ITravelObjectRow;
+  invalidateTravelSegmentsCache();
   return {
     ...object,
     access_points: [],
@@ -590,6 +744,7 @@ export const updateTravelObject = async ({
   const objects = await listTravelObjects();
   const updated = objects.find(object => object.id === objectId);
   if (!updated) throw new Error('Объект не найден после сохранения');
+  invalidateTravelSegmentsCache();
   return updated;
 };
 
@@ -600,6 +755,7 @@ export const deleteTravelObject = async (objectId: string): Promise<void> => {
     .eq('id', objectId);
 
   if (error) throw formatTravelFeatureError(error);
+  invalidateTravelSegmentsCache();
 };
 
 export const listTravelRoutes = async (): Promise<ITravelRoute[]> => {
@@ -652,6 +808,7 @@ export const createTravelRoute = async ({
   const [objects] = await Promise.all([fetchTravelObjectsRaw()]);
   const objectNameById = new Map<string, string>(objects.map(object => [object.id, object.name]));
   const multiplier = route.credit_multiplier ?? DEFAULT_CREDIT_MULTIPLIER;
+  invalidateTravelSegmentsCache();
 
   return {
     ...route,
@@ -689,6 +846,7 @@ export const updateTravelRoute = async ({
   const routes = await listTravelRoutes();
   const updated = routes.find(route => route.id === routeId);
   if (!updated) throw new Error('Маршрут не найден после сохранения');
+  invalidateTravelSegmentsCache();
   return updated;
 };
 
@@ -699,6 +857,7 @@ export const deleteTravelRoute = async (routeId: string): Promise<void> => {
     .eq('id', routeId);
 
   if (error) throw formatTravelFeatureError(error);
+  invalidateTravelSegmentsCache();
 };
 
 const getScopedEmployees = async ({
@@ -724,6 +883,7 @@ export const rebuildTravelSegmentsForScope = async ({
     startDate,
     endDate,
   });
+  invalidateTravelSegmentsCache();
 
   return {
     segmentCount: segments.length,
@@ -737,79 +897,82 @@ export const listTravelSegments = async ({
   employeeId,
   status,
 }: ITravelScopeParams & { status?: TravelSegmentStatus | 'problem' }): Promise<ITravelSegmentListItem[]> => {
-  const employees = await getScopedEmployees({ month, departmentId, employeeId });
-  const employeeIds = employees.map(employee => employee.id);
-  const employeeMap = new Map<number, ITravelEmployeeRow>(employees.map(employee => [employee.id, employee]));
-  const departmentMap = await fetchDepartmentsMap(
-    employees.map(employee => employee.org_department_id).filter((value): value is string => !!value),
-  );
-  const { startDate, endDate } = toMonthRange(month);
-
-  await calculateAndSyncTravelSegments({
-    employeeIds,
-    startDate,
-    endDate,
-  });
-
-  if (employeeIds.length === 0) return [];
-
-  let query = supabase
-    .from('skud_travel_segments')
-    .select('id, employee_id, work_date, from_object_id, to_object_id, from_access_point_name, to_access_point_name, exit_time, entry_time, actual_minutes, norm_minutes, max_credit_minutes, credited_minutes, delay_minutes, status, created_at, updated_at')
-    .in('employee_id', employeeIds)
-    .gte('work_date', startDate)
-    .lte('work_date', endDate)
-    .order('work_date', { ascending: false })
-    .order('exit_time', { ascending: true });
-
-  if (status && status !== 'problem') {
-    query = query.eq('status', status);
+  const cacheKey = buildTravelSegmentsCacheKey({ month, departmentId, employeeId, status });
+  const cached = travelSegmentsCache.get(cacheKey);
+  if (cached) {
+    return cached.data;
   }
 
-  const { data, error } = await query;
-  if (error) throw formatTravelFeatureError(error);
+  const inFlight = travelSegmentsInFlight.get(cacheKey);
+  if (inFlight) {
+    return inFlight;
+  }
 
-  const rows = (data || []) as ITravelSegmentRow[];
-  const filteredRows = status === 'problem'
-    ? rows.filter(row => row.status !== 'auto_approved')
-    : rows;
+  const loadPromise = (async () => {
+    const employees = await getScopedEmployees({ month, departmentId, employeeId });
+    const employeeIds = employees.map(employee => employee.id);
+    const employeeMap = new Map<number, ITravelEmployeeRow>(employees.map(employee => [employee.id, employee]));
+    const departmentMap = await fetchDepartmentsMap(
+      employees.map(employee => employee.org_department_id).filter((value): value is string => !!value),
+    );
+    const { startDate, endDate } = toMonthRange(month);
 
-  const objectIds = [...new Set(
-    filteredRows.flatMap(row => [row.from_object_id, row.to_object_id]).filter((value): value is string => !!value),
-  )];
-  const objects = objectIds.length > 0
-    ? await fetchTravelObjectsRaw()
-    : [];
-  const objectNameById = new Map<string, string>(objects.map(object => [object.id, object.name]));
+    if (employeeIds.length === 0) return [];
 
-  return filteredRows.map(row => {
-    const employee = employeeMap.get(row.employee_id);
-    const departmentIdValue = employee?.org_department_id || null;
-    return {
-      id: row.id,
-      employee_id: row.employee_id,
-      employee_name: employee?.full_name || `#${row.employee_id}`,
-      department_id: departmentIdValue,
-      department_name: departmentIdValue ? departmentMap.get(departmentIdValue) || null : null,
-      work_date: row.work_date,
-      from_object_id: row.from_object_id,
-      from_object_name: row.from_object_id ? objectNameById.get(row.from_object_id) || null : null,
-      to_object_id: row.to_object_id,
-      to_object_name: row.to_object_id ? objectNameById.get(row.to_object_id) || null : null,
-      from_access_point_name: row.from_access_point_name,
-      to_access_point_name: row.to_access_point_name,
-      exit_time: row.exit_time,
-      entry_time: row.entry_time,
-      actual_minutes: row.actual_minutes,
-      norm_minutes: row.norm_minutes,
-      max_credit_minutes: row.max_credit_minutes,
-      credited_minutes: row.credited_minutes,
-      delay_minutes: row.delay_minutes,
-      status: row.status,
-      created_at: row.created_at,
-      updated_at: row.updated_at,
-    };
-  });
+    const segments = await fetchStoredTravelSegments({
+      employeeIds,
+      startDate,
+      endDate,
+      status,
+    });
+
+    const objectIds = [...new Set(
+      segments.flatMap(segment => [segment.from_object_id, segment.to_object_id]).filter((value): value is string => !!value),
+    )];
+    const objects = objectIds.length > 0
+      ? await fetchTravelObjectsRaw()
+      : [];
+    const objectNameById = new Map<string, string>(objects.map(object => [object.id, object.name]));
+
+    return segments.map(segment => {
+      const employee = employeeMap.get(segment.employee_id);
+      const departmentIdValue = employee?.org_department_id || null;
+      return {
+        id: segment.id || segmentKey(segment),
+        employee_id: segment.employee_id,
+        employee_name: employee?.full_name || `#${segment.employee_id}`,
+        department_id: departmentIdValue,
+        department_name: departmentIdValue ? departmentMap.get(departmentIdValue) || null : null,
+        work_date: segment.work_date,
+        from_object_id: segment.from_object_id,
+        from_object_name: segment.from_object_id ? objectNameById.get(segment.from_object_id) || null : null,
+        to_object_id: segment.to_object_id,
+        to_object_name: segment.to_object_id ? objectNameById.get(segment.to_object_id) || null : null,
+        from_access_point_name: segment.from_access_point_name,
+        to_access_point_name: segment.to_access_point_name,
+        exit_time: segment.exit_time,
+        entry_time: segment.entry_time,
+        actual_minutes: segment.actual_minutes,
+        norm_minutes: segment.norm_minutes,
+        max_credit_minutes: segment.max_credit_minutes,
+        credited_minutes: segment.credited_minutes,
+        delay_minutes: segment.delay_minutes,
+        status: segment.status,
+        created_at: segment.created_at,
+        updated_at: segment.updated_at,
+      };
+    });
+  })();
+
+  travelSegmentsInFlight.set(cacheKey, loadPromise);
+
+  try {
+    const data = await loadPromise;
+    travelSegmentsCache.set(cacheKey, { data });
+    return data;
+  } finally {
+    travelSegmentsInFlight.delete(cacheKey);
+  }
 };
 
 export const getTravelHoursSummaryForRange = async ({

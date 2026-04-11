@@ -2,6 +2,7 @@ import { useState } from 'react';
 import type { FC } from 'react';
 import { adminService } from '../../services/adminService';
 import { useToast } from '../../contexts/ToastContext';
+import { useAuth } from '../../contexts/AuthContext';
 import type { EmployeePositionType } from '../../types';
 import styles from '../../pages/super-admin/SuperAdmin.module.css';
 
@@ -19,7 +20,7 @@ interface IApprovalModal {
   visible: boolean;
   userId: string;
   userName: string;
-  positionType: EmployeePositionType;
+  positionType: EmployeePositionType | '';
   employeeId: number | null;
   employeeSearch: string;
   employeeResults: { id: number; full_name: string; org_department_id: string | null }[];
@@ -33,14 +34,19 @@ interface IPendingUsersTabProps {
 
 export const PendingUsersTab: FC<IPendingUsersTabProps> = ({ pendingUsers, onReload }) => {
   const toast = useToast();
+  const { roles } = useAuth();
   const [approvalModal, setApprovalModal] = useState<IApprovalModal | null>(null);
+
+  const availableRoles = roles
+    .filter(role => role.is_active)
+    .sort((a, b) => a.level - b.level || a.name.localeCompare(b.name, 'ru'));
 
   const openApprovalModal = (user: IPendingUser) => {
     setApprovalModal({
       visible: true,
       userId: user.id,
       userName: user.full_name || user.email || '',
-      positionType: user.position_type || 'worker',
+      positionType: '',
       employeeId: null,
       employeeSearch: '',
       employeeResults: [],
@@ -67,6 +73,10 @@ export const PendingUsersTab: FC<IPendingUsersTabProps> = ({ pendingUsers, onRel
 
   const handleApproveConfirm = async () => {
     if (!approvalModal) return;
+    if (!approvalModal.positionType) {
+      toast.error('Выберите роль перед одобрением');
+      return;
+    }
 
     try {
       await adminService.approveUser(approvalModal.userId, {
@@ -163,9 +173,12 @@ export const PendingUsersTab: FC<IPendingUsersTabProps> = ({ pendingUsers, onRel
                   value={approvalModal.positionType}
                   onChange={(e) => setApprovalModal(prev => prev ? { ...prev, positionType: e.target.value as EmployeePositionType } : null)}
                 >
-                  <option value="worker">Сотрудник</option>
-                  <option value="header">Руководитель</option>
-                  <option value="admin">Администратор</option>
+                  <option value="">Выберите роль</option>
+                  {availableRoles.map(role => (
+                    <option key={role.code} value={role.code}>
+                      {role.name}
+                    </option>
+                  ))}
                 </select>
               </div>
 
@@ -206,7 +219,11 @@ export const PendingUsersTab: FC<IPendingUsersTabProps> = ({ pendingUsers, onRel
               </div>
 
               <div className={styles.controlActions}>
-                <button className={styles.approveBtn} onClick={handleApproveConfirm}>
+                <button
+                  className={styles.approveBtn}
+                  onClick={handleApproveConfirm}
+                  disabled={!approvalModal.positionType}
+                >
                   Одобрить
                 </button>
                 <button className={styles.cancelBtn} onClick={() => setApprovalModal(null)}>

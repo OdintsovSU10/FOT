@@ -2,12 +2,12 @@ import { Response } from 'express';
 import { z } from 'zod';
 import { supabase } from '../config/database.js';
 import { auditService } from '../services/audit.service.js';
-import type { AuthenticatedRequest, UserProfile } from '../types/index.js';
+import type { AuthenticatedRequest, ChatInboundMode, UserProfile } from '../types/index.js';
 import { logSupabaseError } from './admin-helpers.js';
 import { getRoleByCode } from '../services/roles-cache.service.js';
 
 const approveUserSchema = z.object({
-  position_type: z.string().optional(),
+  position_type: z.string().min(1),
   employee_id: z.number().int().positive().optional(),
 });
 
@@ -103,6 +103,7 @@ export const adminUsersController = {
           imported_position: u.imported_position,
           employee_id: u.employee_id,
           supervisor_id: u.supervisor_id,
+          chat_inbound_mode: (u.chat_inbound_mode || 'open') as ChatInboundMode,
           is_approved: u.is_approved,
           two_factor_enabled: u.two_factor_enabled,
           approved_at: u.approved_at,
@@ -174,6 +175,11 @@ export const adminUsersController = {
     try {
       const { id } = req.params;
       const { position_type, employee_id } = approveUserSchema.parse(req.body);
+      const role = await getRoleByCode(position_type);
+      if (!role || !role.is_active) {
+        res.status(400).json({ success: false, error: 'Выбрана несуществующая или неактивная роль' });
+        return;
+      }
 
       const { data: profile, error: fetchError } = await supabase
         .from('user_profiles')
@@ -192,9 +198,7 @@ export const adminUsersController = {
         approved_at: new Date().toISOString(),
       };
 
-      if (position_type) {
-        updateData.position_type = position_type;
-      }
+      updateData.position_type = position_type;
       if (employee_id) {
         updateData.employee_id = employee_id;
       }
@@ -449,6 +453,41 @@ export const adminUsersController = {
       }
       console.error('Update employee error:', error);
       res.status(500).json({ success: false, error: 'Failed to update employee link' });
+    }
+  },
+
+  async updateUserChatInboundMode(req: AuthenticatedRequest, res: Response): Promise<void> {
+    try {
+      const { id } = req.params;
+      const { chat_inbound_mode } = z.object({
+        chat_inbound_mode: z.enum(['open', 'requests_only', 'disabled']),
+      }).parse(req.body);
+
+      const { error } = await supabase
+        .from('user_profiles')
+        .update({ chat_inbound_mode })
+        .eq('id', id);
+
+      if (error) {
+        console.error('Update chat inbound mode error:', error);
+        res.status(500).json({ success: false, error: 'Failed to update chat inbound mode' });
+        return;
+      }
+
+      await auditService.logFromRequest(req, req.user.id, 'CHAT_INBOUND_MODE_CHANGED', {
+        entityType: 'user',
+        entityId: id,
+        details: { chat_inbound_mode },
+      });
+
+      res.json({ success: true, message: 'Chat inbound mode updated successfully' });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        res.status(400).json({ success: false, error: error.errors[0].message });
+        return;
+      }
+      console.error('Update chat inbound mode error:', error);
+      res.status(500).json({ success: false, error: 'Failed to update chat inbound mode' });
     }
   },
 

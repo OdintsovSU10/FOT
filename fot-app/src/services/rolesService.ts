@@ -19,11 +19,27 @@ export interface RolePageAccessEntry {
   can_edit: boolean;
 }
 
+export interface PermissionOption {
+  code: string;
+  label: string;
+  description: string;
+}
+
+export interface PermissionGroup {
+  code: string;
+  label: string;
+  description: string;
+  options: PermissionOption[];
+  requiredWithPages?: string[];
+  exclusive: boolean;
+}
+
 export interface CreateRoleData {
   code: string;
   name: string;
   description?: string | null;
   level: number;
+  permissions?: string[];
 }
 
 export interface UpdateRoleData {
@@ -31,6 +47,7 @@ export interface UpdateRoleData {
   description?: string | null;
   level: number;
   is_active?: boolean;
+  permissions?: string[];
 }
 
 export const rolesService = {
@@ -64,6 +81,11 @@ export const rolesService = {
 
   async getAvailablePages(): Promise<AvailablePage[]> {
     const res = await apiClient.get<ApiResponse<AvailablePage[]>>('/roles/available-pages');
+    return res.data ?? [];
+  },
+
+  async getPermissionCatalog(): Promise<PermissionGroup[]> {
+    const res = await apiClient.get<ApiResponse<PermissionGroup[]>>('/roles/permission-catalog');
     return res.data ?? [];
   },
 };

@@ -60,8 +60,9 @@ export const skudService = {
     return response.data;
   },
 
-  async getAccessPoints(): Promise<string[]> {
-    const response = await apiClient.get<ApiResponse<string[]>>('/skud/access-points');
+  async getAccessPoints(connection?: 'internal' | 'external'): Promise<string[]> {
+    const params = connection ? `?connection=${connection}` : '';
+    const response = await apiClient.get<ApiResponse<string[]>>(`/skud/access-points${params}`);
     return response.data || [];
   },
 
@@ -127,9 +128,10 @@ export const skudService = {
     });
   },
 
-  async syncAccessPoints(): Promise<{ accessPoints: string[]; removed: string[]; settingsRemoved: number }> {
+  async syncAccessPoints(connection?: 'internal' | 'external'): Promise<{ accessPoints: string[]; removed: string[]; settingsRemoved: number }> {
+    const params = connection ? `?connection=${connection}` : '';
     const response = await apiClient.post<ApiResponse<{ accessPoints: string[]; removed: string[]; settingsRemoved: number }>>(
-      '/skud/sync-access-points'
+      `/skud/sync-access-points${params}`
     );
     return response.data;
   },

@@ -51,8 +51,8 @@ const LiveClock = memo(() => {
 });
 
 export const DashboardPage: React.FC = () => {
-  const { positionType, profile } = useAuth();
-  const isHeaderOnly = positionType === 'header';
+  const { hasPermission, profile } = useAuth();
+  const isDepartmentScope = hasPermission('data.scope.department') && !hasPermission('data.scope.all');
 
   const today = new Date().toLocaleDateString('ru-RU', {
     weekday: 'long',
@@ -71,10 +71,10 @@ export const DashboardPage: React.FC = () => {
 
   // Для header: сразу ставим отдел в URL без ожидания загрузки структуры
   useEffect(() => {
-    if (isHeaderOnly && profile?.department_id && !searchParams.get('dept')) {
+    if (isDepartmentScope && profile?.department_id && !searchParams.get('dept')) {
       setSearchParams({ dept: profile.department_id }, { replace: true });
     }
-  }, [isHeaderOnly, profile?.department_id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isDepartmentScope, profile?.department_id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     apiClient.get<{ success: boolean; data: { departments: IDbDepartment[] } }>('/structure')
@@ -168,7 +168,7 @@ export const DashboardPage: React.FC = () => {
     deptInputRef.current?.blur();
   };
 
-  const deptSelector = isHeaderOnly ? (
+  const deptSelector = isDepartmentScope ? (
     <div className="dash-dept-dropdown">
       <div className="dash-dept-trigger has-value" style={{ cursor: 'default' }}>
         <Building2 size={14} className="dash-dept-search-icon" />

@@ -1,21 +1,16 @@
 import type { Response } from 'express';
 import { supabase } from '../config/database.js';
 import type { AuthenticatedRequest } from '../types/index.js';
+import { resolveRequestDataScope, resolveScopedDepartmentId } from '../services/data-scope.service.js';
 
 /** Header подтверждает табель отдела за месяц */
 const submit = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
     const { department_id, period } = req.body;
-    const deptId = department_id || req.user.department_id;
+    const deptId = await resolveScopedDepartmentId(req, department_id || null);
 
     if (!deptId || !period) {
       res.status(400).json({ success: false, error: 'department_id и period обязательны' });
-      return;
-    }
-
-    // header может подтвердить только свой отдел
-    if (req.user.position_type === 'header' && deptId !== req.user.department_id) {
-      res.status(403).json({ success: false, error: 'Можно подтвердить только свой отдел' });
       return;
     }
 
@@ -43,7 +38,10 @@ const submit = async (req: AuthenticatedRequest, res: Response): Promise<void> =
 /** Статус согласования по отделу и периоду */
 const getStatus = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
-    const department_id = (req.query.department_id as string) || req.user.department_id;
+    const department_id = await resolveScopedDepartmentId(
+      req,
+      typeof req.query.department_id === 'string' ? req.query.department_id : null,
+    );
     const period = req.query.period as string;
 
     if (!department_id || !period) {
@@ -84,6 +82,11 @@ const approve = async (req: AuthenticatedRequest, res: Response): Promise<void> 
 
     if (approval.status !== 'submitted') {
       res.status(400).json({ success: false, error: 'Табель не находится на проверке' });
+      return;
+    }
+    const scopedDepartmentId = await resolveScopedDepartmentId(req, approval.department_id);
+    if (!scopedDepartmentId || scopedDepartmentId !== approval.department_id) {
+      res.status(403).json({ success: false, error: 'Нет доступа к табелю этого отдела' });
       return;
     }
 
@@ -129,6 +132,11 @@ const reject = async (req: AuthenticatedRequest, res: Response): Promise<void> =
       res.status(400).json({ success: false, error: 'Табель не находится на проверке' });
       return;
     }
+    const scopedDepartmentId = await resolveScopedDepartmentId(req, approval.department_id);
+    if (!scopedDepartmentId || scopedDepartmentId !== approval.department_id) {
+      res.status(403).json({ success: false, error: 'Нет доступа к табелю этого отдела' });
+      return;
+    }
 
     const { data, error } = await supabase
       .from('timesheet_approvals')
@@ -154,11 +162,21 @@ const reject = async (req: AuthenticatedRequest, res: Response): Promise<void> =
 /** HR: все неутверждённые табели */
 const getPending = async (_req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
-    const { data, error } = await supabase
+    const scope = await resolveRequestDataScope(_req);
+    let query = supabase
       .from('timesheet_approvals')
       .select('*')
       .eq('status', 'submitted')
       .order('submitted_at', { ascending: false });
+
+    if (scope === 'department' && _req.user.department_id) {
+      query = query.eq('department_id', _req.user.department_id);
+    } else if (scope === 'self') {
+      res.json({ success: true, data: [] });
+      return;
+    }
+
+    const { data, error } = await query;
     if (error) throw error;
     res.json({ success: true, data: data || [] });
   } catch (err) {
@@ -171,12 +189,20 @@ const getPending = async (_req: AuthenticatedRequest, res: Response): Promise<vo
 const getByStatus = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
     const status = req.query.status as string | undefined;
+    const scope = await resolveRequestDataScope(req);
     let query = supabase
       .from('timesheet_approvals')
       .select('*');
 
     if (status) {
       query = query.eq('status', status);
+    }
+
+    if (scope === 'department' && req.user.department_id) {
+      query = query.eq('department_id', req.user.department_id);
+    } else if (scope === 'self') {
+      res.json({ success: true, data: [] });
+      return;
     }
 
     query = query.order('updated_at', { ascending: false });
