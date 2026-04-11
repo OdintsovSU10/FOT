@@ -3,7 +3,7 @@ import ExcelJS from 'exceljs';
 import archiver from 'archiver';
 import type { AuthenticatedRequest } from '../types/index.js';
 import { fetchTimesheetDataForDepartment } from '../services/timesheet-export.service.js';
-import { buildTimesheetSheet, sanitizeSheetName, NORMAL_RULES, BRIGADE_RULES } from '../services/timesheet-excel.service.js';
+import { buildTimesheetSheet, sanitizeSheetName } from '../services/timesheet-excel.service.js';
 
 const MONTH_NAMES = ['', 'Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь',
   'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
@@ -45,9 +45,8 @@ export async function exportTimesheetMass(req: AuthenticatedRequest, res: Respon
       );
 
       for (const data of results) {
-        const rules = data.isBrigade ? BRIGADE_RULES : NORMAL_RULES;
         const wb = new ExcelJS.Workbook();
-        buildTimesheetSheet(wb, sanitizeSheetName(data.departmentName), data, rules);
+        buildTimesheetSheet(wb, sanitizeSheetName(data.departmentName), data);
 
         const buf = await wb.xlsx.writeBuffer();
 

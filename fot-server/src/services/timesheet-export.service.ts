@@ -16,6 +16,7 @@ export interface IExportEmployee {
   full_name: string;
   position_id: string | null;
   org_department_id: string | null;
+  sigur_employee_id: number | null;
 }
 
 export interface IDepartmentTimesheetData {
@@ -25,6 +26,7 @@ export interface IDepartmentTimesheetData {
   employees: IExportEmployee[];
   schedulesMap: Map<number, IResolvedSchedule>;
   dataMap: Map<number, Map<string, { status: string; hours: number; corrected?: boolean }>>;
+  skudMap: Map<number, Map<string, { hours: number; corrected: boolean }>>;
   posMap: Map<string, string>;
   year: number;
   mon: number;
@@ -74,7 +76,7 @@ export async function fetchTimesheetDataForDepartment(
   // Сотрудники
   let empQuery = supabase
     .from('employees')
-    .select('id, full_name, position_id, org_department_id')
+    .select('id, full_name, position_id, org_department_id, sigur_employee_id')
     .eq('employment_status', 'active')
     .eq('is_archived', false)
     .order('full_name');
@@ -89,6 +91,7 @@ export async function fetchTimesheetDataForDepartment(
     full_name: e.full_name as string,
     position_id: (e.position_id as string | null),
     org_department_id: (e.org_department_id as string | null),
+    sigur_employee_id: (e.sigur_employee_id as number | null),
   }));
   const employeeIds = empArr.map(e => e.id);
 
@@ -159,6 +162,8 @@ export async function fetchTimesheetDataForDepartment(
 
   // dataMap: employee_id -> date -> { status, hours, corrected? }
   const dataMap = new Map<number, Map<string, { status: string; hours: number; corrected?: boolean }>>();
+  // skudMap: raw SKUD hours per employee per day (for "СКУД" row in export)
+  const skudMap = new Map<number, Map<string, { hours: number; corrected: boolean }>>();
 
   // SKUD events
   for (const [, events] of eventsByKey) {
@@ -177,6 +182,12 @@ export async function fetchTimesheetDataForDepartment(
       status: isPresent ? 'work' : 'absent',
       hours: isPresent ? totalHours : 0,
     });
+
+    // Populate skudMap with raw SKUD hours
+    if (isPresent) {
+      if (!skudMap.has(empId)) skudMap.set(empId, new Map());
+      skudMap.get(empId)!.set(date, { hours: totalHours, corrected: false });
+    }
   }
 
   // Manual corrections override SKUD
@@ -195,6 +206,13 @@ export async function fetchTimesheetDataForDepartment(
   for (const m of manualEntries) {
     const empId = m.employee_id as number;
     const date = m.work_date as string;
+
+    // Mark SKUD entry as corrected if it exists
+    const empSkud = skudMap.get(empId);
+    if (empSkud?.has(date)) {
+      empSkud.get(date)!.corrected = true;
+    }
+
     if (!dataMap.has(empId)) dataMap.set(empId, new Map());
     dataMap.get(empId)!.set(date, {
       status: m.status as string,
@@ -240,6 +258,7 @@ export async function fetchTimesheetDataForDepartment(
     employees: empArr,
     schedulesMap,
     dataMap,
+    skudMap,
     posMap,
     year,
     mon,
