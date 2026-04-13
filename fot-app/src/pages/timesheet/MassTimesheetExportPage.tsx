@@ -4,6 +4,7 @@ import { useStructureTree } from '../../hooks/useStructure';
 import { timesheetService } from '../../services/timesheetService';
 import { getMonthLabel } from '../../utils/calendarUtils';
 import type { OrgDepartmentNode } from '../../types';
+import { filterDepartmentTree, sortDepartmentTree } from '../../utils/departmentUtils';
 import './MassTimesheetExportPage.css';
 
 const collectAllIds = (nodes: OrgDepartmentNode[]): string[] => {
@@ -15,21 +16,6 @@ const collectAllIds = (nodes: OrgDepartmentNode[]): string[] => {
   return ids;
 };
 const EMPTY_DEPARTMENTS: OrgDepartmentNode[] = [];
-
-const matchesSearch = (node: OrgDepartmentNode, query: string): boolean => {
-  if (node.name.toLowerCase().includes(query)) return true;
-  return (node.children || []).some(c => matchesSearch(c, query));
-};
-
-const filterTree = (nodes: OrgDepartmentNode[], query: string): OrgDepartmentNode[] => {
-  if (!query) return nodes;
-  return nodes
-    .filter(n => matchesSearch(n, query))
-    .map(n => ({
-      ...n,
-      children: filterTree(n.children || [], query),
-    }));
-};
 
 interface IDeptTreeNodeProps {
   node: OrgDepartmentNode;
@@ -53,7 +39,7 @@ const DeptTreeNode: FC<IDeptTreeNodeProps> = ({ node, checkedIds, onToggle, expa
 
   return (
     <div className="mte-tree-node">
-      <div className="mte-tree-row">
+      <div className={`mte-tree-row ${isChecked ? 'mte-tree-row--checked' : ''}`}>
         {hasChildren ? (
           <button className="mte-tree-expand" onClick={() => onToggleExpand(node.id)}>
             {isExpanded ? <ChevronDown size={14} /> : <ChevronR size={14} />}
@@ -99,10 +85,14 @@ export const MassTimesheetExportPage: FC = () => {
 
   const { data: structure, isLoading } = useStructureTree();
   const departments = structure?.departments ?? EMPTY_DEPARTMENTS;
+  const sortedDepartments = useMemo(
+    () => sortDepartmentTree(departments),
+    [departments],
+  );
 
   const filteredDepts = useMemo(
-    () => filterTree(departments, searchQuery.toLowerCase().trim()),
-    [departments, searchQuery]
+    () => filterDepartmentTree(sortedDepartments, searchQuery.toLowerCase().trim()),
+    [sortedDepartments, searchQuery]
   );
 
   const filteredIds = useMemo(() => collectAllIds(filteredDepts), [filteredDepts]);
@@ -181,7 +171,7 @@ export const MassTimesheetExportPage: FC = () => {
   return (
     <div className="mte-page">
       <div className="mte-header">
-        <h1 className="mte-title">Массовый экспорт табелей</h1>
+        <h2 className="mte-title">Массовый экспорт</h2>
         <div className="mte-month-nav">
           <button className="mte-month-btn" onClick={prevMonth}>
             <ChevronLeft size={16} />
@@ -208,7 +198,7 @@ export const MassTimesheetExportPage: FC = () => {
             <button className="mte-link-btn" onClick={selectAll}>Выбрать все</button>
             <button className="mte-link-btn" onClick={deselectAll}>Снять все</button>
             <span className="mte-selected-count">
-              Выбрано: {checkedIds.size}
+              Выбрано {checkedIds.size}
             </span>
           </div>
         </div>
