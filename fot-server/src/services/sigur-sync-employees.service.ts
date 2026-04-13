@@ -198,13 +198,24 @@ export async function syncEmployeesLogic(
   console.log(`[syncEmployees] employees to process: ${sigurEmployees.length}`);
 
   // Глобальный поиск по sigur_employee_id
-  const existingEmps: { id: number; sigur_employee_id: number; employment_status: string; department_locked: boolean; org_department_id: string | null; position_id: string | null }[] = [];
+  const existingEmps: {
+    id: number;
+    sigur_employee_id: number;
+    employment_status: string;
+    department_locked: boolean;
+    org_department_id: string | null;
+    position_id: string | null;
+    full_name: string | null;
+    last_name: string | null;
+    first_name: string | null;
+    middle_name: string | null;
+  }[] = [];
   const EMP_PAGE = 1000;
   let empOffset = 0;
   while (true) {
     const { data: existingEmpsPage } = await supabase
       .from('employees')
-      .select('id, sigur_employee_id, employment_status, department_locked, org_department_id, position_id')
+      .select('id, sigur_employee_id, employment_status, department_locked, org_department_id, position_id, full_name, last_name, first_name, middle_name')
       .not('sigur_employee_id', 'is', null)
       .range(empOffset, empOffset + EMP_PAGE - 1);
     if (!existingEmpsPage || existingEmpsPage.length === 0) break;
@@ -216,13 +227,27 @@ export async function syncEmployeesLogic(
   const sigurIdToDbId = new Map<number, number>();
   const firedSigurIds = new Set<number>();
   const lockedDeptSigurIds = new Set<number>();
-  const dbEmpById = new Map<number, { org_department_id: string | null; position_id: string | null }>();
+  const dbEmpById = new Map<number, {
+    org_department_id: string | null;
+    position_id: string | null;
+    full_name: string | null;
+    last_name: string | null;
+    first_name: string | null;
+    middle_name: string | null;
+  }>();
   for (const e of existingEmps || []) {
     if (e.sigur_employee_id != null) {
       if (!sigurIdToDbId.has(e.sigur_employee_id)) {
         sigurIdToDbId.set(e.sigur_employee_id, e.id);
       }
-      dbEmpById.set(e.id, { org_department_id: e.org_department_id, position_id: e.position_id });
+      dbEmpById.set(e.id, {
+        org_department_id: e.org_department_id,
+        position_id: e.position_id,
+        full_name: e.full_name,
+        last_name: e.last_name,
+        first_name: e.first_name,
+        middle_name: e.middle_name,
+      });
       if (e.employment_status === 'fired') firedSigurIds.add(e.sigur_employee_id);
       if (e.department_locked) lockedDeptSigurIds.add(e.sigur_employee_id);
     }
@@ -337,10 +362,27 @@ export async function syncEmployeesLogic(
     if (sigurEmpId && sigurIdToDbId.has(sigurEmpId)) {
       const dbId = sigurIdToDbId.get(sigurEmpId)!;
       const updateFields: Record<string, unknown> = {};
+      const prev = dbEmpById.get(dbId);
 
       // Не обновляем отдел если заблокирован вручную
       if (orgDepartmentId && !(sigurEmpId && lockedDeptSigurIds.has(sigurEmpId))) {
         updateFields.org_department_id = orgDepartmentId;
+      }
+      const normalizedFullName = fullName.trim();
+      const fio = parseFIO(normalizedFullName);
+      if (
+        prev
+        && (
+          (prev.full_name || '') !== normalizedFullName
+          || (prev.last_name || '') !== fio.lastName
+          || (prev.first_name || null) !== (fio.firstName || null)
+          || (prev.middle_name || null) !== (fio.middleName || null)
+        )
+      ) {
+        updateFields.full_name = normalizedFullName;
+        updateFields.last_name = fio.lastName;
+        updateFields.first_name = fio.firstName || null;
+        updateFields.middle_name = fio.middleName || null;
       }
       // Должности из Sigur не обновляем — приоритет у портала ФОТ
 
