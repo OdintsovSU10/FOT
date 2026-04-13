@@ -1,10 +1,12 @@
 import { supabase } from '../config/database.js';
 import { getInternalAccessPoints } from './skud-shared.service.js';
+import { settingsService } from './settings.service.js';
 import { createCache } from '../utils/cache.js';
 
 const DEFAULT_CREDIT_MULTIPLIER = 1.5;
 const BATCH_SIZE = 500;
 const TRAVEL_SEGMENTS_CACHE_TTL_MS = 60_000;
+const TRAVEL_LIMIT_REQUIRED_MESSAGE = 'Не задан единый лимит передвижения. Сохраните его в настройках СКУД.';
 
 export type TravelSegmentStatus = 'auto_approved' | 'delayed' | 'needs_object' | 'needs_route';
 
@@ -202,6 +204,18 @@ const formatTravelFeatureError = (error: unknown): Error => {
   return new Error('Ошибка работы с передвижениями');
 };
 
+const isMissingTravelLimitError = (error: unknown): boolean => (
+  error instanceof Error && error.message === TRAVEL_LIMIT_REQUIRED_MESSAGE
+);
+
+const loadConfiguredTravelLimitMinutes = async (): Promise<number> => {
+  const config = await settingsService.getSkudTravelConfig();
+  if (config.limitMinutes == null) {
+    throw new Error(TRAVEL_LIMIT_REQUIRED_MESSAGE);
+  }
+  return config.limitMinutes;
+};
+
 const toMonthRange = (month: string): { startDate: string; endDate: string } => {
   const [yearStr, monthStr] = month.split('-');
   const year = Number(yearStr);
@@ -219,7 +233,6 @@ const normalizeAccessPoint = (value: string | null | undefined): string | null =
   return normalized || null;
 };
 
-const routeKey = (fromObjectId: string, toObjectId: string): string => `${fromObjectId}__${toObjectId}`;
 const dayKey = (employeeId: number, workDate: string): string => `${employeeId}_${workDate}`;
 const segmentKey = ({
   employee_id,
@@ -457,12 +470,12 @@ const buildTravelSegments = ({
   events,
   internalPoints,
   accessPointToObjectId,
-  routeMap,
+  limitMinutes,
 }: {
   events: ITravelEventRow[];
   internalPoints: Set<string>;
   accessPointToObjectId: Map<string, string>;
-  routeMap: Map<string, ITravelRouteRow>;
+  limitMinutes: number;
 }): ICalculatedTravelSegment[] => {
   const grouped = new Map<string, ITravelEventRow[]>();
 
@@ -506,17 +519,11 @@ const buildTravelSegments = ({
       if (!fromObjectId || !toObjectId) {
         status = 'needs_object';
       } else {
-        const route = routeMap.get(routeKey(fromObjectId, toObjectId));
-        if (!route) {
-          status = 'needs_route';
-        } else {
-          normMinutes = route.travel_minutes;
-          const multiplier = route.credit_multiplier ?? DEFAULT_CREDIT_MULTIPLIER;
-          maxCreditMinutes = Math.ceil(route.travel_minutes * multiplier);
-          creditedMinutes = Math.min(actualMinutes, maxCreditMinutes);
-          delayMinutes = Math.max(actualMinutes - maxCreditMinutes, 0);
-          status = delayMinutes > 0 ? 'delayed' : 'auto_approved';
-        }
+        normMinutes = limitMinutes;
+        maxCreditMinutes = limitMinutes;
+        creditedMinutes = 0;
+        delayMinutes = Math.max(actualMinutes - limitMinutes, 0);
+        status = delayMinutes > 0 ? 'delayed' : 'auto_approved';
       }
 
       segments.push({
@@ -615,10 +622,11 @@ export const calculateAndSyncTravelSegments = async ({
     return { segments: [], summaryByDay: new Map(), syncedAt: new Date().toISOString() };
   }
 
-  const [internalPoints, mappings, routes, events] = await Promise.all([
+  const travelLimitMinutes = await loadConfiguredTravelLimitMinutes();
+
+  const [internalPoints, mappings, events] = await Promise.all([
     getInternalAccessPoints(),
     fetchTravelMappingsRaw(),
-    fetchTravelRoutesRaw(),
     fetchEventsForEmployees({ employeeIds, startDate, endDate }),
   ]);
 
@@ -628,16 +636,11 @@ export const calculateAndSyncTravelSegments = async ({
     if (normalized) accessPointToObjectId.set(normalized, row.object_id);
   }
 
-  const routeMap = new Map<string, ITravelRouteRow>();
-  for (const route of routes) {
-    routeMap.set(routeKey(route.from_object_id, route.to_object_id), route);
-  }
-
   const segments = buildTravelSegments({
     events,
     internalPoints,
     accessPointToObjectId,
-    routeMap,
+    limitMinutes: travelLimitMinutes,
   });
 
   const syncedAt = await syncSegmentsToDatabase({ employeeIds, startDate, endDate, segments });
@@ -781,6 +784,27 @@ export const listTravelRoutes = async (): Promise<ITravelRoute[]> => {
   });
 };
 
+export const getTravelConfig = async (): Promise<{ limit_minutes: number | null }> => {
+  const config = await settingsService.getSkudTravelConfig();
+  return {
+    limit_minutes: config.limitMinutes,
+  };
+};
+
+export const saveTravelConfig = async ({
+  limitMinutes,
+  userId,
+}: {
+  limitMinutes: number;
+  userId: string;
+}): Promise<{ limit_minutes: number | null }> => {
+  const config = await settingsService.setSkudTravelConfig({ limitMinutes }, userId);
+  invalidateTravelSegmentsCache();
+  return {
+    limit_minutes: config.limitMinutes,
+  };
+};
+
 export const createTravelRoute = async ({
   fromObjectId,
   toObjectId,
@@ -897,6 +921,8 @@ export const listTravelSegments = async ({
   employeeId,
   status,
 }: ITravelScopeParams & { status?: TravelSegmentStatus | 'problem' }): Promise<ITravelSegmentListItem[]> => {
+  await loadConfiguredTravelLimitMinutes();
+
   const cacheKey = buildTravelSegmentsCacheKey({ month, departmentId, employeeId, status });
   const cached = travelSegmentsCache.get(cacheKey);
   if (cached) {
@@ -986,6 +1012,10 @@ export const getTravelHoursSummaryForRange = async ({
   } catch (error) {
     if (isMissingTableError(error)) {
       console.warn('[travel] feature tables are missing, returning empty summary');
+      return new Map();
+    }
+    if (isMissingTravelLimitError(error)) {
+      console.warn('[travel] limit is not configured, returning empty summary');
       return new Map();
     }
     throw error;

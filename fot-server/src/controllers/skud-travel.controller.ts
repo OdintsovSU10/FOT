@@ -3,6 +3,7 @@ import { z } from 'zod';
 import type { AuthenticatedRequest } from '../types/index.js';
 import {
   createTravelObject,
+  getTravelConfig as getTravelConfigService,
   createTravelRoute,
   deleteTravelObject,
   deleteTravelRoute,
@@ -10,6 +11,7 @@ import {
   listTravelRoutes,
   listTravelSegments,
   rebuildTravelSegmentsForScope,
+  saveTravelConfig as saveTravelConfigService,
   updateTravelObject,
   updateTravelRoute,
 } from '../services/skud-travel.service.js';
@@ -32,6 +34,10 @@ const saveRouteSchema = z.object({
   travel_minutes: z.number().int().positive().max(1440),
 });
 
+const travelConfigSchema = z.object({
+  limit_minutes: z.number().int().positive().max(1440),
+});
+
 const segmentQuerySchema = z.object({
   month: z.string().regex(monthRegex),
   department_id: z.string().uuid().optional(),
@@ -40,6 +46,36 @@ const segmentQuerySchema = z.object({
 });
 
 export const skudTravelController = {
+  async getTravelConfig(_req: AuthenticatedRequest, res: Response): Promise<void> {
+    try {
+      const data = await getTravelConfigService();
+      res.json({ success: true, data });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Ошибка загрузки лимита передвижения';
+      console.error('getTravelConfig error:', error);
+      res.status(500).json({ success: false, error: message });
+    }
+  },
+
+  async updateTravelConfig(req: AuthenticatedRequest, res: Response): Promise<void> {
+    try {
+      const parsed = travelConfigSchema.parse(req.body);
+      const data = await saveTravelConfigService({
+        limitMinutes: parsed.limit_minutes,
+        userId: req.user.id,
+      });
+      res.json({ success: true, data });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        res.status(400).json({ success: false, error: 'Некорректный лимит передвижения', details: error.errors });
+        return;
+      }
+      const message = error instanceof Error ? error.message : 'Ошибка сохранения лимита передвижения';
+      console.error('updateTravelConfig error:', error);
+      res.status(500).json({ success: false, error: message });
+    }
+  },
+
   async getTravelObjects(_req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
       const data = await listTravelObjects();

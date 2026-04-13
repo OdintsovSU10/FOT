@@ -275,6 +275,18 @@ export const TimesheetSidePanel: FC<ISidePanelProps> = ({
     return '—';
   };
 
+  const getTravelIssueLabel = (entry: TimesheetEntry): string => {
+    const parts: string[] = [];
+    if ((entry.travel_delay_minutes || 0) > 0) {
+      parts.push(`превышение лимита ${formatTravelMinutes(entry.travel_delay_minutes || 0)}`);
+    }
+    if ((entry.travel_problematic_segments || 0) > 0) {
+      const count = entry.travel_problematic_segments || 0;
+      parts.push(count === 1 ? 'не определён объект' : `не определён объект (${count})`);
+    }
+    return parts.join(' • ');
+  };
+
   if (!employee) return null;
 
   return (
@@ -365,17 +377,11 @@ export const TimesheetSidePanel: FC<ISidePanelProps> = ({
                         {getHoursLabel(entry)}
                       </div>
                       {entry && (
-                        ((entry.travel_minutes_credited || 0) > 0
-                          || (entry.travel_delay_minutes || 0) > 0
+                        ((entry.travel_delay_minutes || 0) > 0
                           || (entry.travel_problematic_segments || 0) > 0)
                       ) && (
                         <div className="ts-day-detail-travel">
-                          {(entry.travel_minutes_credited || 0) > 0
-                            ? `дорога +${formatTravelMinutes(entry.travel_minutes_credited || 0)}`
-                            : 'дорога не зачтена'}
-                          {(entry.travel_delay_minutes || 0) > 0
-                            ? ` • задержка ${formatTravelMinutes(entry.travel_delay_minutes || 0)}`
-                            : ''}
+                          {getTravelIssueLabel(entry)}
                         </div>
                       )}
                     </div>

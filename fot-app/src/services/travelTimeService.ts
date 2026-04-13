@@ -1,5 +1,5 @@
 import { apiClient } from '../api/client';
-import type { ITravelObject, ITravelRoute, ITravelSegment, TravelSegmentStatus } from '../types';
+import type { ITravelConfig, ITravelObject, ITravelRoute, ITravelSegment, TravelSegmentStatus } from '../types';
 
 interface ApiResponse<T> {
   data?: T;
@@ -36,6 +36,18 @@ const invalidateTravelSegmentsCache = (): void => {
 };
 
 export const travelTimeService = {
+  async getConfig(): Promise<ITravelConfig> {
+    const res = await apiClient.get<ApiResponse<ITravelConfig>>('/skud/travel-config');
+    return res.data || { limit_minutes: null };
+  },
+
+  async saveConfig(data: { limit_minutes: number }): Promise<ITravelConfig> {
+    const res = await apiClient.put<ApiResponse<ITravelConfig>>('/skud/travel-config', data);
+    if (!res.data) throw new Error(res.error || 'Ошибка сохранения лимита передвижения');
+    invalidateTravelSegmentsCache();
+    return res.data;
+  },
+
   async getObjects(): Promise<ITravelObject[]> {
     const res = await apiClient.get<ApiResponse<ITravelObject[]>>('/skud/travel-objects');
     return res.data || [];

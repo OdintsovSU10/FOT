@@ -17,8 +17,8 @@ const SyncFilterTab = lazy(() => import('../../components/skud/SyncFilterTab').t
 const TravelObjectsTab = lazy(() => import('../../components/skud/TravelObjectsTab').then(module => ({
   default: module.TravelObjectsTab,
 })));
-const TravelRoutesTab = lazy(() => import('../../components/skud/TravelRoutesTab').then(module => ({
-  default: module.TravelRoutesTab,
+const TravelConfigTab = lazy(() => import('../../components/skud/TravelConfigTab').then(module => ({
+  default: module.TravelConfigTab,
 })));
 
 const SIGUR_CONNECTION_STORAGE_KEY = 'sigur_selected_connection';
@@ -115,11 +115,11 @@ export const SigurSettingsPage = () => {
           Объекты
         </button>
         <button
-          className={`sigur-tab ${activeTab === 'routes' ? 'active' : ''}`}
-          onClick={() => setActiveTab('routes')}
+          className={`sigur-tab ${activeTab === 'travel-config' ? 'active' : ''}`}
+          onClick={() => setActiveTab('travel-config')}
         >
           <MapPin size={14} />
-          Маршруты
+          Лимит передвижения
         </button>
         <button
           className={`sigur-tab ${activeTab === 'sync-filter' ? 'active' : ''}`}
@@ -186,9 +186,9 @@ export const SigurSettingsPage = () => {
         </Suspense>
       )}
 
-      {activeTab === 'routes' && (
+      {activeTab === 'travel-config' && (
         <Suspense fallback={tabFallback}>
-          <TravelRoutesTab
+          <TravelConfigTab
             canEdit={canEdit}
             setError={setError}
           />

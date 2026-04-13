@@ -107,8 +107,6 @@ const getDayCellClass = (entry: TimesheetEntry | null, weekend: boolean, today: 
   if (entry.is_correction) classes.push('ts-day--corrected');
   if ((entry.travel_problematic_segments || 0) > 0 || (entry.travel_delay_minutes || 0) > 0) {
     classes.push('ts-day--travel-issue');
-  } else if ((entry.travel_minutes_credited || 0) > 0) {
-    classes.push('ts-day--travel');
   }
   return classes.join(' ');
 };
@@ -130,14 +128,11 @@ const getDayCellTitle = (entry: TimesheetEntry | null, weekend: boolean): string
   if (entry.hours_worked != null) {
     parts.push(`Часы: ${formatHM(entry.hours_worked)}`);
   }
-  if ((entry.travel_minutes_credited || 0) > 0) {
-    parts.push(`Учтено время в дороге: ${formatHM((entry.travel_minutes_credited || 0) / 60)}`);
-  }
   if ((entry.travel_delay_minutes || 0) > 0) {
-    parts.push(`Задержка в дороге: ${formatHM((entry.travel_delay_minutes || 0) / 60)}`);
+    parts.push(`Превышение лимита передвижения: ${formatHM((entry.travel_delay_minutes || 0) / 60)}`);
   }
   if ((entry.travel_problematic_segments || 0) > 0) {
-    parts.push(`Проблемных дорожных сегментов: ${entry.travel_problematic_segments}`);
+    parts.push(`Есть передвижения без привязки объекта: ${entry.travel_problematic_segments}`);
   }
   if (entry.is_correction) {
     parts.push('Есть корректировка');
@@ -310,10 +305,7 @@ export const TimesheetGrid: FC<ITimesheetGridProps> = ({
             <span className="ts-legend-dot ts-legend-dot--corrected">К</span>Корректировка
           </div>
           <div className="ts-legend-item">
-            <span className="ts-legend-dot ts-legend-dot--travel">↔</span>Учтено время в дороге
-          </div>
-          <div className="ts-legend-item">
-            <span className="ts-legend-dot ts-legend-dot--travel-issue">!</span>Проблема в дороге
+            <span className="ts-legend-dot ts-legend-dot--travel-issue">!</span>Превышение лимита или проблема объекта
           </div>
         </div>
       </div>

@@ -107,6 +107,20 @@ router.get(
   skudController.getAccessPointSettings
 );
 
+// GET /api/skud/travel-config - текущий единый лимит передвижения (header+)
+router.get(
+  '/travel-config',
+  requirePageAccess('/skud-settings', 'view'),
+  skudController.getTravelConfig
+);
+
+// PUT /api/skud/travel-config - сохранить единый лимит передвижения (admin+)
+router.put(
+  '/travel-config',
+  requirePageAccess('/skud-settings', 'edit'),
+  skudController.updateTravelConfig
+);
+
 // GET /api/skud/travel-objects - объекты для группировки точек доступа (header+)
 router.get(
   '/travel-objects',

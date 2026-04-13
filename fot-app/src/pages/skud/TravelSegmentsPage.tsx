@@ -4,7 +4,8 @@ import { AlertTriangle, RefreshCw, Route, Search } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useStructureTree } from '../../hooks/useStructure';
 import { travelTimeService } from '../../services/travelTimeService';
-import type { ITravelSegment, OrgDepartmentNode, TravelSegmentStatus } from '../../types';
+import type { ITravelSegment, TravelSegmentStatus } from '../../types';
+import { getSortedDepartmentOptions } from '../../utils/departmentUtils';
 import './TravelSegmentsPage.css';
 
 interface IDeptOption {
@@ -15,28 +16,16 @@ interface IDeptOption {
 const STATUS_OPTIONS: Array<{ value: TravelSegmentStatus | 'all' | 'problem'; label: string }> = [
   { value: 'problem', label: 'Только проблемы' },
   { value: 'all', label: 'Все сегменты' },
-  { value: 'auto_approved', label: 'Автозачтено' },
-  { value: 'delayed', label: 'Есть задержка' },
+  { value: 'auto_approved', label: 'В пределах лимита' },
+  { value: 'delayed', label: 'Превышен лимит' },
   { value: 'needs_object', label: 'Нет объекта' },
-  { value: 'needs_route', label: 'Нет маршрута' },
 ];
 
 const STATUS_LABELS: Record<TravelSegmentStatus, string> = {
-  auto_approved: 'Автозачтено',
-  delayed: 'Задержка',
+  auto_approved: 'В пределах лимита',
+  delayed: 'Превышен лимит',
   needs_object: 'Нет объекта',
-  needs_route: 'Нет маршрута',
-};
-
-const flattenTree = (nodes: OrgDepartmentNode[]): IDeptOption[] => {
-  const result: IDeptOption[] = [];
-  for (const node of nodes) {
-    result.push({ id: node.id, name: node.name });
-    if (node.children?.length) {
-      result.push(...flattenTree(node.children));
-    }
-  }
-  return result;
+  needs_route: 'Требуется перенастройка',
 };
 
 const formatMinutes = (minutes: number | null): string => {
@@ -89,7 +78,7 @@ export const TravelSegmentsPage: FC = () => {
     ? (profile?.department_id || null)
     : selectedDeptId;
   const deptOptions = useMemo(
-    () => flattenTree(structureQuery.data?.departments || []),
+    () => getSortedDepartmentOptions(structureQuery.data?.departments || []) as IDeptOption[],
     [structureQuery.data],
   );
 
@@ -123,18 +112,16 @@ export const TravelSegmentsPage: FC = () => {
   }, [segments, search]);
 
   const summary = useMemo(() => {
-    const totalCredited = filteredSegments.reduce((sum, segment) => sum + segment.credited_minutes, 0);
-    const totalDelay = filteredSegments.reduce((sum, segment) => sum + segment.delay_minutes, 0);
-    const autoApproved = filteredSegments.filter(segment => segment.status === 'auto_approved').length;
-    const delayed = filteredSegments.filter(segment => segment.status === 'delayed').length;
-    const problems = filteredSegments.filter(segment => segment.status === 'needs_object' || segment.status === 'needs_route').length;
+    const totalExceeded = filteredSegments.reduce((sum, segment) => sum + segment.delay_minutes, 0);
+    const withinLimit = filteredSegments.filter(segment => segment.status === 'auto_approved').length;
+    const exceeded = filteredSegments.filter(segment => segment.status === 'delayed').length;
+    const missingObject = filteredSegments.filter(segment => segment.status === 'needs_object').length;
     return {
       total: filteredSegments.length,
-      autoApproved,
-      delayed,
-      problems,
-      totalCredited,
-      totalDelay,
+      withinLimit,
+      exceeded,
+      missingObject,
+      totalExceeded,
     };
   }, [filteredSegments]);
 
@@ -159,7 +146,7 @@ export const TravelSegmentsPage: FC = () => {
       <div className="travel-segments-header">
         <div>
           <h1>Передвижения между объектами</h1>
-          <p>Система автоматически засчитывает дорогу по правилу 1.5 x T и выделяет отклонения.</p>
+          <p>Система сравнивает фактическое передвижение с единым лимитом и выделяет превышения или проблемы с объектами.</p>
         </div>
         <button className="travel-segments-btn travel-segments-btn-primary" onClick={handleRebuild} disabled={rebuilding}>
           <RefreshCw size={16} className={rebuilding ? 'travel-spin' : ''} />
@@ -220,24 +207,20 @@ export const TravelSegmentsPage: FC = () => {
           <strong>{summary.total}</strong>
         </div>
         <div className="travel-segments-card">
-          <span>Автозачтено</span>
-          <strong>{summary.autoApproved}</strong>
+          <span>В пределах лимита</span>
+          <strong>{summary.withinLimit}</strong>
         </div>
         <div className="travel-segments-card">
-          <span>С задержкой</span>
-          <strong>{summary.delayed}</strong>
+          <span>Превышен лимит</span>
+          <strong>{summary.exceeded}</strong>
         </div>
         <div className="travel-segments-card">
-          <span>Без настройки</span>
-          <strong>{summary.problems}</strong>
+          <span>Нет объекта</span>
+          <strong>{summary.missingObject}</strong>
         </div>
         <div className="travel-segments-card">
-          <span>Засчитано времени</span>
-          <strong>{formatMinutes(summary.totalCredited)}</strong>
-        </div>
-        <div className="travel-segments-card">
-          <span>Суммарная задержка</span>
-          <strong>{formatMinutes(summary.totalDelay)}</strong>
+          <span>Суммарное превышение</span>
+          <strong>{formatMinutes(summary.totalExceeded)}</strong>
         </div>
       </div>
 
@@ -250,21 +233,20 @@ export const TravelSegmentsPage: FC = () => {
               <th>Маршрут</th>
               <th>Время</th>
               <th>Факт</th>
-              <th>T / лимит</th>
-              <th>Засчитано</th>
-              <th>Задержка</th>
+              <th>Лимит</th>
+              <th>Превышение</th>
               <th>Статус</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={9} className="travel-segments-empty">Загрузка...</td>
+                <td colSpan={8} className="travel-segments-empty">Загрузка...</td>
               </tr>
             ) : filteredSegments.length === 0 ? (
               <tr>
-                <td colSpan={9} className="travel-segments-empty">
-                  Нет данных по текущим фильтрам. Если сегменты ещё не рассчитаны, нажмите «Пересчитать».
+                <td colSpan={8} className="travel-segments-empty">
+                  Нет данных по текущим фильтрам. Если лимит уже задан, нажмите «Пересчитать», чтобы обновить сегменты.
                 </td>
               </tr>
             ) : filteredSegments.map(segment => (
@@ -288,10 +270,8 @@ export const TravelSegmentsPage: FC = () => {
                 </td>
                 <td>{formatMinutes(segment.actual_minutes)}</td>
                 <td>
-                  <div>{formatMinutes(segment.norm_minutes)}</div>
-                  <div className="travel-segments-secondary">{formatMinutes(segment.max_credit_minutes)}</div>
+                  {formatMinutes(segment.norm_minutes)}
                 </td>
-                <td>{formatMinutes(segment.credited_minutes)}</td>
                 <td>{formatMinutes(segment.delay_minutes)}</td>
                 <td>
                   <span className={statusClassName(segment.status)}>

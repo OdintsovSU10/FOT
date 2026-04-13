@@ -1,6 +1,6 @@
 import { supabase } from '../config/database.js';
 import type { IProductionCalendarMonth, IResolvedSchedule, TimeStatus } from '../types/index.js';
-import { getTravelHoursSummaryForRange, travelMinutesToHours } from './skud-travel.service.js';
+import { getTravelHoursSummaryForRange } from './skud-travel.service.js';
 import { getScheduleForDate, isWorkingDay, needsSkudCheck } from './schedule.service.js';
 
 const ADJUSTMENT_PRIORITY: Record<string, number> = {
@@ -234,7 +234,6 @@ export async function buildAttendanceEntries(params: {
     }
 
     const travelSummary = travelSummaries.get(key);
-    const travelMinutes = travelSummary?.creditedMinutes || 0;
     const legacyCorrectedBy = extractLegacyCorrectorId(adjustment.metadata);
     const correctedByName = adjustment.created_by
       ? userNames.get(adjustment.created_by) || null
@@ -252,8 +251,8 @@ export async function buildAttendanceEntries(params: {
       status: adjustment.status,
       hours_worked: adjustment.hours_override,
       base_hours_worked: adjustment.hours_override,
-      travel_minutes_credited: travelMinutes,
-      travel_hours_credited: travelMinutesToHours(travelMinutes),
+      travel_minutes_credited: 0,
+      travel_hours_credited: 0,
       travel_delay_minutes: travelSummary?.delayMinutes || 0,
       travel_segments_count: travelSummary?.segmentsCount || 0,
       travel_problematic_segments: travelSummary?.problematicSegmentsCount || 0,
@@ -273,11 +272,9 @@ export async function buildAttendanceEntries(params: {
 
     const key = `${summary.employee_id}_${summary.date}`;
     const travelSummary = travelSummaries.get(key);
-    const travelMinutes = travelSummary?.creditedMinutes || 0;
     const baseHours = getSummaryHours(summary);
-    const travelHours = travelMinutesToHours(travelMinutes);
-    const hoursWorked = roundHours(baseHours + travelHours);
-    const isPresent = baseHours > 0 || summary.first_entry !== null || travelMinutes > 0;
+    const hoursWorked = roundHours(baseHours);
+    const isPresent = baseHours > 0 || summary.first_entry !== null;
 
     pushEntry({
       id: null,
@@ -286,8 +283,8 @@ export async function buildAttendanceEntries(params: {
       status: isPresent ? 'work' : 'absent',
       hours_worked: isPresent ? hoursWorked : 0,
       base_hours_worked: baseHours,
-      travel_minutes_credited: travelMinutes,
-      travel_hours_credited: travelHours,
+      travel_minutes_credited: 0,
+      travel_hours_credited: 0,
       travel_delay_minutes: travelSummary?.delayMinutes || 0,
       travel_segments_count: travelSummary?.segmentsCount || 0,
       travel_problematic_segments: travelSummary?.problematicSegmentsCount || 0,

@@ -91,7 +91,7 @@ describe('attendance.service', () => {
     mockedState.resolver = () => ({ data: [], error: null });
   });
 
-  it('prefers attendance adjustments over daily summary and keeps travel credits metadata', async () => {
+  it('prefers attendance adjustments over daily summary and keeps travel issue metadata without crediting hours', async () => {
     mockedState.travelSummary = new Map([
       ['1_2026-04-01', {
         creditedMinutes: 30,
@@ -172,8 +172,8 @@ describe('attendance.service', () => {
       work_date: '2026-04-01',
       status: 'manual',
       hours_worked: 8,
-      travel_minutes_credited: 30,
-      travel_hours_credited: 0.5,
+      travel_minutes_credited: 0,
+      travel_hours_credited: 0,
       travel_delay_minutes: 5,
       travel_segments_count: 2,
       travel_problematic_segments: 1,
@@ -181,6 +181,60 @@ describe('attendance.service', () => {
       corrected_by_name: 'HR Admin',
     });
     expect(result.skudMap.get(1)?.get('2026-04-01')).toEqual({ hours: 7.5, corrected: true });
+  });
+
+  it('does not add travel time to summary hours but keeps delay metadata', async () => {
+    mockedState.travelSummary = new Map([
+      ['1_2026-04-01', {
+        creditedMinutes: 45,
+        delayMinutes: 20,
+        segmentsCount: 1,
+        problematicSegmentsCount: 1,
+      }],
+    ]);
+
+    mockedState.resolver = (query) => {
+      if (query.table === 'skud_daily_summary') {
+        return {
+          data: [{
+            employee_id: 1,
+            date: '2026-04-01',
+            first_entry: '09:00:00',
+            last_exit: '18:00:00',
+            total_hours: 8,
+            total_minutes: 480,
+          }],
+          error: null,
+        };
+      }
+
+      if (query.table === 'attendance_adjustments' || query.table === 'user_profiles' || query.table === 'employees') {
+        return { data: [], error: null };
+      }
+
+      throw new Error(`Unexpected query for table ${query.table}`);
+    };
+
+    const result = await buildAttendanceEntries({
+      employees: [{ id: 1, full_name: 'Иван Иванов', work_category: 'office' }],
+      startDate: '2026-04-01',
+      endDate: '2026-04-01',
+      dailySchedulesMap: new Map(),
+      calendarMonth: { holidays: [], shortened_days: [], norm_days: 22 } as unknown as IProductionCalendarMonth,
+      todayStr: '2026-04-01',
+    });
+
+    expect(result.entries).toHaveLength(1);
+    expect(result.entries[0]).toMatchObject({
+      employee_id: 1,
+      work_date: '2026-04-01',
+      hours_worked: 8,
+      base_hours_worked: 8,
+      travel_minutes_credited: 0,
+      travel_hours_credited: 0,
+      travel_delay_minutes: 20,
+      travel_problematic_segments: 1,
+    });
   });
 
   it('writes attendance adjustments into canonical attendance_adjustments table', async () => {
