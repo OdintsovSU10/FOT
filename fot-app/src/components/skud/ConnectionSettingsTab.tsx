@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import type { FC } from 'react';
 import { Wifi, WifiOff, RefreshCw, Eye, Search, ChevronDown } from 'lucide-react';
 import { sigurService } from '../../services/sigurService';
+import { sortDepartmentOptions } from '../../utils/departmentUtils';
 import type { IPreviewData, SettingsTab } from './sigur-settings.types';
 import { FIELD_LABELS, DIRECTION_LABELS } from './sigur-settings.utils';
 import { StructureSyncSection } from './StructureSyncSection';
@@ -75,10 +76,10 @@ export const ConnectionSettingsTab: FC<IConnectionSettingsTabProps> = ({
     if (!connected) return;
     sigurService.getSyncFilter()
       .then(items => {
-        const depts = items.map(d => ({
+        const depts = sortDepartmentOptions(items.map(d => ({
           id: d.sigur_department_id,
           name: d.sigur_department_name,
-        })).sort((a, b) => a.name.localeCompare(b.name, 'ru'));
+        })));
         setDepartments(depts);
       })
       .catch(() => { /* ignore */ });

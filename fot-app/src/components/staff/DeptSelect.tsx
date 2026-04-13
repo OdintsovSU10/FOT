@@ -1,9 +1,14 @@
 import { useState, useEffect, useMemo, useRef, useCallback, memo, type FC } from 'react';
 import { ChevronDown } from 'lucide-react';
-import type { OrgDepartmentNode } from '../../types/organization';
+import { sortDepartmentOptions } from '../../utils/departmentUtils';
+
+interface IDeptSelectOption {
+  id: string;
+  name: string;
+}
 
 interface IDeptSelectProps {
-  departments: OrgDepartmentNode[];
+  departments: IDeptSelectOption[];
   value: string;
   onChange: (id: string) => void;
 }
@@ -12,14 +17,15 @@ export const DeptSelect: FC<IDeptSelectProps> = memo(({ departments, value, onCh
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState('');
   const ref = useRef<HTMLDivElement>(null);
+  const sortedDepartments = useMemo(() => sortDepartmentOptions(departments), [departments]);
 
-  const selected = useMemo(() => departments.find(d => d.id === value), [departments, value]);
+  const selected = useMemo(() => sortedDepartments.find(d => d.id === value), [sortedDepartments, value]);
 
   const filtered = useMemo(() => {
-    if (!q) return departments;
+    if (!q) return sortedDepartments;
     const qLower = q.toLowerCase();
-    return departments.filter(d => d.name.toLowerCase().includes(qLower));
-  }, [departments, q]);
+    return sortedDepartments.filter(d => d.name.toLowerCase().includes(qLower));
+  }, [sortedDepartments, q]);
 
   useEffect(() => {
     if (!open) return;

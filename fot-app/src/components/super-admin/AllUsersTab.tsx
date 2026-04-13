@@ -4,7 +4,8 @@ import { adminService } from '../../services/adminService';
 import { useStructureTree } from '../../hooks/useStructure';
 import { useToast } from '../../contexts/ToastContext';
 import { useAuth } from '../../contexts/AuthContext';
-import type { ChatInboundMode, EmployeePositionType, TwoFactorData, OrgDepartmentNode } from '../../types';
+import type { ChatInboundMode, EmployeePositionType, TwoFactorData } from '../../types';
+import { getSortedFlatDepartments } from '../../utils/departmentUtils';
 import styles from '../../pages/super-admin/SuperAdmin.module.css';
 
 export interface IUserFromApi {
@@ -45,23 +46,6 @@ interface IAllUsersTabProps {
   onReload: () => Promise<void>;
 }
 
-interface IDeptFlat {
-  id: string;
-  name: string;
-  level: number;
-}
-
-const flattenDepts = (nodes: OrgDepartmentNode[], level = 0): IDeptFlat[] => {
-  const result: IDeptFlat[] = [];
-  for (const node of nodes) {
-    result.push({ id: node.id, name: node.name, level });
-    if (node.children?.length) {
-      result.push(...flattenDepts(node.children, level + 1));
-    }
-  }
-  return result;
-};
-
 export const AllUsersTab: FC<IAllUsersTabProps> = ({ allUsers, onReload }) => {
   const toast = useToast();
   const { roles, getRoleLabel } = useAuth();
@@ -78,7 +62,7 @@ export const AllUsersTab: FC<IAllUsersTabProps> = ({ allUsers, onReload }) => {
     loading: false,
   });
   const flatDepts = useMemo(
-    () => flattenDepts(structureQuery.data?.departments || []),
+    () => getSortedFlatDepartments(structureQuery.data?.departments || []),
     [structureQuery.data?.departments],
   );
 

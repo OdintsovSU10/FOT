@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { Search, Save, Check, RefreshCw, Info, ChevronRight, ChevronDown, Folder, FolderOpen } from 'lucide-react';
 import { sigurService } from '../../services/sigurService';
+import { compareDepartmentNames } from '../../utils/departmentUtils';
 import '../../styles/SigurSettingsPage.css';
 
 interface ISigurDepartment {
@@ -39,7 +40,7 @@ const buildTree = (depts: ISigurDepartment[], sortMode: SortMode): ITreeNode[] =
   }
 
   const comparator = sortMode === 'alpha'
-    ? (a: ITreeNode, b: ITreeNode) => a.dept.name.localeCompare(b.dept.name, 'ru')
+    ? (a: ITreeNode, b: ITreeNode) => compareDepartmentNames(a.dept.name, b.dept.name)
     : (a: ITreeNode, b: ITreeNode) => a.dept.id - b.dept.id;
 
   const sortNodes = (nodes: ITreeNode[]) => {

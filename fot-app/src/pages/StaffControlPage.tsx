@@ -18,24 +18,13 @@ import { useDebouncedValue } from '../hooks/useDebouncedValue';
 import { useStaffData } from '../hooks/useStaffData';
 import { DeptSelect } from '../components/staff/DeptSelect';
 import type { Employee, EmployeeHistoryEvent, EmployeeInput, EnrichPreview } from '../types';
-import type { OrgDepartmentNode } from '../types/organization';
+import type { IFlatDepartmentOption } from '../utils/departmentUtils';
+import { getSortedFlatDepartments } from '../utils/departmentUtils';
 import '../styles/StaffControlPage.css';
 
 const HistoryPanel = lazy(() => import('../components/staff/HistoryPanel').then(m => ({ default: m.HistoryPanel })));
 const ImportModal = lazy(() => import('../components/employees/ImportModal').then(m => ({ default: m.ImportModal })));
 const EnrichPreviewModal = lazy(() => import('../components/employees/EnrichPreviewModal').then(m => ({ default: m.EnrichPreviewModal })));
-
-/* ───────── helpers ───────── */
-
-const flattenDepts = (nodes: OrgDepartmentNode[]): OrgDepartmentNode[] =>
-  nodes.flatMap(n => [n, ...flattenDepts(n.children)]);
-
-const sortDepts = (depts: OrgDepartmentNode[]): OrgDepartmentNode[] =>
-  [...depts].sort((a, b) => {
-    const aHas = /\(/.test(a.name) ? 0 : 1;
-    const bHas = /\(/.test(b.name) ? 0 : 1;
-    return aHas - bHas || a.name.localeCompare(b.name, 'ru');
-  });
 
 const fmt = (n: number | null | undefined) =>
   n ? n.toLocaleString('ru-RU') + ' ₽' : '—';
@@ -166,7 +155,7 @@ const StaffRow: FC<IStaffRowProps> = memo(({ emp, index, categoryLabels, schedul
 interface IStaffModalsProps {
   modalType: ModalType | null;
   modalEmp: Employee | null;
-  allDepts: OrgDepartmentNode[];
+  allDepts: IFlatDepartmentOption[];
   categories: IWorkCategory[];
   templates: IWorkSchedule[];
   scheduleViews: Map<number, IEmployeeScheduleView>;
@@ -924,7 +913,7 @@ export const StaffControlPage: FC = () => {
 
   /* ─── memoized computations ─── */
 
-  const allDepts = useMemo(() => sortDepts(flattenDepts(departments)), [departments]);
+  const allDepts = useMemo(() => getSortedFlatDepartments(departments), [departments]);
 
   const currentFilterDescription = useMemo(() => {
     const parts: string[] = [];

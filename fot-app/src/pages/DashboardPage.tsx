@@ -6,6 +6,7 @@ import { useDashboardStats } from '../hooks/useDashboardStats';
 import { useStructureTree } from '../hooks/useStructure';
 import { useAuth } from '../contexts/AuthContext';
 import type { DashboardPeriod } from '../types';
+import { getSortedFlatDepartments } from '../utils/departmentUtils';
 import '../styles/DashboardPage.css';
 
 const ActivityList = lazy(() => import('../components/dashboard/ActivityList').then(m => ({ default: m.ActivityList })));
@@ -14,30 +15,6 @@ const AvgArrivalCard = lazy(() => import('../components/dashboard/AnalyticsRow')
 const HourlyActivityCard = lazy(() => import('../components/dashboard/DashboardSidebar').then(m => ({ default: m.HourlyActivityCard })));
 const ComparisonCard = lazy(() => import('../components/dashboard/DashboardSidebar').then(m => ({ default: m.ComparisonCard })));
 const LiveEventsCard = lazy(() => import('../components/dashboard/stats/LiveEventsCard').then(m => ({ default: m.LiveEventsCard })));
-
-interface IDbDepartment {
-  id: string;
-  name: string;
-  parent_id: string | null;
-  children: IDbDepartment[];
-}
-
-interface IDeptFlatOption {
-  id: string;
-  name: string;
-  level: number;
-}
-
-const flattenDbTree = (nodes: IDbDepartment[], level = 0): IDeptFlatOption[] => {
-  const result: IDeptFlatOption[] = [];
-  for (const node of nodes) {
-    result.push({ id: node.id, name: node.name, level });
-    if (node.children && node.children.length > 0) {
-      result.push(...flattenDbTree(node.children, level + 1));
-    }
-  }
-  return result;
-};
 
 const formatClock = (): string => {
   const now = new Date();
@@ -89,9 +66,7 @@ export const DashboardPage: React.FC = () => {
 
   const deptOptions = useMemo(() => {
     if (isDepartmentScope) return [];
-    const departments = (structureQuery.data?.departments || []) as IDbDepartment[];
-    const collator = new Intl.Collator('ru', { sensitivity: 'base', ignorePunctuation: true });
-    return flattenDbTree(departments).sort((a, b) => collator.compare(a.name.trim(), b.name.trim()));
+    return getSortedFlatDepartments(structureQuery.data?.departments || []);
   }, [isDepartmentScope, structureQuery.data?.departments]);
 
   useEffect(() => {

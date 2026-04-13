@@ -1,15 +1,8 @@
 import { useState, useEffect, useMemo, type FC } from 'react';
 import { ChevronDown, ChevronRight, Building2, Users } from 'lucide-react';
-import { apiClient } from '../../api/client';
-import type { Employee } from '../../types';
+import { useStructureTree } from '../../hooks/useStructure';
+import type { Employee, OrgDepartmentNode } from '../../types';
 import '../../styles/EmployeeTreeView.css';
-
-interface IDbDepartment {
-  id: string;
-  name: string;
-  parent_id: string | null;
-  children: IDbDepartment[];
-}
 
 interface IEmployeeTreeViewProps {
   employees: Employee[];
@@ -22,30 +15,18 @@ export const EmployeeTreeView: FC<IEmployeeTreeViewProps> = ({
   searchQuery,
   onEmployeeClick,
 }) => {
-  const [tree, setTree] = useState<IDbDepartment[]>([]);
-  const [loading, setLoading] = useState(true);
+  const structureQuery = useStructureTree();
   const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set());
+  const tree = structureQuery.data?.departments ?? [];
+  const loading = structureQuery.isLoading;
 
   useEffect(() => {
-    let cancelled = false;
-    const load = async () => {
-      setLoading(true);
-      try {
-        const res = await apiClient.get<{ success: boolean; data: { departments: IDbDepartment[] } }>('/structure');
-        if (cancelled) return;
-        const departments = res.data?.departments || [];
-        setTree(departments);
-        const initial = new Set<string>();
-        departments.forEach(n => initial.add(n.id));
-        setExpandedNodes(initial);
-      } catch {
-        if (!cancelled) setTree([]);
-      }
-      if (!cancelled) setLoading(false);
-    };
-    load();
-    return () => { cancelled = true; };
-  }, []);
+    if (tree.length === 0) return;
+    setExpandedNodes(prev => {
+      if (prev.size > 0) return prev;
+      return new Set(tree.map(node => node.id));
+    });
+  }, [tree]);
 
   const employeesByDeptId = useMemo(() => {
     const map = new Map<string, Employee[]>();
@@ -58,20 +39,20 @@ export const EmployeeTreeView: FC<IEmployeeTreeViewProps> = ({
   }, [employees]);
 
   const flatMap = useMemo(() => {
-    const map = new Map<string, IDbDepartment>();
-    const flatten = (nodes: IDbDepartment[]) => {
+    const map = new Map<string, OrgDepartmentNode>();
+    const flatten = (nodes: OrgDepartmentNode[]) => {
       nodes.forEach(n => { map.set(n.id, n); flatten(n.children); });
     };
     flatten(tree);
     return map;
   }, [tree]);
 
-  const getEmpsForNode = (node: IDbDepartment): Employee[] =>
+  const getEmpsForNode = (node: OrgDepartmentNode): Employee[] =>
     employeesByDeptId.get(node.id) || [];
 
   const countBranch = useMemo(() => {
     const cache = new Map<string, number>();
-    const count = (node: IDbDepartment): number => {
+    const count = (node: OrgDepartmentNode): number => {
       if (cache.has(node.id)) return cache.get(node.id)!;
       let total = (employeesByDeptId.get(node.id) || []).length;
       node.children.forEach(child => { total += count(child); });
@@ -93,7 +74,7 @@ export const EmployeeTreeView: FC<IEmployeeTreeViewProps> = ({
         current = current.parent_id ? flatMap.get(current.parent_id) : undefined;
       }
     };
-    const walkTree = (nodes: IDbDepartment[]) => {
+    const walkTree = (nodes: OrgDepartmentNode[]) => {
       nodes.forEach(n => {
         if ((employeesByDeptId.get(n.id) || []).length > 0) addAncestors(n.id);
         walkTree(n.children);
@@ -122,7 +103,7 @@ export const EmployeeTreeView: FC<IEmployeeTreeViewProps> = ({
     </div>
   );
 
-  const renderDeptNode = (node: IDbDepartment, level: number) => {
+  const renderDeptNode = (node: OrgDepartmentNode, level: number) => {
     const count = countBranch.get(node.id) || 0;
     const isExpanded = expandedNodes.has(node.id);
     const hasChildren = node.children.length > 0;

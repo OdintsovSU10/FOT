@@ -16,6 +16,7 @@ import type {
 import type { IResolvedSchedule } from '../../types/schedule';
 import { TimesheetApprovalBar } from '../../components/timesheet/TimesheetApprovalBar';
 import { getScheduleForTimesheetDay, getWorkHoursForDay } from '../../utils/scheduleUtils';
+import { getSortedDepartmentOptions } from '../../utils/departmentUtils';
 import './TimesheetPage.css';
 
 const TimesheetSidePanel = lazy(() => import('../../components/timesheet/TimesheetSidePanel').then(module => ({
@@ -32,71 +33,6 @@ interface IDeptOption {
   id: string;
   name: string;
 }
-
-interface IDbDepartment {
-  id: string;
-  name: string;
-  children: IDbDepartment[];
-}
-
-const DEPARTMENT_TYPE_PRIORITY = ['ТО', 'ОСП'] as const;
-const departmentNameCollator = new Intl.Collator('ru', {
-  sensitivity: 'base',
-  ignorePunctuation: true,
-  numeric: true,
-});
-
-const flattenTree = (nodes: IDbDepartment[]): IDeptOption[] => {
-  const result: IDeptOption[] = [];
-  for (const node of nodes) {
-    result.push({ id: node.id, name: node.name });
-    if (node.children && node.children.length > 0) {
-      result.push(...flattenTree(node.children));
-    }
-  }
-  return result;
-};
-
-const getDepartmentType = (name: string): string | null => {
-  const match = name.trim().match(/\(([^()]+)\)\s*$/u);
-  return match ? match[1].trim().toUpperCase() : null;
-};
-
-const getDepartmentBaseName = (name: string): string => (
-  name.replace(/\s*\([^()]+\)\s*$/u, '').trim()
-);
-
-const getDepartmentPriority = (type: string | null): number => {
-  if (!type) return DEPARTMENT_TYPE_PRIORITY.length + 1;
-  const index = DEPARTMENT_TYPE_PRIORITY.findIndex(marker => marker === type);
-  return index === -1 ? DEPARTMENT_TYPE_PRIORITY.length : index;
-};
-
-const sortDepartments = (departments: IDeptOption[]): IDeptOption[] => (
-  [...departments].sort((a, b) => {
-    const aType = getDepartmentType(a.name);
-    const bType = getDepartmentType(b.name);
-
-    const priorityDiff = getDepartmentPriority(aType) - getDepartmentPriority(bType);
-    if (priorityDiff !== 0) return priorityDiff;
-
-    if (aType && bType) {
-      const typeDiff = departmentNameCollator.compare(aType, bType);
-      if (typeDiff !== 0) return typeDiff;
-    }
-
-    const baseNameDiff = departmentNameCollator.compare(
-      getDepartmentBaseName(a.name),
-      getDepartmentBaseName(b.name),
-    );
-    if (baseNameDiff !== 0) return baseNameDiff;
-
-    const nameDiff = departmentNameCollator.compare(a.name.trim(), b.name.trim());
-    if (nameDiff !== 0) return nameDiff;
-
-    return a.id.localeCompare(b.id, 'ru');
-  })
-);
 
 const DEFAULT_STATS: ITimesheetStats = {
   employeeCount: 0,
@@ -148,7 +84,7 @@ export const TimesheetPage: FC = () => {
 
   const structureQuery = useStructureTree();
   const deptOptions = useMemo(
-    () => sortDepartments(flattenTree(structureQuery.data?.departments ?? [])),
+    () => getSortedDepartmentOptions(structureQuery.data?.departments ?? []) as IDeptOption[],
     [structureQuery.data],
   );
   const effectiveSelectedDeptId = isDepartmentScope

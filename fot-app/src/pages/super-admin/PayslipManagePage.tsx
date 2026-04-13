@@ -2,7 +2,7 @@ import { type FC, useMemo, useState } from 'react';
 import { ChevronLeft, ChevronRight, Zap } from 'lucide-react';
 import { apiClient } from '../../api/client';
 import { useStructureTree } from '../../hooks/useStructure';
-import type { OrgDepartmentNode } from '../../types/organization';
+import { getSortedFlatDepartments } from '../../utils/departmentUtils';
 import styles from './PayslipManagePage.module.css';
 
 interface IGeneratedPayslip {
@@ -16,12 +16,6 @@ interface IGeneratedPayslip {
   net_amount: number;
 }
 
-interface IDeptFlat {
-  id: string;
-  name: string;
-  level: number;
-}
-
 const formatMoney = (v: number): string =>
   v.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
@@ -29,17 +23,6 @@ const MONTH_NAMES = [
   'Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь',
   'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь',
 ];
-
-const flattenDepts = (nodes: OrgDepartmentNode[], level = 0): IDeptFlat[] => {
-  const result: IDeptFlat[] = [];
-  for (const node of nodes) {
-    result.push({ id: node.id, name: node.name, level });
-    if (node.children?.length) {
-      result.push(...flattenDepts(node.children, level + 1));
-    }
-  }
-  return result;
-};
 
 export const PayslipManagePage: FC = () => {
   const now = new Date();
@@ -52,7 +35,7 @@ export const PayslipManagePage: FC = () => {
   const [error, setError] = useState<string | null>(null);
   const structureQuery = useStructureTree();
   const departments = useMemo(
-    () => flattenDepts(structureQuery.data?.departments || []),
+    () => getSortedFlatDepartments(structureQuery.data?.departments || []),
     [structureQuery.data?.departments],
   );
 

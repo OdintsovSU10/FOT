@@ -16,6 +16,7 @@ import {
   usePresenceQuery,
 } from '../../hooks/useEmployeeDirectory';
 import { useStructureTree } from '../../hooks/useStructure';
+import { getSortedFlatDepartments } from '../../utils/departmentUtils';
 import '../../styles/EmployeesPage.css';
 
 const PAGE_SIZE = 50;
@@ -185,15 +186,7 @@ export const EmployeesPage: FC = () => {
 
   // Flat departments for select
   const flatDepts = useMemo(() => {
-    const result: { id: string; name: string; level: number }[] = [];
-    const flatten = (nodes: OrgDepartmentNode[], level = 0) => {
-      for (const n of nodes) {
-        result.push({ id: n.id, name: n.name, level });
-        flatten(n.children, level + 1);
-      }
-    };
-    flatten(departments);
-    return result;
+    return getSortedFlatDepartments(departments);
   }, [departments]);
 
   // Selected department info

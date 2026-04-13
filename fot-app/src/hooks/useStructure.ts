@@ -1,6 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { structureApi } from '../api/structure';
 import type { OrgStructureResponse } from '../types';
+import { sortDepartmentTree } from '../utils/departmentUtils';
 
 export const STRUCTURE_QUERY_KEY = ['structure', 'tree'] as const;
 
@@ -10,7 +11,11 @@ export const useStructureTree = (enabled = true) => {
     queryFn: async () => {
       const res = await structureApi.getTree();
       if (res.error) throw new Error(res.error);
-      return res.data as OrgStructureResponse;
+      const data = res.data as OrgStructureResponse;
+      return {
+        ...data,
+        departments: sortDepartmentTree(data.departments || []),
+      };
     },
     enabled,
     staleTime: 5 * 60_000,

@@ -5,6 +5,7 @@ import { useIsMobile } from '../hooks/useIsMobile';
 import { DisciplineTable } from '../components/discipline/DisciplineTable';
 import { DisciplineDetailPanel } from '../components/discipline/DisciplineDetailPanel';
 import { triggerBlobDownload } from '../utils/download';
+import { sortDepartmentOptions } from '../utils/departmentUtils';
 import '../styles/DisciplineAnalyticsPage.css';
 
 type ViolationType = 'late' | 'underwork' | 'early' | 'absence';
@@ -190,7 +191,9 @@ export const DisciplineAnalyticsPage: FC = () => {
         depts.set(emp.department_id, deptData[emp.department_id]);
       }
     }
-    return [...depts.entries()].sort((a, b) => a[1].localeCompare(b[1]));
+    return sortDepartmentOptions(
+      [...depts.entries()].map(([id, name]) => ({ id, name })),
+    ).map(({ id, name }) => [id, name] as const);
   }, [empData, deptData]);
 
   const employees = useMemo<IEmployeeSummary[]>(() => {
