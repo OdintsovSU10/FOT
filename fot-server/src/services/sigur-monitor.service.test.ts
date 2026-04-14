@@ -488,4 +488,46 @@ describe('sigur-monitor.service', () => {
     expect(mockedState.tables.sigur_health_checks).toHaveLength(1);
     expect(mockedState.tables.sigur_health_checks[0]?.source).toBe('presence_polling');
   });
+
+  it('does not open a silence incident while polling is chunking through backlog', async () => {
+    const historicalDates = ['2026-04-03', '2026-03-27', '2026-03-20', '2026-03-13'];
+    mockedState.tables.skud_events = historicalDates.flatMap((date, index) => (
+      Array.from({ length: 6 }, (_, offset) => ({
+        id: 300 + index * 10 + offset,
+        event_date: date,
+        event_time: `16:${String(15 + offset).padStart(2, '0')}:00`,
+      }))
+    ));
+    mockedState.runtimeStateMock.pollingState = {
+      key: 'sigur_presence_polling',
+      checkpoint_at: '2026-04-14T12:39:20.000Z',
+      lease_owner: null,
+      lease_expires_at: null,
+      heartbeat_at: null,
+      updated_at: '2026-04-14T13:29:04.524Z',
+      meta: {
+        lastSignalAt: '2026-04-14T13:29:04.524Z',
+        lastSuccessAt: '2026-04-14T13:29:04.524Z',
+        lastEventFlowAt: '2026-04-14T11:39:17.000Z',
+        lastCycle: {
+          windowTruncated: true,
+        },
+      },
+    };
+
+    await recordSigurMonitorSuccess({
+      source: 'presence_polling',
+      checkedAt: new Date('2026-04-14T13:29:04.524Z'),
+      eventsLastWindow: 253,
+      meta: {
+        latestObservedEventAt: '2026-04-14T11:39:17.000Z',
+      },
+    });
+
+    await runSigurMonitorCycleNow(new Date('2026-04-14T13:29:07.457Z'));
+
+    expect(mockedState.tables.sigur_incidents).toHaveLength(0);
+    expect(mockedState.tables.sigur_health_checks).toHaveLength(1);
+    expect(mockedState.tables.sigur_health_checks[0]?.source).toBe('presence_polling');
+  });
 });

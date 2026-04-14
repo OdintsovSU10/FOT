@@ -371,15 +371,26 @@ async function refreshRuntimeStateFromPollingState(now = new Date(), timezone?: 
   lastSuccessfulSignalAt: Date | null;
   lastEventFlowAt: Date | null;
   isPresencePollingInFlight: boolean;
+  isPresencePollingCatchUpInProgress: boolean;
 }> {
   const pollingState = await getSigurRuntimeState(SIGUR_POLLING_STATE_KEY);
   const pollingMeta = pollingState?.meta || {};
+  const pollingLastCycle = typeof pollingMeta.lastCycle === 'object' && pollingMeta.lastCycle !== null
+    ? pollingMeta.lastCycle as Record<string, unknown>
+    : {};
   const lastSignalAt = parseOptionalIsoDate(pollingMeta.lastSignalAt) || runtimeState.lastSignalAt;
   const lastSuccessfulSignalAt = parseOptionalIsoDate(pollingMeta.lastSuccessAt) || runtimeState.lastSuccessfulSignalAt;
   const sharedLastEventFlowAt = parseOptionalIsoDate(pollingMeta.lastEventFlowAt);
   const lastEventFlowAt = sharedLastEventFlowAt || runtimeState.lastEventFlowAt || (timezone ? await getLatestEventFlowAt(timezone) : null);
+  const checkpointAt = parseOptionalIsoDate(pollingState?.checkpoint_at);
   const leaseExpiresAt = parseOptionalIsoDate(pollingState?.lease_expires_at);
   const isPresencePollingInFlight = !!(pollingState?.lease_owner && leaseExpiresAt && leaseExpiresAt.getTime() > now.getTime());
+  const isPresencePollingCatchUpInProgress = !isPresencePollingInFlight
+    && pollingLastCycle.windowTruncated === true
+    && !!checkpointAt
+    && !!lastSignalAt
+    && (now.getTime() - lastSignalAt.getTime()) < MONITOR_STALE_SIGNAL_MS
+    && checkpointAt.getTime() < now.getTime();
 
   runtimeState.lastSignalAt = lastSignalAt;
   runtimeState.lastSuccessfulSignalAt = lastSuccessfulSignalAt;
@@ -393,6 +404,7 @@ async function refreshRuntimeStateFromPollingState(now = new Date(), timezone?: 
     lastSuccessfulSignalAt,
     lastEventFlowAt,
     isPresencePollingInFlight,
+    isPresencePollingCatchUpInProgress,
   };
 }
 
@@ -1048,11 +1060,12 @@ export async function runSigurMonitorCycleNow(now = new Date()): Promise<void> {
     ? now.getTime() - pollingSnapshot.lastSignalAt.getTime()
     : Number.POSITIVE_INFINITY;
   const isPresencePollingInFlight = pollingSnapshot.isPresencePollingInFlight;
+  const isPresencePollingCatchUpInProgress = pollingSnapshot.isPresencePollingCatchUpInProgress;
   if (!isPresencePollingInFlight && lastSignalAge >= MONITOR_STALE_SIGNAL_MS) {
     await performDirectProbe(now);
   }
 
-  if (isPresencePollingInFlight) {
+  if (isPresencePollingInFlight || isPresencePollingCatchUpInProgress) {
     return;
   }
 
