@@ -77,6 +77,39 @@ function mergePageCatalogWithDefaults(pages: PageCatalogItem[] | null): PageCata
   );
 }
 
+function mergeCapabilityCatalogWithDefaults(groups: PermissionGroup[] | null): PermissionGroup[] {
+  const merged = new Map<string, PermissionGroup>();
+
+  for (const group of DEFAULT_PERMISSION_GROUPS) {
+    merged.set(group.code, {
+      ...group,
+      options: group.options.map((option) => ({ ...option })),
+    });
+  }
+
+  for (const group of groups || []) {
+    const existing = merged.get(group.code);
+    const options = new Map<string, PermissionOption>(
+      (existing?.options || []).map((option) => [option.code, { ...option }]),
+    );
+
+    for (const option of group.options) {
+      options.set(option.code, { ...option });
+    }
+
+    merged.set(group.code, {
+      ...(existing || {}),
+      ...group,
+      options: [...options.values()].sort(
+        (left, right) => left.sort_order - right.sort_order || left.label.localeCompare(right.label, 'ru'),
+      ),
+    });
+  }
+
+  return [...merged.values()]
+    .sort((left, right) => left.sort_order - right.sort_order || left.label.localeCompare(right.label, 'ru'));
+}
+
 function normalizeCapabilityGroups(rows: ICapabilityCatalogRow[]): PermissionGroup[] {
   const groups = new Map<string, PermissionGroup>();
 
@@ -166,7 +199,7 @@ async function ensureCatalogLoaded(): Promise<void> {
   ]);
 
   pageCatalogCache = clonePageCatalog(mergePageCatalogWithDefaults(dbPages));
-  capabilityCatalogCache = clonePermissionGroups(dbCapabilities ?? DEFAULT_PERMISSION_GROUPS);
+  capabilityCatalogCache = clonePermissionGroups(mergeCapabilityCatalogWithDefaults(dbCapabilities));
   catalogCacheExpiresAt = now + ACCESS_CATALOG_CACHE_TTL_MS;
 }
 

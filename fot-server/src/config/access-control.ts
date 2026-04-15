@@ -596,6 +596,12 @@ export function validateTimesheetWorkflowPermissions(
   const dataScope = resolveDataScopeFromPermissions(normalized);
   const timesheetMode = resolvePageAccessMode(pageAccess, '/timesheet');
   const timesheetHrMode = resolvePageAccessMode(pageAccess, '/timesheet-hr');
+  const hasReviewPermission = normalized.includes(TIMESHEET_WORKFLOW_REVIEW_PERMISSION);
+  const hasMonitorPermission = normalized.includes(TIMESHEET_WORKFLOW_MONITOR_PERMISSION);
+
+  if (timesheetHrMode !== 'none' && !hasReviewPermission && !hasMonitorPermission) {
+    return `Роль ${roleCode}: доступ к странице /timesheet-hr требует capability "Проверка" или "Мониторинг"`;
+  }
 
   if (normalized.includes(TIMESHEET_WORKFLOW_SUBMIT_PERMISSION)) {
     if (timesheetMode !== 'edit') {
@@ -607,7 +613,7 @@ export function validateTimesheetWorkflowPermissions(
     }
   }
 
-  if (normalized.includes(TIMESHEET_WORKFLOW_REVIEW_PERMISSION)) {
+  if (hasReviewPermission) {
     if (timesheetHrMode !== 'edit') {
       return `Роль ${roleCode}: capability "Проверка" требует доступ edit к странице /timesheet-hr`;
     }
@@ -617,7 +623,7 @@ export function validateTimesheetWorkflowPermissions(
     }
   }
 
-  if (normalized.includes(TIMESHEET_WORKFLOW_MONITOR_PERMISSION)) {
+  if (hasMonitorPermission) {
     if (timesheetHrMode === 'none') {
       return `Роль ${roleCode}: capability "Мониторинг" требует доступ view или edit к странице /timesheet-hr`;
     }

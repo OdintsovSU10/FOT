@@ -223,23 +223,28 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return roles.find(r => r.code === code)?.name ?? code;
   }, [roles]);
 
+  const isSuperAdmin = effectivePositionType === 'super_admin';
+
   const hasPermission = useCallback((permission: string): boolean => {
     if (!state.isAuthenticated || !state.isApproved) return false;
     if (state.isTwoFactorEnabled && !state.isTwoFactorVerified) return false;
-    return !!state.profile?.permissions?.includes(permission);
-  }, [state.isAuthenticated, state.isApproved, state.isTwoFactorEnabled, state.isTwoFactorVerified, state.profile?.permissions]);
+    if (isSuperAdmin) return true;
+    return state.profile?.permissions?.includes(permission) === true;
+  }, [isSuperAdmin, state.isAuthenticated, state.isApproved, state.isTwoFactorEnabled, state.isTwoFactorVerified, state.profile?.permissions]);
 
   const canViewPage = useCallback((pagePath: string): boolean => {
     if (!state.isAuthenticated || !state.isApproved) return false;
     if (state.isTwoFactorEnabled && !state.isTwoFactorVerified) return false;
+    if (isSuperAdmin) return true;
     return state.profile?.page_access?.[pagePath]?.can_view === true;
-  }, [state.isAuthenticated, state.isApproved, state.isTwoFactorEnabled, state.isTwoFactorVerified, state.profile?.page_access]);
+  }, [isSuperAdmin, state.isAuthenticated, state.isApproved, state.isTwoFactorEnabled, state.isTwoFactorVerified, state.profile?.page_access]);
 
   const canEditPage = useCallback((pagePath: string): boolean => {
     if (!state.isAuthenticated || !state.isApproved) return false;
     if (state.isTwoFactorEnabled && !state.isTwoFactorVerified) return false;
+    if (isSuperAdmin) return true;
     return state.profile?.page_access?.[pagePath]?.can_edit === true;
-  }, [state.isAuthenticated, state.isApproved, state.isTwoFactorEnabled, state.isTwoFactorVerified, state.profile?.page_access]);
+  }, [isSuperAdmin, state.isAuthenticated, state.isApproved, state.isTwoFactorEnabled, state.isTwoFactorVerified, state.profile?.page_access]);
 
   // Check if user can access based on position hierarchy (dynamic from system_roles)
   const canAccess = useCallback((requiredPosition?: EmployeePositionType): boolean => {

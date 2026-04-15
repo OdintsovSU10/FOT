@@ -13,7 +13,8 @@ const TABS = ['Проверка', 'Экспорт'];
 export const TimesheetHrPage: FC = () => {
   const { hasPermission } = useAuth();
   const [active, setActive] = useState(0);
-  const canAccessWorkflow = hasPermission('timesheet.workflow.review') || hasPermission('timesheet.workflow.monitor');
+  const canAccessWorkflow = hasPermission('timesheet.workflow.review')
+    || hasPermission('timesheet.workflow.monitor');
 
   if (!canAccessWorkflow) {
     return (

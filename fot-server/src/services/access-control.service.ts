@@ -6,7 +6,11 @@ import {
   type DataScope,
   type EmployeePortalVariant,
 } from '../config/access-control.js';
-import { invalidateAccessCatalogCache } from './access-catalog.service.js';
+import {
+  invalidateAccessCatalogCache,
+  loadAccessPageCatalog,
+  loadCapabilityCatalog,
+} from './access-catalog.service.js';
 import { getRoleByCode, getRoleById, invalidateRolesCache } from './roles-cache.service.js';
 
 interface PageAccessPermission {
@@ -17,6 +21,9 @@ interface PageAccessPermission {
 type RolePageAccessMap = Map<string, Map<string, PageAccessPermission>>;
 
 const PAGE_ACCESS_CACHE_TTL_MS = 300_000;
+const SUPER_ADMIN_ROLE_CODE = 'super_admin';
+const SUPER_ADMIN_EMPLOYEE_VARIANT = 'portal.employee.variant.office';
+const SUPER_ADMIN_DATA_SCOPE = 'data.scope.all';
 
 let pageAccessCache: RolePageAccessMap | null = null;
 let pageAccessCacheExpiresAt = 0;
@@ -56,21 +63,67 @@ async function resolveRole(roleRef: string) {
   return (await getRoleById(roleRef)) ?? (await getRoleByCode(roleRef));
 }
 
-export async function getRolePermissions(roleRef: string): Promise<string[]> {
-  const role = await resolveRole(roleRef);
-  return normalizePermissions(role?.permissions);
-}
-
-export async function getRolePageAccess(roleRef: string): Promise<Record<string, PageAccessPermission>> {
-  const role = await resolveRole(roleRef);
-  if (!role) {
+async function getStoredRolePageAccess(roleRef: string, role?: Awaited<ReturnType<typeof resolveRole>>): Promise<Record<string, PageAccessPermission>> {
+  const resolvedRole = role ?? await resolveRole(roleRef);
+  if (!resolvedRole) {
     return {};
   }
 
   const cache = await loadPageAccessCache();
-  const entries = cache.get(role.id) ?? cache.get(role.code) ?? new Map<string, PageAccessPermission>();
-
+  const entries = cache.get(resolvedRole.id) ?? cache.get(resolvedRole.code) ?? new Map<string, PageAccessPermission>();
   return Object.fromEntries(entries.entries());
+}
+
+async function buildSuperAdminPermissions(permissions: string[]): Promise<string[]> {
+  const capabilityGroups = await loadCapabilityCatalog();
+  const nonExclusivePermissions = capabilityGroups
+    .filter(group => !group.exclusive)
+    .flatMap(group => group.options.map(option => option.code));
+
+  return normalizePermissions([
+    SUPER_ADMIN_EMPLOYEE_VARIANT,
+    SUPER_ADMIN_DATA_SCOPE,
+    ...permissions,
+    ...nonExclusivePermissions,
+  ]);
+}
+
+async function buildSuperAdminPageAccess(): Promise<Record<string, PageAccessPermission>> {
+  const pages = await loadAccessPageCatalog();
+
+  return Object.fromEntries(
+    pages.map((page) => [
+      page.key,
+      {
+        can_view: true,
+        can_edit: page.supports_edit === true,
+      },
+    ]),
+  );
+}
+
+export async function getRolePermissions(roleRef: string): Promise<string[]> {
+  const role = await resolveRole(roleRef);
+  const permissions = normalizePermissions(role?.permissions);
+
+  if (role?.code === SUPER_ADMIN_ROLE_CODE || roleRef === SUPER_ADMIN_ROLE_CODE) {
+    return buildSuperAdminPermissions(permissions);
+  }
+
+  return permissions;
+}
+
+export async function getRolePageAccess(roleRef: string): Promise<Record<string, PageAccessPermission>> {
+  const role = await resolveRole(roleRef);
+  if (role?.code === SUPER_ADMIN_ROLE_CODE || roleRef === SUPER_ADMIN_ROLE_CODE) {
+    return buildSuperAdminPageAccess();
+  }
+
+  if (!role) {
+    return {};
+  }
+
+  return getStoredRolePageAccess(roleRef, role);
 }
 
 export async function hasPermission(roleRef: string, permission: string): Promise<boolean> {

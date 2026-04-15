@@ -37,6 +37,16 @@ describe('validateTimesheetWorkflowPermissions', () => {
     expect(error).toContain('/timesheet-hr');
   });
 
+  it('rejects hr page access without review or monitor capability', () => {
+    const error = validateTimesheetWorkflowPermissions(
+      'timesheet_hr',
+      ['data.scope.all'],
+      { '/timesheet-hr': 'view' },
+    );
+
+    expect(error).toContain('Проверка');
+  });
+
   it('accepts valid submit, review and monitor configuration', () => {
     const error = validateTimesheetWorkflowPermissions(
       'timesheet_hr',

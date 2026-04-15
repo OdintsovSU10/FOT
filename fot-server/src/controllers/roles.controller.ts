@@ -6,7 +6,7 @@ import {
   type AccessMode,
 } from '../config/access-control.js';
 import type { AuthenticatedRequest, SystemRole } from '../types/index.js';
-import { invalidateAccessControlCache } from '../services/access-control.service.js';
+import { getRolePermissions, invalidateAccessControlCache } from '../services/access-control.service.js';
 import {
   loadAccessCatalog,
   normalizeKnownPageAccessModes,
@@ -207,11 +207,12 @@ export const rolesController = {
       }
 
       const page_access = await loadRoleAccessModes(role.code);
+      const permissions = await getRolePermissions(role.id);
       res.json({
         success: true,
         data: {
           role,
-          permissions: normalizePermissions(role.permissions),
+          permissions,
           page_access,
         },
       });
