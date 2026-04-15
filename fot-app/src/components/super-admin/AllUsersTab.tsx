@@ -48,7 +48,7 @@ interface IAllUsersTabProps {
 
 export const AllUsersTab: FC<IAllUsersTabProps> = ({ allUsers, onReload }) => {
   const toast = useToast();
-  const { roles, getRoleLabel } = useAuth();
+  const { roles, getRoleLabel, profile, refreshProfile } = useAuth();
   const structureQuery = useStructureTree();
   const [roleFilter, setRoleFilter] = useState<EmployeePositionType | null>(null);
   const [expandedUserId, setExpandedUserId] = useState<string | null>(null);
@@ -158,6 +158,9 @@ export const AllUsersTab: FC<IAllUsersTabProps> = ({ allUsers, onReload }) => {
       await adminService.updateUserPosition(userId, positionType);
       toast.success('Должность изменена');
       await onReload();
+      if (profile?.id === userId) {
+        await refreshProfile();
+      }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Ошибка изменения должности');
     }

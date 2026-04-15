@@ -12,6 +12,18 @@ const approveUserSchema = z.object({
   employee_id: z.number().int().positive().optional(),
 });
 
+async function resolveActiveRoleAssignment(positionType: string): Promise<{ id: string; code: string } | null> {
+  const role = await getRoleByCode(positionType);
+  if (!role || !role.is_active) {
+    return null;
+  }
+
+  return {
+    id: role.id,
+    code: role.code,
+  };
+}
+
 export const adminUsersController = {
   async getAllUsers(_req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
@@ -176,8 +188,8 @@ export const adminUsersController = {
     try {
       const { id } = req.params;
       const { position_type, employee_id } = approveUserSchema.parse(req.body);
-      const role = await getRoleByCode(position_type);
-      if (!role || !role.is_active) {
+      const roleAssignment = await resolveActiveRoleAssignment(position_type);
+      if (!roleAssignment) {
         res.status(400).json({ success: false, error: 'Выбрана несуществующая или неактивная роль' });
         return;
       }
@@ -197,9 +209,10 @@ export const adminUsersController = {
         is_approved: true,
         approved_by: req.user.id,
         approved_at: new Date().toISOString(),
+        position_type: roleAssignment.code,
+        system_role_id: roleAssignment.id,
       };
 
-      updateData.position_type = position_type;
       if (employee_id) {
         updateData.employee_id = employee_id;
       }
@@ -218,7 +231,7 @@ export const adminUsersController = {
       await auditService.logFromRequest(req, req.user.id, 'USER_APPROVED', {
         entityType: 'user',
         entityId: id,
-        details: { position_type },
+        details: { position_type: roleAssignment.code },
       });
 
       res.json({ success: true, message: 'User approved successfully' });
@@ -342,15 +355,15 @@ export const adminUsersController = {
         position_type: z.string().min(1)
       }).parse(req.body);
 
-      const role = await getRoleByCode(position_type);
-      if (!role) {
-        res.status(400).json({ success: false, error: 'Роль не найдена' });
+      const roleAssignment = await resolveActiveRoleAssignment(position_type);
+      if (!roleAssignment) {
+        res.status(400).json({ success: false, error: 'Роль не найдена или неактивна' });
         return;
       }
 
       try {
         await ensureCriticalAdminAccess({
-          userRoleById: { [id]: position_type },
+          userRoleById: { [id]: roleAssignment.code },
         });
       } catch (error) {
         res.status(400).json({
@@ -362,7 +375,10 @@ export const adminUsersController = {
 
       const { error } = await supabase
         .from('user_profiles')
-        .update({ position_type })
+        .update({
+          position_type: roleAssignment.code,
+          system_role_id: roleAssignment.id,
+        })
         .eq('id', id);
 
       if (error) {
@@ -374,7 +390,7 @@ export const adminUsersController = {
       await auditService.logFromRequest(req, req.user.id, 'POSITION_CHANGED', {
         entityType: 'user',
         entityId: id,
-        details: { new_position_type: position_type },
+        details: { new_position_type: roleAssignment.code },
       });
 
       res.json({ success: true, message: 'Position updated successfully' });
