@@ -28,8 +28,8 @@ httpServer.listen(PORT, () => {
   console.log(`Environment: ${env.NODE_ENV}`);
   console.log(`CORS Origin: ${env.CORS_ORIGIN}`);
   console.log('Socket.IO enabled');
-  startPresencePolling();
-  startSigurMonitor();
-  startStructureSyncScheduler();
+  void startPresencePolling();
+  void startSigurMonitor();
+  void startStructureSyncScheduler();
   startTimesheetReminderScheduler();
 });

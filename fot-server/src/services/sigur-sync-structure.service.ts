@@ -63,7 +63,7 @@ export async function syncDepartmentsLogic(
   connection?: 'external' | 'internal',
   context?: ISyncContext,
 ): Promise<ISyncDepartmentsResult> {
-  if (!sigurService.isConfigured()) throw new Error('Sigur не настроен');
+  if (!(await sigurService.isConfigured())) throw new Error('Sigur не настроен');
 
   const rawDepartments = await getDepartmentsRaw(connection, context);
   if (!rawDepartments || rawDepartments.length === 0) {

@@ -1,4 +1,11 @@
 import { apiClient } from '../api/client';
+import type {
+  SigurArchiveDepartmentInfo,
+  SigurConnectionScope,
+  SigurConnectionSettings,
+  SigurEmployeeAccessPointsSaveResult,
+  SigurEmployeeAccessPointsState,
+} from '../types';
 
 interface ApiResponse<T> {
   data: T;
@@ -19,7 +26,31 @@ interface ISigurPreviewResult {
   mappedCount?: number;
 }
 
+interface ISigurConnectionSettingsPayload {
+  internal?: { url?: string | null; username?: string | null; password?: string | null };
+  external?: { url?: string | null; username?: string | null; password?: string | null };
+  archiveDepartmentId?: number | null;
+  archiveDepartmentName?: string | null;
+}
+
 export const sigurService = {
+  async getConnectionSettings(): Promise<SigurConnectionSettings> {
+    const response = await apiClient.get<ApiResponse<SigurConnectionSettings>>('/sigur/connection-settings');
+    return response.data;
+  },
+
+  async saveConnectionSettings(payload: ISigurConnectionSettingsPayload): Promise<SigurConnectionSettings> {
+    const response = await apiClient.put<ApiResponse<SigurConnectionSettings>>('/sigur/connection-settings', payload);
+    return response.data;
+  },
+
+  async ensureArchiveDepartment(connection?: SigurConnectionScope): Promise<SigurArchiveDepartmentInfo> {
+    const response = await apiClient.post<ApiResponse<SigurArchiveDepartmentInfo>>('/sigur/archive-department/ensure', {
+      connection,
+    });
+    return response.data;
+  },
+
   async testConnection(connection?: 'internal' | 'external'): Promise<ISigurTestResult> {
     const params = connection ? `?connection=${connection}` : '';
     return apiClient.get<ISigurTestResult>(`/sigur/test${params}`);
@@ -64,6 +95,26 @@ export const sigurService = {
 
   async getAccessRules(): Promise<{ data: unknown[]; count: number }> {
     return apiClient.get('/sigur/access-rules');
+  },
+
+  async getEmployeeAccessPoints(employeeId: number, connection?: SigurConnectionScope): Promise<SigurEmployeeAccessPointsState> {
+    const params = connection ? `?connection=${connection}` : '';
+    const response = await apiClient.get<ApiResponse<SigurEmployeeAccessPointsState>>(
+      `/sigur/employees/${employeeId}/access-points${params}`,
+    );
+    return response.data;
+  },
+
+  async saveEmployeeAccessPoints(
+    employeeId: number,
+    accessPointIds: number[],
+    connection?: SigurConnectionScope,
+  ): Promise<SigurEmployeeAccessPointsSaveResult> {
+    const response = await apiClient.put<ApiResponse<SigurEmployeeAccessPointsSaveResult>>(
+      `/sigur/employees/${employeeId}/access-points`,
+      { accessPointIds, connection },
+    );
+    return response.data;
   },
 
   async getEventTypes(): Promise<{ data: unknown[] }> {

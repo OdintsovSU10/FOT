@@ -1,0 +1,168 @@
+.skud-map-point-button {
+  margin: 0;
+  padding: 0;
+  background: none;
+  border: none;
+  font: inherit;
+  text-align: inherit;
+}
+
+.skud-map-point-button--interactive {
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 0.18em;
+  transition: color 0.15s ease, opacity 0.15s ease;
+}
+
+.skud-map-point-button--interactive:hover {
+  color: var(--primary);
+  opacity: 1;
+}
+
+.skud-map-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 420;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(10, 15, 30, 0.78);
+}
+
+.skud-map-modal {
+  width: min(1040px, 100%);
+  max-height: calc(100vh - 48px);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 18px;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: var(--surface);
+  box-shadow: 0 20px 70px rgba(0, 0, 0, 0.35);
+}
+
+.skud-map-modal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.skud-map-modal-title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.skud-map-modal-subtitle {
+  margin-top: 4px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.skud-map-modal-close {
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-hover);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.skud-map-modal-close:hover {
+  color: var(--text-primary);
+  border-color: var(--primary);
+}
+
+.skud-map-modal-stage {
+  position: relative;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background:
+    radial-gradient(circle at top left, color-mix(in srgb, var(--primary) 10%, transparent), transparent 42%),
+    var(--surface-hover);
+  min-height: 260px;
+}
+
+.skud-map-modal-image-wrap {
+  position: relative;
+  width: 100%;
+  min-height: 220px;
+}
+
+.skud-map-modal-image {
+  display: block;
+  width: 100%;
+  height: auto;
+  user-select: none;
+}
+
+.skud-map-marker {
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  border: 2px solid #fff;
+  border-radius: 999px;
+  background: #ef4444;
+  box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.18);
+  transform: translate(-50%, -50%);
+}
+
+.skud-map-marker::after {
+  content: '';
+  position: absolute;
+  inset: 4px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.92);
+}
+
+.skud-map-marker--active {
+  width: 22px;
+  height: 22px;
+  background: #2563eb;
+  box-shadow: 0 0 0 6px rgba(37, 99, 235, 0.18);
+}
+
+.skud-map-marker-label {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.9);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.skud-map-modal-hint {
+  color: var(--text-tertiary);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+@media (max-width: 720px) {
+  .skud-map-modal-overlay {
+    padding: 12px;
+  }
+
+  .skud-map-modal {
+    padding: 14px;
+    max-height: calc(100vh - 24px);
+  }
+
+  .skud-map-modal-title {
+    font-size: 16px;
+  }
+}

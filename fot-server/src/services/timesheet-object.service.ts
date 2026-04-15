@@ -29,6 +29,7 @@ export interface IAttendanceObjectEntry {
   object_id: string | null;
   object_name: string;
   hours_worked: number;
+  display_hours_worked: number;
   base_hours_worked: number;
   is_correction: boolean;
   notes?: string | null;
@@ -338,6 +339,7 @@ const toObjectEntry = (entry: IAggregatedObjectEntry): IAttendanceObjectEntry =>
   object_id: entry.object_id,
   object_name: entry.object_name,
   hours_worked: roundHours(entry.effective_minutes / 60),
+  display_hours_worked: roundHours(entry.effective_minutes / 60),
   base_hours_worked: roundHours(entry.base_minutes / 60),
   is_correction: entry.is_correction,
   notes: entry.notes ?? null,

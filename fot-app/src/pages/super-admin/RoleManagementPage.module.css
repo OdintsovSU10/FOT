@@ -407,6 +407,21 @@
   line-height: 1.45;
 }
 
+.behaviorHintList {
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--primary) 6%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--primary) 18%, var(--border));
+}
+
+.behaviorHintItem {
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .behaviorGroups {
   display: grid;
   gap: 14px;

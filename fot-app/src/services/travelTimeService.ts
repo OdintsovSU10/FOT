@@ -1,5 +1,14 @@
 import { apiClient } from '../api/client';
-import type { ITravelConfig, ITravelObject, ITravelRoute, ITravelSegment, TravelSegmentStatus } from '../types';
+import type {
+  IAccessPointMapView,
+  ITravelConfig,
+  ITravelObject,
+  ITravelObjectMap,
+  ITravelObjectMapPoint,
+  ITravelRoute,
+  ITravelSegment,
+  TravelSegmentStatus,
+} from '../types';
 
 interface ApiResponse<T> {
   data?: T;
@@ -67,6 +76,71 @@ export const travelTimeService = {
 
   async deleteObject(id: string): Promise<void> {
     await apiClient.delete<ApiResponse<null>>(`/skud/travel-objects/${id}`);
+  },
+
+  async getObjectMap(id: string): Promise<ITravelObjectMap> {
+    const res = await apiClient.get<ApiResponse<ITravelObjectMap>>(`/skud/travel-objects/${id}/map`);
+    if (!res.data) throw new Error(res.error || 'Ошибка загрузки карты объекта');
+    return res.data;
+  },
+
+  async getObjectMapUploadUrl(id: string, data: {
+    file_name: string;
+    content_type: string;
+    file_size: number;
+  }): Promise<{ upload_url: string; storage_path: string }> {
+    const res = await apiClient.post<ApiResponse<{ upload_url: string; storage_path: string }>>(
+      `/skud/travel-objects/${id}/map/upload-url`,
+      data,
+    );
+    if (!res.data) throw new Error(res.error || 'Ошибка подготовки загрузки карты');
+    return res.data;
+  },
+
+  async uploadObjectMapFile(uploadUrl: string, file: File): Promise<void> {
+    const formData = new FormData();
+    formData.append('cacheControl', '3600');
+    formData.append('', file);
+
+    const response = await fetch(uploadUrl, {
+      method: 'PUT',
+      body: formData,
+      headers: {
+        'x-upsert': 'true',
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error('Не удалось загрузить файл карты в Supabase Storage');
+    }
+  },
+
+  async confirmObjectMapUpload(id: string, data: {
+    storage_path: string;
+    file_name: string;
+    content_type: string;
+    file_size: number;
+  }): Promise<ITravelObjectMap> {
+    const res = await apiClient.post<ApiResponse<ITravelObjectMap>>(`/skud/travel-objects/${id}/map/confirm`, data);
+    if (!res.data) throw new Error(res.error || 'Ошибка подтверждения карты объекта');
+    return res.data;
+  },
+
+  async saveObjectMapPoints(id: string, points: ITravelObjectMapPoint[]): Promise<ITravelObjectMap> {
+    const res = await apiClient.put<ApiResponse<ITravelObjectMap>>(`/skud/travel-objects/${id}/map-points`, { points });
+    if (!res.data) throw new Error(res.error || 'Ошибка сохранения маркеров карты');
+    return res.data;
+  },
+
+  async deleteObjectMap(id: string): Promise<void> {
+    await apiClient.delete<ApiResponse<null>>(`/skud/travel-objects/${id}/map`);
+  },
+
+  async getAccessPointMap(accessPointName: string): Promise<IAccessPointMapView> {
+    const params = new URLSearchParams({ access_point_name: accessPointName });
+    const res = await apiClient.get<ApiResponse<IAccessPointMapView>>(`/skud/access-point-map?${params.toString()}`);
+    if (!res.data) throw new Error(res.error || 'Карта для точки доступа не настроена');
+    return res.data;
   },
 
   async getRoutes(): Promise<ITravelRoute[]> {

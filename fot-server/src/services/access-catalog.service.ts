@@ -9,6 +9,7 @@ import {
   type PermissionOption,
   type PageAccessEntry,
   validatePermissionSelections,
+  validateTimesheetWorkflowPermissions,
 } from '../config/access-control.js';
 
 interface ICapabilityCatalogRow {
@@ -58,6 +59,22 @@ function clonePermissionGroups(groups: PermissionGroup[]): PermissionGroup[] {
     ...group,
     options: group.options.map((option) => ({ ...option })),
   }));
+}
+
+function mergePageCatalogWithDefaults(pages: PageCatalogItem[] | null): PageCatalogItem[] {
+  const merged = new Map<string, PageCatalogItem>();
+
+  for (const page of DEFAULT_ACCESS_PAGE_CATALOG.filter((item) => item.is_active)) {
+    merged.set(page.key, { ...page });
+  }
+
+  for (const page of pages || []) {
+    merged.set(page.key, { ...page });
+  }
+
+  return [...merged.values()].sort(
+    (left, right) => left.sort_order - right.sort_order || left.label.localeCompare(right.label, 'ru'),
+  );
 }
 
 function normalizeCapabilityGroups(rows: ICapabilityCatalogRow[]): PermissionGroup[] {
@@ -148,7 +165,7 @@ async function ensureCatalogLoaded(): Promise<void> {
     loadCapabilityCatalogFromDatabase(),
   ]);
 
-  pageCatalogCache = clonePageCatalog(dbPages ?? DEFAULT_ACCESS_PAGE_CATALOG.filter((page) => page.is_active));
+  pageCatalogCache = clonePageCatalog(mergePageCatalogWithDefaults(dbPages));
   capabilityCatalogCache = clonePermissionGroups(dbCapabilities ?? DEFAULT_PERMISSION_GROUPS);
   catalogCacheExpiresAt = now + ACCESS_CATALOG_CACHE_TTL_MS;
 }
@@ -210,6 +227,11 @@ export async function validateRoleConfiguration(
   const permissionError = validatePermissionSelections(roleCode, permissions);
   if (permissionError) {
     return permissionError;
+  }
+
+  const timesheetWorkflowError = validateTimesheetWorkflowPermissions(roleCode, permissions, pageAccess);
+  if (timesheetWorkflowError) {
+    return timesheetWorkflowError;
   }
 
   const pageError = await validatePageAccessModes(pageAccess);

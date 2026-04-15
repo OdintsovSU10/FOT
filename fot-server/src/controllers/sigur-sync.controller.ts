@@ -64,7 +64,7 @@ export const sigurSyncController = {
     let lockAcquired = false;
 
     try {
-      if (!sigurService.isConfigured()) {
+      if (!(await sigurService.isConfigured())) {
         res.status(503).json({ success: false, error: 'Sigur не настроен' });
         return;
       }
@@ -268,7 +268,7 @@ export const sigurSyncController = {
     let lockAcquired = false;
 
     try {
-      if (!sigurService.isConfigured()) {
+      if (!(await sigurService.isConfigured())) {
         res.status(503).json({ success: false, error: 'Sigur не настроен' });
         return;
       }

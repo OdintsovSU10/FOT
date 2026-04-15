@@ -1,9 +1,8 @@
 import { type FC } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  REQUEST_TYPE_LABELS,
-  STATUS_LABELS,
   STATUS_COLORS,
+  STATUS_LABELS,
   type ISalaryRaiseRequest,
 } from '../../services/salaryRaiseService';
 import { useMySalaryRaiseRequests } from '../../hooks/useSalaryRaiseData';
@@ -11,11 +10,11 @@ import styles from './SalaryRaisePage.module.css';
 
 const formatSalary = (value: number | null | undefined): string => {
   if (value == null) return '—';
-  return new Intl.NumberFormat('ru-RU').format(value) + ' ₽';
+  return `${new Intl.NumberFormat('ru-RU').format(value)} ₽`;
 };
 
-const formatDate = (date: string): string =>
-  new Date(date).toLocaleDateString('ru-RU');
+const formatDate = (value: string): string => new Date(value).toLocaleDateString('ru-RU');
+
 const EMPTY_REQUESTS: ISalaryRaiseRequest[] = [];
 
 export const SalaryRaisePage: FC = () => {
@@ -26,12 +25,12 @@ export const SalaryRaisePage: FC = () => {
   return (
     <div className={styles.page}>
       <header className={styles.header}>
-        <h1 className={styles.title}>Заявки на повышение оклада</h1>
-        <button
-          className={styles.createBtn}
-          onClick={() => navigate('/employee/salary-raise/new')}
-        >
-          Создать заявку
+        <div>
+          <h1 className={styles.title}>Повышение оклада</h1>
+          <p className={styles.subtitle}>Заявки на повышение для ваших прямых подчинённых.</p>
+        </div>
+        <button className={styles.createBtn} onClick={() => navigate('/employee/salary-raise/new')}>
+          Новая заявка
         </button>
       </header>
 
@@ -39,58 +38,74 @@ export const SalaryRaisePage: FC = () => {
         <div className={styles.loading}>Загрузка...</div>
       ) : requests.length === 0 ? (
         <div className={styles.empty}>
-          <p>У вас пока нет заявок на повышение оклада</p>
+          <p>У вас пока нет заявок на повышение оклада.</p>
         </div>
       ) : (
         <div className={styles.list}>
-          {requests.map((r) => {
-            const currentSalary = r.employee_snapshot?.current_salary;
-            const raisePercent = r.raise_percentage != null
-              ? r.raise_percentage.toFixed(1)
-              : null;
-
-            return (
-              <article
-                key={r.id}
-                className={styles.card}
-                onClick={() => navigate(`/employee/salary-raise/${r.id}`)}
-              >
-                <div className={styles.cardTop}>
-                  <span
-                    className={styles.statusBadge}
-                    style={{
-                      backgroundColor: STATUS_COLORS[r.status] + '1a',
-                      color: STATUS_COLORS[r.status],
-                    }}
-                  >
-                    {STATUS_LABELS[r.status]}
-                  </span>
-                  <span className={styles.requestType}>
-                    {REQUEST_TYPE_LABELS[r.request_type]}
-                  </span>
+          {requests.map((request) => (
+            <article
+              key={request.id}
+              className={styles.card}
+              style={{ borderLeftColor: STATUS_COLORS[request.status] }}
+              onClick={() => navigate(`/employee/salary-raise/${request.id}`)}
+            >
+              <div className={styles.cardHeader}>
+                <div className={styles.cardHeaderLeft}>
+                  <span className={styles.requestType}>{request.employee_snapshot.full_name}</span>
+                  <span className={styles.cardDate}>Создана {formatDate(request.created_at)}</span>
                 </div>
+                <span
+                  className={styles.statusBadge}
+                  style={{
+                    color: STATUS_COLORS[request.status],
+                    backgroundColor: `${STATUS_COLORS[request.status]}1A`,
+                  }}
+                >
+                  {STATUS_LABELS[request.status]}
+                </span>
+              </div>
 
+              <div className={styles.cardBody}>
                 <div className={styles.salaryRow}>
                   <span className={styles.salaryLabel}>Оклад:</span>
-                  <span className={styles.salaryValue}>
-                    {formatSalary(currentSalary)}
-                  </span>
+                  <span className={styles.salaryValue}>{formatSalary(request.current_salary_entered)}</span>
                   <span className={styles.arrow}>→</span>
-                  <span className={styles.salaryValue}>
-                    {formatSalary(r.requested_salary)}
-                  </span>
-                  {raisePercent && (
-                    <span className={styles.raisePercent}>+{raisePercent}%</span>
-                  )}
+                  <span className={styles.salaryValue}>{formatSalary(request.requested_salary)}</span>
+                  <span className={styles.raisePercent}>+{request.raise_percentage.toFixed(1)}%</span>
+                </div>
+
+                <div className={styles.compactGrid}>
+                  <div className={styles.compactItem}>
+                    <span className={styles.compactLabel}>Объект:</span>
+                    <span className={styles.compactValue}>{request.work_object_name || '—'}</span>
+                  </div>
+
+                  <div className={styles.compactItem}>
+                    <span className={styles.compactLabel}>Руководитель:</span>
+                    <span className={styles.compactValue}>
+                      {request.manager_snapshot?.full_name || request.employee_snapshot.supervisor_name || '—'}
+                    </span>
+                  </div>
+
+                  <div className={styles.compactItem}>
+                    <span className={styles.compactLabel}>Должность:</span>
+                    <span className={styles.compactValue}>{request.employee_snapshot.position_name || '—'}</span>
+                  </div>
+
+                  <div className={styles.compactItem}>
+                    <span className={styles.compactLabel}>Достижения:</span>
+                    <span className={styles.compactValue}>{request.achievements.length}</span>
+                  </div>
                 </div>
 
                 <div className={styles.cardMeta}>
-                  <span>Желаемая дата: {formatDate(r.desired_effective_date)}</span>
-                  <span>Создана: {formatDate(r.created_at)}</span>
+                  <span>Подразделение: {request.employee_snapshot.department_name || '—'}</span>
+                  <span>Создана: {formatDate(request.created_at)}</span>
+                  <span>Обновлена: {formatDate(request.updated_at)}</span>
                 </div>
-              </article>
-            );
-          })}
+              </div>
+            </article>
+          ))}
         </div>
       )}
     </div>

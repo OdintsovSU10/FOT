@@ -2,15 +2,21 @@ import { Response } from 'express';
 import { z } from 'zod';
 import type { AuthenticatedRequest } from '../types/index.js';
 import {
+  confirmTravelObjectMapUpload as confirmTravelObjectMapUploadService,
   createTravelObject,
+  createTravelObjectMapUploadUrl as createTravelObjectMapUploadUrlService,
   getTravelConfig as getTravelConfigService,
+  getAccessPointMapView as getAccessPointMapViewService,
+  getTravelObjectMap as getTravelObjectMapService,
   createTravelRoute,
+  deleteTravelObjectMap as deleteTravelObjectMapService,
   deleteTravelObject,
   deleteTravelRoute,
   listTravelObjects,
   listTravelRoutes,
   listTravelSegments,
   rebuildTravelSegmentsForScope,
+  saveTravelObjectMapPoints as saveTravelObjectMapPointsService,
   saveTravelConfig as saveTravelConfigService,
   updateTravelObject,
   updateTravelRoute,
@@ -28,6 +34,24 @@ const updateObjectSchema = z.object({
   access_points: z.array(z.string().trim().min(1).max(255)).max(500).default([]),
 });
 
+const uploadTravelObjectMapSchema = z.object({
+  file_name: z.string().trim().min(1).max(255),
+  content_type: z.string().trim().min(1).max(100),
+  file_size: z.number().int().positive().max(10 * 1024 * 1024),
+});
+
+const confirmTravelObjectMapSchema = uploadTravelObjectMapSchema.extend({
+  storage_path: z.string().trim().min(1).max(1024),
+});
+
+const saveTravelObjectMapPointsSchema = z.object({
+  points: z.array(z.object({
+    access_point_name: z.string().trim().min(1).max(255),
+    x_ratio: z.number().min(0).max(1),
+    y_ratio: z.number().min(0).max(1),
+  })).max(500).default([]),
+});
+
 const saveRouteSchema = z.object({
   from_object_id: z.string().uuid(),
   to_object_id: z.string().uuid(),
@@ -43,6 +67,10 @@ const segmentQuerySchema = z.object({
   department_id: z.string().uuid().optional(),
   employee_id: z.coerce.number().int().positive().optional(),
   status: z.enum(['auto_approved', 'delayed', 'needs_object', 'needs_route', 'problem']).optional(),
+});
+
+const accessPointMapQuerySchema = z.object({
+  access_point_name: z.string().trim().min(1).max(255),
 });
 
 export const skudTravelController = {
@@ -136,6 +164,129 @@ export const skudTravelController = {
       }
       const message = error instanceof Error ? error.message : 'Ошибка удаления объекта';
       console.error('deleteTravelObject error:', error);
+      res.status(500).json({ success: false, error: message });
+    }
+  },
+
+  async getTravelObjectMap(req: AuthenticatedRequest, res: Response): Promise<void> {
+    try {
+      const objectId = z.string().uuid().parse(req.params.id);
+      const data = await getTravelObjectMapService(objectId);
+      if (!data) {
+        res.status(404).json({ success: false, error: 'Карта для объекта ещё не загружена' });
+        return;
+      }
+      res.json({ success: true, data });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        res.status(400).json({ success: false, error: 'Некорректный id объекта', details: error.errors });
+        return;
+      }
+      const message = error instanceof Error ? error.message : 'Ошибка загрузки карты объекта';
+      console.error('getTravelObjectMap error:', error);
+      res.status(500).json({ success: false, error: message });
+    }
+  },
+
+  async getTravelObjectMapUploadUrl(req: AuthenticatedRequest, res: Response): Promise<void> {
+    try {
+      const objectId = z.string().uuid().parse(req.params.id);
+      const parsed = uploadTravelObjectMapSchema.parse(req.body);
+      const data = await createTravelObjectMapUploadUrlService({
+        objectId,
+        fileName: parsed.file_name,
+        contentType: parsed.content_type,
+        fileSize: parsed.file_size,
+      });
+      res.json({ success: true, data });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        res.status(400).json({ success: false, error: 'Некорректные данные файла карты', details: error.errors });
+        return;
+      }
+      const message = error instanceof Error ? error.message : 'Ошибка подготовки загрузки карты';
+      console.error('getTravelObjectMapUploadUrl error:', error);
+      res.status(500).json({ success: false, error: message });
+    }
+  },
+
+  async confirmTravelObjectMapUpload(req: AuthenticatedRequest, res: Response): Promise<void> {
+    try {
+      const objectId = z.string().uuid().parse(req.params.id);
+      const parsed = confirmTravelObjectMapSchema.parse(req.body);
+      const data = await confirmTravelObjectMapUploadService({
+        objectId,
+        storagePath: parsed.storage_path,
+        fileName: parsed.file_name,
+        contentType: parsed.content_type,
+        fileSize: parsed.file_size,
+      });
+      res.json({ success: true, data });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        res.status(400).json({ success: false, error: 'Некорректные данные файла карты', details: error.errors });
+        return;
+      }
+      const message = error instanceof Error ? error.message : 'Ошибка подтверждения карты объекта';
+      console.error('confirmTravelObjectMapUpload error:', error);
+      res.status(500).json({ success: false, error: message });
+    }
+  },
+
+  async saveTravelObjectMapPoints(req: AuthenticatedRequest, res: Response): Promise<void> {
+    try {
+      const objectId = z.string().uuid().parse(req.params.id);
+      const parsed = saveTravelObjectMapPointsSchema.parse(req.body);
+      const data = await saveTravelObjectMapPointsService({
+        objectId,
+        points: parsed.points,
+      });
+      res.json({ success: true, data });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        res.status(400).json({ success: false, error: 'Некорректные координаты карты', details: error.errors });
+        return;
+      }
+      const message = error instanceof Error ? error.message : 'Ошибка сохранения маркеров карты';
+      console.error('saveTravelObjectMapPoints error:', error);
+      res.status(500).json({ success: false, error: message });
+    }
+  },
+
+  async deleteTravelObjectMap(req: AuthenticatedRequest, res: Response): Promise<void> {
+    try {
+      const objectId = z.string().uuid().parse(req.params.id);
+      await deleteTravelObjectMapService(objectId);
+      res.json({ success: true });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        res.status(400).json({ success: false, error: 'Некорректный id объекта', details: error.errors });
+        return;
+      }
+      const message = error instanceof Error ? error.message : 'Ошибка удаления карты объекта';
+      console.error('deleteTravelObjectMap error:', error);
+      res.status(500).json({ success: false, error: message });
+    }
+  },
+
+  async getAccessPointMap(req: AuthenticatedRequest, res: Response): Promise<void> {
+    try {
+      const parsed = accessPointMapQuerySchema.parse({
+        access_point_name: req.query.access_point_name,
+      });
+      const data = await getAccessPointMapViewService(parsed.access_point_name);
+      if (!data) {
+        res.status(404).json({ success: false, error: 'Для выбранной точки доступа карта не настроена' });
+        return;
+      }
+      res.json({ success: true, data });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        res.status(400).json({ success: false, error: 'Некорректное название точки доступа', details: error.errors });
+        return;
+      }
+      const message = error instanceof Error ? error.message : 'Ошибка загрузки карты точки доступа';
+      console.error('getAccessPointMap error:', error);
       res.status(500).json({ success: false, error: message });
     }
   },

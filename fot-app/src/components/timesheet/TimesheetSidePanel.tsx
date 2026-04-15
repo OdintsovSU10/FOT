@@ -2,7 +2,10 @@ import { type FC, useMemo, useState, useEffect, useCallback } from 'react';
 import { X, ChevronDown, ChevronRight, LogIn, LogOut, Timer } from 'lucide-react';
 import type { TimesheetEntry, TimesheetEmployee, SkudEvent, IProductionCalendarMonth } from '../../types';
 import type { IResolvedSchedule } from '../../types/schedule';
+import { useAuth } from '../../contexts/AuthContext';
+import { useAccessPointMapViewer } from '../../hooks/useAccessPointMapViewer';
 import { skudService } from '../../services/skudService';
+import { AccessPointTrigger } from '../skud/AccessPointTrigger';
 import {
   getDaysInMonth,
   formatDateRu,
@@ -142,6 +145,12 @@ export const TimesheetSidePanel: FC<ISidePanelProps> = ({
   calendar = null,
   visibleDays,
 }) => {
+  const { canViewPage } = useAuth();
+  const {
+    canOpenAccessPointMap,
+    openAccessPointMap,
+    accessPointMapModal,
+  } = useAccessPointMapViewer(canViewPage('/skud-settings'));
   const [expandedDays, setExpandedDays] = useState<Set<number>>(new Set());
   const [skudEvents, setSkudEvents] = useState<Map<string, IDayEvents>>(new Map());
   const [loadingSkud, setLoadingSkud] = useState(false);
@@ -214,11 +223,12 @@ export const TimesheetSidePanel: FC<ISidePanelProps> = ({
   }, [employee, entries, year, month, schedules, dailySchedules, calendar, visibleDays]);
 
   const getHoursClass = (entry: TimesheetEntry | null): string => {
+    const visibleHours = entry?.display_hours_worked ?? entry?.hours_worked ?? null;
     if (!entry) return 'ts-day-detail-hours--absent';
     if (entry.status === 'absent') return 'ts-day-detail-hours--absent';
     if (entry.status === 'sick') return 'ts-day-detail-hours--sick';
     if (entry.status === 'vacation') return 'ts-day-detail-hours--vacation';
-    if (entry.hours_worked && entry.hours_worked >= 8) return 'ts-day-detail-hours--full';
+    if (visibleHours && visibleHours >= 8) return 'ts-day-detail-hours--full';
     return 'ts-day-detail-hours--partial';
   };
 
@@ -230,12 +240,13 @@ export const TimesheetSidePanel: FC<ISidePanelProps> = ({
   };
 
   const getHoursLabel = (entry: TimesheetEntry | null): string => {
+    const visibleHours = entry?.display_hours_worked ?? entry?.hours_worked ?? null;
     if (!entry) return '—';
     if (entry.status === 'absent') return 'Неявка';
     if (entry.status === 'sick') return 'Б/л';
     if (entry.status === 'vacation') return 'Отпуск';
     if (entry.status === 'business_trip') return 'Ком-ка';
-    if (entry.hours_worked != null) return formatHM(entry.hours_worked);
+    if (visibleHours != null) return formatHM(visibleHours);
     return '—';
   };
 
@@ -285,8 +296,9 @@ export const TimesheetSidePanel: FC<ISidePanelProps> = ({
               const hasEvents = dayEventsData && dayEventsData.events.length > 0;
               const summaryFirstEntry = entry?.first_entry || dayEventsData?.firstEntry || null;
               const summaryLastExit = entry?.last_exit || dayEventsData?.lastExit || null;
-              const summaryTotalSeconds = entry?.hours_worked != null
-                ? Math.max(0, Math.round(entry.hours_worked * 3600))
+              const visibleHours = entry?.display_hours_worked ?? entry?.hours_worked ?? null;
+              const summaryTotalSeconds = visibleHours != null
+                ? Math.max(0, Math.round(visibleHours * 3600))
                 : (dayEventsData?.totalSeconds || 0);
 
               return (
@@ -357,7 +369,12 @@ export const TimesheetSidePanel: FC<ISidePanelProps> = ({
                                 {ev.direction === 'entry' ? 'Вход' : 'Выход'}
                               </span>
                               {ev.access_point && (
-                                <span className="ts-day-event-point">{ev.access_point}</span>
+                                <AccessPointTrigger
+                                  accessPointName={ev.access_point}
+                                  className="ts-day-event-point"
+                                  canOpen={canOpenAccessPointMap}
+                                  onOpen={openAccessPointMap}
+                                />
                               )}
                             </div>
                             );
@@ -392,6 +409,7 @@ export const TimesheetSidePanel: FC<ISidePanelProps> = ({
           </div>
         </div>
       </div>
+      {accessPointMapModal}
     </>
   );
 };

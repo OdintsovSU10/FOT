@@ -3,7 +3,11 @@ import {
   LogIn, LogOut, ChevronDown, ChevronRight, ChevronLeft,
   Clock, Timer, Download,
 } from 'lucide-react';
+import { useAuth } from '../../contexts/AuthContext';
+import { useAccessPointMapViewer } from '../../hooks/useAccessPointMapViewer';
 import { skudService } from '../../services/skudService';
+import { EmployeeSigurAccessPointsCard } from './EmployeeSigurAccessPointsCard';
+import { AccessPointTrigger } from '../skud/AccessPointTrigger';
 import { DateInput } from '../ui/DateInput';
 import type { SkudEvent } from '../../types';
 import { triggerBlobDownload } from '../../utils/download';
@@ -11,6 +15,7 @@ import { triggerBlobDownload } from '../../utils/download';
 interface IEmployeeSkudSectionProps {
   employeeId: number;
   employeeName: string;
+  sigurEmployeeId?: number | null;
   departmentId?: string;
   onSync?: () => void;
   focusDate?: string | null;
@@ -222,9 +227,16 @@ const getNavLabel = (mode: ViewMode, viewDate: Date): string => {
 
 
 export const EmployeeSkudSection: FC<IEmployeeSkudSectionProps> = ({
-  employeeId, focusDate, focusKey, externalViewMode,
+  employeeId, sigurEmployeeId, focusDate, focusKey, externalViewMode,
   externalRangeStart, externalRangeEnd, externalViewDate,
 }) => {
+  const { canViewPage, canEditPage } = useAuth();
+  const {
+    canOpenAccessPointMap,
+    openAccessPointMap,
+    accessPointMapModal,
+  } = useAccessPointMapViewer(canViewPage('/skud-settings'));
+  const canEditSigurAccessPoints = canEditPage('/employees') || canEditPage('/staff-control') || canEditPage('/skud-settings');
   const [groups, setGroups] = useState<IDayGroup[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -367,6 +379,13 @@ export const EmployeeSkudSection: FC<IEmployeeSkudSectionProps> = ({
 
   return (
     <div className="skud-section">
+      <EmployeeSigurAccessPointsCard
+        employeeId={employeeId}
+        sigurEmployeeId={sigurEmployeeId ?? null}
+        canEdit={canEditSigurAccessPoints}
+        selectedConnection="external"
+      />
+
       {/* Navigation Bar */}
       <div className="skud-nav-bar">
         {!externalViewMode && (
@@ -443,7 +462,16 @@ export const EmployeeSkudSection: FC<IEmployeeSkudSectionProps> = ({
                   </span>
                   {ev.direction === 'entry' ? 'Вход' : 'Выход'}
                 </div>
-                <div className="skud-col-point skud-table-point">{ev.access_point || '—'}</div>
+                <div className="skud-col-point">
+                  {ev.access_point ? (
+                    <AccessPointTrigger
+                      accessPointName={ev.access_point}
+                      className="skud-table-point"
+                      canOpen={canOpenAccessPointMap}
+                      onOpen={openAccessPointMap}
+                    />
+                  ) : '—'}
+                </div>
               </div>
             );
           })}
@@ -573,7 +601,12 @@ export const EmployeeSkudSection: FC<IEmployeeSkudSectionProps> = ({
                             {ev.direction === 'entry' ? 'Вход' : 'Выход'}
                           </span>
                           {ev.access_point && (
-                            <span className="skud-event-point">{ev.access_point}</span>
+                            <AccessPointTrigger
+                              accessPointName={ev.access_point}
+                              className="skud-event-point"
+                              canOpen={canOpenAccessPointMap}
+                              onOpen={openAccessPointMap}
+                            />
                           )}
                         </div>
                       );
@@ -585,6 +618,7 @@ export const EmployeeSkudSection: FC<IEmployeeSkudSectionProps> = ({
           })}
         </div>
       )}
+      {accessPointMapModal}
     </div>
   );
 };

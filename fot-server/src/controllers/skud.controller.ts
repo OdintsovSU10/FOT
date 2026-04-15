@@ -596,7 +596,7 @@ const skudReadController = {
     try {
       const connection = (req.query.connection as 'internal' | 'external') || undefined;
       const includeMeta = req.query.includeMeta === '1' || req.query.includeMeta === 'true';
-      if (sigurService.isConfigured()) {
+      if (await sigurService.isConfigured()) {
         try {
           const sigurAPs = await sigurService.getAccessPoints(connection);
           const options = buildAccessPointOptions(sigurAPs as Record<string, unknown>[]);

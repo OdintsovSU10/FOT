@@ -413,12 +413,15 @@ export const EmployeeCardPage: FC = () => {
   // Actions
   const startEditing = () => {
     if (!employee) return;
+    const isSigurLinked = employee.sigur_employee_id != null;
     setEditData({
       full_name: employee.full_name,
       hire_date: employee.hire_date,
-      birth_date: employee.birth_date || undefined,
-      current_salary: employee.current_salary,
-      org_department_id: employee.org_department_id || undefined,
+      ...(isSigurLinked ? {} : {
+        birth_date: employee.birth_date || undefined,
+        current_salary: employee.current_salary,
+        org_department_id: employee.org_department_id || undefined,
+      }),
     });
     setIsEditing(true);
     setActiveTab('info');
@@ -426,8 +429,16 @@ export const EmployeeCardPage: FC = () => {
 
   const saveEditing = async () => {
     if (!employee) return;
-    try { await employeeService.update(employee.id, editData); setIsEditing(false); reloadEmployee(); }
-    catch { setError('Ошибка сохранения'); }
+    try {
+      const payload = employee.sigur_employee_id != null
+        ? { full_name: editData.full_name || '' }
+        : editData;
+      await employeeService.update(employee.id, payload);
+      setIsEditing(false);
+      reloadEmployee();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Ошибка сохранения');
+    }
   };
 
   const handleArchive = async () => {
@@ -544,7 +555,7 @@ export const EmployeeCardPage: FC = () => {
           {canEdit && (
             <div className="ec-profile-actions">
               <button className="ec-action-btn" onClick={startEditing}>
-                <Edit3 size={16} /> Редактировать
+                <Edit3 size={16} /> {employee.sigur_employee_id != null ? 'Изменить ФИО' : 'Редактировать'}
               </button>
               {employee.is_archived ? (
                 <button className="ec-action-btn" onClick={handleRestore}>
@@ -652,6 +663,7 @@ export const EmployeeCardPage: FC = () => {
             <EmployeeInfoSection
               employee={employee}
               isEditing={isEditing}
+              isSigurLinked={employee.sigur_employee_id != null}
               editData={editData}
               onEditDataChange={setEditData}
               onSave={saveEditing}
@@ -675,6 +687,7 @@ export const EmployeeCardPage: FC = () => {
             employeeId={employee.id}
             employeeName={employee.full_name}
             departmentId={employee.org_department_id || undefined}
+            sigurEmployeeId={employee.sigur_employee_id}
             onSync={reloadSkudEvents}
             focusDate={skudFocusDate}
             focusKey={skudFocusKey}

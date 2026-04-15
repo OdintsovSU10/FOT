@@ -3,6 +3,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { Check, X, Clock, CheckCircle, XCircle, RotateCcw, History } from 'lucide-react';
 import { Tabs } from '../../components/ui/Tabs';
 import { useToast } from '../../contexts/ToastContext';
+import { useAuth } from '../../contexts/AuthContext';
 import {
   APPROVAL_STATUS_LABELS,
   timesheetApprovalService,
@@ -121,6 +122,7 @@ const ApprovalHistorySection: FC<{ approvalId: number }> = ({ approvalId }) => {
 };
 
 export const TimesheetReviewPage: FC = () => {
+  const { hasPermission } = useAuth();
   const [commentId, setCommentId] = useState<number | null>(null);
   const [commentMode, setCommentMode] = useState<CommentMode>(null);
   const [comment, setComment] = useState('');
@@ -128,8 +130,10 @@ export const TimesheetReviewPage: FC = () => {
   const [processingId, setProcessingId] = useState<number | null>(null);
   const toast = useToast();
   const queryClient = useQueryClient();
+  const canReviewTimesheets = hasPermission('timesheet.workflow.review');
+  const canMonitorTimesheets = canReviewTimesheets || hasPermission('timesheet.workflow.monitor');
   const status = TAB_STATUSES[activeTab];
-  const approvalsQuery = useTimesheetApprovalReviewList(status);
+  const approvalsQuery = useTimesheetApprovalReviewList(status, canMonitorTimesheets);
   const approvals: ITimesheetApproval[] = approvalsQuery.data ?? [];
   const structureQuery = useStructureTree();
   const deptMap = useMemo<IDeptMap>(() => {
@@ -222,6 +226,10 @@ export const TimesheetReviewPage: FC = () => {
 
   return (
     <div className="tsr-page">
+      {!canMonitorTimesheets ? (
+        <div className="tsr-empty">Для этой роли не включён мониторинг табелей.</div>
+      ) : (
+        <>
       <div className="tsr-toolbar">
         <div className="tsr-tabs">
           <Tabs tabs={TAB_LABELS} activeTab={activeTab} onTabChange={handleTabChange} />
@@ -280,7 +288,7 @@ export const TimesheetReviewPage: FC = () => {
                   <ApprovalHistorySection approvalId={approval.id} />
                 </div>
 
-                {isSubmittedTab && (
+                {isSubmittedTab && canReviewTimesheets && (
                   <div className="tsr-card-actions">
                     {commentFormOpened && commentMode === 'review' ? (
                       <div className="tsr-comment-form">
@@ -315,7 +323,7 @@ export const TimesheetReviewPage: FC = () => {
                   </div>
                 )}
 
-                {isApprovedTab && (
+                {isApprovedTab && canReviewTimesheets && (
                   <div className="tsr-card-actions">
                     {commentFormOpened && commentMode === 'return' ? (
                       <div className="tsr-comment-form">
@@ -345,6 +353,8 @@ export const TimesheetReviewPage: FC = () => {
             );
           })}
         </div>
+      )}
+        </>
       )}
     </div>
   );

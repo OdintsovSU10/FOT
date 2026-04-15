@@ -7,7 +7,7 @@ import {
   getTimesheetReminderEventsForDate,
   parseTimesheetApprovalPeriod,
 } from './timesheet-period.service.js';
-import { timesheetResponsiblesService } from './timesheet-responsibles.service.js';
+import { listTimesheetWorkflowRecipientIds } from './timesheet-workflow-recipients.service.js';
 
 const REMINDER_INTERVAL_MS = 15 * 60_000;
 const STARTUP_DELAY_MS = 45_000;
@@ -155,43 +155,6 @@ async function persistReminderLog(items: Array<{
   }
 }
 
-async function sendMissingResponsibleAlert(departmentId: string, period: string, departmentName: string): Promise<void> {
-  const hrRecipients = await timesheetResponsiblesService.getHrRecipientsForDepartment(departmentId);
-  if (hrRecipients.length === 0) return;
-
-  const unsentRecipients: string[] = [];
-  for (const userId of hrRecipients) {
-    if (!(await hasReminderLog(departmentId, period, userId, 'missing_responsible'))) {
-      unsentRecipients.push(userId);
-    }
-  }
-
-  if (unsentRecipients.length === 0) return;
-
-  const title = 'Не назначен ответственный за табель';
-  const body = `Отдел ${departmentName}: для периода ${period} не заполнен основной или резервный ответственный по табелю.`;
-
-  await notificationService.createMany(unsentRecipients.map(userId => ({
-    userId,
-    type: 'timesheet_missing_responsible',
-    title,
-    body,
-    metadata: {
-      departmentId,
-      period,
-      path: '/admin/settings',
-    },
-  })));
-  await pushService.sendGenericNotification(unsentRecipients, title, body, { path: '/admin/settings' });
-  await persistReminderLog(unsentRecipients.map(userId => ({
-    department_id: departmentId,
-    period,
-    user_id: userId,
-    stage: 'missing_responsible',
-    metadata: { type: 'timesheet_missing_responsible' },
-  })));
-}
-
 async function processReminderEvent(event: { period: string; stage: string }): Promise<void> {
   const departmentIds = await loadActiveDepartmentIds();
   if (departmentIds.length === 0) return;
@@ -208,17 +171,6 @@ async function processReminderEvent(event: { period: string; stage: string }): P
     }
 
     const departmentName = departmentNameMap.get(departmentId) || departmentId;
-    const reminderRecipients = await timesheetResponsiblesService.getReminderRecipientsByDepartment(departmentId);
-    const hasPrimary = reminderRecipients.primary.length > 0;
-    const hasBackup = reminderRecipients.backup.length > 0;
-
-    if (!hasPrimary || !hasBackup) {
-      await sendMissingResponsibleAlert(departmentId, event.period, departmentName);
-      if (!hasPrimary && !hasBackup) {
-        continue;
-      }
-    }
-
     let recipientIds: string[] = [];
     let title = '';
     let body = '';
@@ -226,15 +178,13 @@ async function processReminderEvent(event: { period: string; stage: string }): P
     let type = 'timesheet_reminder';
 
     if (event.stage === 'overdue') {
-      recipientIds = await timesheetResponsiblesService.getHrRecipientsForDepartment(departmentId);
+      recipientIds = await listTimesheetWorkflowRecipientIds(departmentId, ['review', 'monitor']);
       ({ title, body } = buildHrReminderMessage(event.period, departmentName));
       path = getReviewPath(event.period, event.stage);
       type = 'timesheet_overdue';
     } else {
       ({ title, body } = buildDepartmentReminderMessage(event.period, departmentName, event.stage));
-      recipientIds = event.stage === 'escalation'
-        ? [...new Set([...reminderRecipients.primary, ...reminderRecipients.backup])]
-        : (reminderRecipients.primary.length > 0 ? reminderRecipients.primary : reminderRecipients.backup);
+      recipientIds = await listTimesheetWorkflowRecipientIds(departmentId, ['submit']);
     }
 
     if (recipientIds.length === 0) continue;

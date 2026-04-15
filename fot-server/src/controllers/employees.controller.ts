@@ -6,6 +6,11 @@ import { loadStructureCache, decryptEmployee, decryptEmployeeList } from '../ser
 import { employeeCache } from '../services/employee-cache.service.js';
 import { parseFIO } from '../utils/fio.utils.js';
 import { employeeChangesService } from '../services/employee-changes.service.js';
+import {
+  ensureSigurPosition,
+  syncLinkedEmployeeFromSigur,
+} from '../services/sigur-linked-employees.service.js';
+import { sigurService } from '../services/sigur.service.js';
 import type { AuthenticatedRequest, EmployeeEncrypted } from '../types/index.js';
 import { canAccessEmployeeInScope, resolveRequestDataScope, resolveScopedDepartmentId } from '../services/data-scope.service.js';
 
@@ -387,12 +392,58 @@ export const employeesController = {
 
       const { data: existing } = await supabase
         .from('employees')
-        .select('id')
+        .select('id, sigur_employee_id')
         .eq('id', id)
         .single();
 
       if (!existing) {
         res.status(404).json({ success: false, error: 'Employee not found' });
+        return;
+      }
+
+      if (existing.sigur_employee_id) {
+        const allowedKeys = new Set(['full_name']);
+        const providedKeys = Object.keys(validated).filter((key) => validated[key as keyof typeof validated] !== undefined);
+        const forbiddenKeys = providedKeys.filter(key => !allowedKeys.has(key));
+
+        if (forbiddenKeys.length > 0) {
+          res.status(400).json({
+            success: false,
+            error: 'Для сотрудников, связанных с Sigur, через эту форму можно менять только ФИО',
+          });
+          return;
+        }
+
+        if (validated.full_name !== undefined) {
+          const normalizedFullName = validated.full_name.trim();
+          await sigurService.updateEmployee(existing.sigur_employee_id, {
+            name: normalizedFullName,
+          });
+        }
+
+        await syncLinkedEmployeeFromSigur(employeeId);
+
+        employeeCache.invalidate(id);
+        const { data: refreshed, error: refreshedError } = await supabase
+          .from('employees')
+          .select(EMPLOYEE_FULL_COLUMNS)
+          .eq('id', id)
+          .single();
+
+        if (refreshedError || !refreshed) {
+          res.status(500).json({ success: false, error: 'Failed to refresh employee after Sigur update' });
+          return;
+        }
+
+        await auditService.logFromRequest(req, req.user.id, 'UPDATE_EMPLOYEE', {
+          entityType: 'employee',
+          entityId: id,
+          details: { updated_fields: providedKeys, source: 'sigur' },
+        });
+
+        const structureCache = await loadStructureCache();
+        const employee = decryptEmployee(refreshed as unknown as EmployeeEncrypted, structureCache);
+        res.json({ success: true, data: employee });
         return;
       }
 
@@ -553,7 +604,8 @@ export const employeesController = {
   async changePosition(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
       const { id } = req.params;
-      if (!(await canAccessEmployeeInScope(req, Number(id)))) {
+      const employeeId = Number(id);
+      if (!(await canAccessEmployeeInScope(req, employeeId))) {
         res.status(403).json({ success: false, error: 'Нет доступа к сотруднику' });
         return;
       }
@@ -564,40 +616,73 @@ export const employeesController = {
         return;
       }
 
-      // Ищем или создаём должность
       const name = position_name.trim();
-      let positionId: string;
-
-      const { data: existing } = await supabase
-        .from('positions')
-        .select('id')
-        .ilike('name', name)
-        .limit(1)
+      const { data: employeeRow, error: employeeError } = await supabase
+        .from('employees')
+        .select('id, sigur_employee_id, position_id')
+        .eq('id', employeeId)
         .single();
 
-      if (existing) {
-        positionId = existing.id;
-      } else {
-        const { data: created } = await supabase
-          .from('positions')
-          .insert({ name, is_active: true, sort_order: 0 })
-          .select('id')
-          .single();
-        positionId = created!.id;
+      if (employeeError || !employeeRow) {
+        res.status(404).json({ success: false, error: 'Employee not found' });
+        return;
       }
 
-      await employeeChangesService.changePosition(Number(id), positionId, {
-        reason,
-        effectiveDate: effective_date,
-        createdBy: req.user.id,
-      });
+      let positionId: string | null = null;
+
+      if (employeeRow.sigur_employee_id) {
+        const ensured = await ensureSigurPosition(name);
+        positionId = ensured.localPositionId;
+
+        await sigurService.updateEmployee(employeeRow.sigur_employee_id, {
+          positionId: ensured.sigurPositionId,
+        });
+
+        if (positionId && positionId !== employeeRow.position_id) {
+          await employeeChangesService.changePosition(employeeId, positionId, {
+            reason,
+            effectiveDate: effective_date,
+            createdBy: req.user.id,
+          });
+        }
+
+        await syncLinkedEmployeeFromSigur(employeeId);
+      } else {
+        const { data: existing } = await supabase
+          .from('positions')
+          .select('id')
+          .ilike('name', name)
+          .limit(1)
+          .single();
+
+        if (existing) {
+          positionId = existing.id;
+        } else {
+          const { data: created } = await supabase
+            .from('positions')
+            .insert({ name, is_active: true, sort_order: 0 })
+            .select('id')
+            .single();
+          positionId = created!.id;
+        }
+
+        if (!positionId) {
+          throw new Error('Не удалось определить локальную должность');
+        }
+
+        await employeeChangesService.changePosition(employeeId, positionId, {
+          reason,
+          effectiveDate: effective_date,
+          createdBy: req.user.id,
+        });
+      }
 
       employeeCache.invalidate(id);
 
       await auditService.logFromRequest(req, req.user.id, 'UPDATE_EMPLOYEE', {
         entityType: 'employee',
         entityId: id,
-        details: { position_name: name, reason },
+        details: { position_name: name, reason, source: employeeRow.sigur_employee_id ? 'sigur' : 'portal' },
       });
 
       res.json({ success: true });

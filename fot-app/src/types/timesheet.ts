@@ -9,6 +9,7 @@ export interface TimesheetEntry {
   work_date: string;
   status: TimesheetStatus;
   hours_worked: number | null;
+  display_hours_worked?: number | null;
   base_hours_worked?: number | null;
   travel_minutes_credited?: number;
   travel_hours_credited?: number;
@@ -37,6 +38,7 @@ export interface TimesheetObjectEntry {
   object_id: string | null;
   object_name: string;
   hours_worked: number;
+  display_hours_worked: number;
   base_hours_worked: number;
   is_correction: boolean;
   notes?: string | null;

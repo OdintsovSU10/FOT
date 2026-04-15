@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { timesheetController } from '../controllers/timesheet.controller.js';
-import { authenticate, requireAnyPageAccess } from '../middleware/auth.js';
+import { authenticate, requireAnyPageAccess, requireAnyPermission } from '../middleware/auth.js';
 
 const router = Router();
 
@@ -15,25 +15,25 @@ router.get(
 
 router.get(
   '/team-management-config',
-  requireAnyPageAccess(['/timesheet', '/timesheet-hr'], 'view'),
+  requireAnyPageAccess(['/timesheet', '/timesheet-hr', '/timesheet/team-management'], 'view'),
   timesheetController.getTeamManagementConfig
 );
 
 router.get(
   '/team-management/search-employees',
-  requireAnyPageAccess(['/timesheet', '/timesheet-hr'], 'edit'),
+  requireAnyPageAccess(['/timesheet', '/timesheet-hr', '/timesheet/team-management'], 'edit'),
   timesheetController.searchTeamEmployees
 );
 
 router.post(
   '/team-management/add-employee',
-  requireAnyPageAccess(['/timesheet', '/timesheet-hr'], 'edit'),
+  requireAnyPageAccess(['/timesheet', '/timesheet-hr', '/timesheet/team-management'], 'edit'),
   timesheetController.addEmployeeToDepartment
 );
 
 router.post(
   '/team-management/exclude-employee',
-  requireAnyPageAccess(['/timesheet', '/timesheet-hr'], 'edit'),
+  requireAnyPageAccess(['/timesheet', '/timesheet-hr', '/timesheet/team-management'], 'edit'),
   timesheetController.excludeEmployeeFromDepartment
 );
 
@@ -47,7 +47,7 @@ router.get(
 // POST /api/timesheet/export-mass
 router.post(
   '/export-mass',
-  requireAnyPageAccess(['/timesheet', '/timesheet-hr'], 'edit'),
+  requireAnyPermission(['timesheet.workflow.monitor', 'timesheet.workflow.review']),
   timesheetController.exportMass
 );
 

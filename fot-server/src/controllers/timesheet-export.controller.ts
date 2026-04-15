@@ -3,6 +3,7 @@ import ExcelJS from 'exceljs';
 import type { AuthenticatedRequest } from '../types/index.js';
 import { fetchTimesheetDataForDepartment, type TimesheetExportHalf } from '../services/timesheet-export.service.js';
 import { buildTimesheetSheet } from '../services/timesheet-excel.service.js';
+import { resolveRequestDataScope } from '../services/data-scope.service.js';
 
 const MONTH_NAMES = ['', 'Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь',
   'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
@@ -20,7 +21,13 @@ export async function exportTimesheet(req: AuthenticatedRequest, res: Response) 
       ? half
       : 'FULL';
     const deptId = department_id && typeof department_id === 'string' ? department_id : null;
-    const data = await fetchTimesheetDataForDepartment(month, deptId, exportHalf);
+    const scope = await resolveRequestDataScope(req);
+    const data = await fetchTimesheetDataForDepartment(
+      month,
+      deptId,
+      exportHalf,
+      scope === 'department' ? 'capped_to_schedule' : 'actual',
+    );
 
     const wb = new ExcelJS.Workbook();
     buildTimesheetSheet(wb, 'Табель', data);

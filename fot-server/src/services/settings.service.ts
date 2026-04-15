@@ -37,6 +37,29 @@ export interface ITimesheetTeamManagementSettings {
   enabled: boolean;
 }
 
+export type SigurConnectionSettingsSource = 'system_settings' | 'env' | 'unset';
+
+export interface ISigurConnectionPublicConfig {
+  url: string;
+  username: string;
+  hasPassword: boolean;
+  source: SigurConnectionSettingsSource;
+}
+
+export interface ISigurConnectionResolvedConfig {
+  url: string;
+  username: string;
+  password: string;
+  source: Exclude<SigurConnectionSettingsSource, 'unset'>;
+}
+
+export interface ISigurConnectionSettings {
+  internal: ISigurConnectionPublicConfig;
+  external: ISigurConnectionPublicConfig;
+  archiveDepartmentId: number | null;
+  archiveDepartmentName: string | null;
+}
+
 export const DEFAULT_SIGUR_MONITOR_SETTINGS: ISigurMonitorSettings = {
   enabled: true,
   failureThreshold: 2,
@@ -65,6 +88,11 @@ export const DEFAULT_TIMESHEET_TEAM_MANAGEMENT_SETTINGS: ITimesheetTeamManagemen
 let cache: Map<string, string | null> = new Map();
 let cacheLoadedAt = 0;
 const CACHE_TTL = 60_000; // 60 сек
+
+const isSecretKey = (key: string): boolean => {
+  const normalized = key.toLowerCase();
+  return normalized.includes('secret') || normalized.includes('key') || normalized.includes('password');
+};
 
 const parseBoolean = (value: string | null | undefined, fallback: boolean): boolean => {
   if (value == null) return fallback;
@@ -117,7 +145,7 @@ export const settingsService = {
         key,
         value,
         description: description || null,
-        is_secret: key.includes('secret') || key.includes('key'),
+        is_secret: isSecretKey(key),
         updated_at: new Date().toISOString(),
         updated_by: userId,
       }, { onConflict: 'key' });
@@ -129,7 +157,7 @@ export const settingsService = {
       key: e.key,
       value: e.value,
       description: e.description || null,
-      is_secret: e.key.includes('secret') || e.key.includes('key'),
+      is_secret: isSecretKey(e.key),
       updated_at: new Date().toISOString(),
       updated_by: userId,
     }));
@@ -169,6 +197,172 @@ export const settingsService = {
       bucketName,
       enabled: !!(accountId && accessKeyId && secretAccessKey),
     };
+  },
+
+  async getSigurConnectionSettings(): Promise<ISigurConnectionSettings> {
+    await loadCache();
+
+    const buildConfig = (
+      scope: 'internal' | 'external',
+      envUrl?: string,
+      envUsername?: string,
+      envPassword?: string,
+    ): ISigurConnectionPublicConfig => {
+      const settingsUrl = cache.get(`sigur_${scope}_url`) || '';
+      const settingsUsername = cache.get(`sigur_${scope}_username`) || '';
+      const settingsPassword = cache.get(`sigur_${scope}_password`) || '';
+
+      if (settingsUrl && settingsUsername && settingsPassword) {
+        return {
+          url: settingsUrl,
+          username: settingsUsername,
+          hasPassword: true,
+          source: 'system_settings',
+        };
+      }
+
+      if (envUrl && envUsername && envPassword) {
+        return {
+          url: envUrl,
+          username: envUsername,
+          hasPassword: true,
+          source: 'env',
+        };
+      }
+
+      return {
+        url: settingsUrl || envUrl || '',
+        username: settingsUsername || envUsername || '',
+        hasPassword: Boolean(settingsPassword || envPassword),
+        source: 'unset',
+      };
+    };
+
+    const archiveDepartmentIdRaw = cache.get('sigur_archive_department_id');
+    const archiveDepartmentName = cache.get('sigur_archive_department_name') || null;
+    const archiveDepartmentId = archiveDepartmentIdRaw && /^\d+$/.test(archiveDepartmentIdRaw)
+      ? Number(archiveDepartmentIdRaw)
+      : null;
+
+    return {
+      internal: buildConfig(
+        'internal',
+        process.env.SIGUR_INTERNAL_URL,
+        process.env.SIGUR_INTERNAL_USERNAME,
+        process.env.SIGUR_INTERNAL_PASSWORD,
+      ),
+      external: buildConfig(
+        'external',
+        process.env.SIGUR_EXTERNAL_URL,
+        process.env.SIGUR_EXTERNAL_USERNAME,
+        process.env.SIGUR_EXTERNAL_PASSWORD,
+      ),
+      archiveDepartmentId,
+      archiveDepartmentName,
+    };
+  },
+
+  async getResolvedSigurConnectionConfig(
+    scope: 'internal' | 'external',
+  ): Promise<ISigurConnectionResolvedConfig | null> {
+    await loadCache();
+
+    const settingsUrl = cache.get(`sigur_${scope}_url`) || '';
+    const settingsUsername = cache.get(`sigur_${scope}_username`) || '';
+    const settingsPassword = cache.get(`sigur_${scope}_password`) || '';
+
+    if (settingsUrl && settingsUsername && settingsPassword) {
+      return {
+        url: settingsUrl,
+        username: settingsUsername,
+        password: settingsPassword,
+        source: 'system_settings',
+      };
+    }
+
+    const envUrl = scope === 'internal' ? process.env.SIGUR_INTERNAL_URL : process.env.SIGUR_EXTERNAL_URL;
+    const envUsername = scope === 'internal' ? process.env.SIGUR_INTERNAL_USERNAME : process.env.SIGUR_EXTERNAL_USERNAME;
+    const envPassword = scope === 'internal' ? process.env.SIGUR_INTERNAL_PASSWORD : process.env.SIGUR_EXTERNAL_PASSWORD;
+
+    if (envUrl && envUsername && envPassword) {
+      return {
+        url: envUrl,
+        username: envUsername,
+        password: envPassword,
+        source: 'env',
+      };
+    }
+
+    return null;
+  },
+
+  async setSigurConnectionSettings(
+    config: {
+      internal?: { url?: string | null; username?: string | null; password?: string | null };
+      external?: { url?: string | null; username?: string | null; password?: string | null };
+      archiveDepartmentId?: number | null;
+      archiveDepartmentName?: string | null;
+    },
+    userId: string,
+  ): Promise<ISigurConnectionSettings> {
+    const entries: { key: string; value: string | null; description?: string }[] = [];
+
+    const upsertConnectionEntries = (
+      scope: 'internal' | 'external',
+      values?: { url?: string | null; username?: string | null; password?: string | null },
+    ) => {
+      if (!values) return;
+
+      if (values.url !== undefined) {
+        entries.push({
+          key: `sigur_${scope}_url`,
+          value: values.url?.trim() || null,
+          description: `Sigur ${scope} URL override`,
+        });
+      }
+
+      if (values.username !== undefined) {
+        entries.push({
+          key: `sigur_${scope}_username`,
+          value: values.username?.trim() || null,
+          description: `Sigur ${scope} username override`,
+        });
+      }
+
+      if (values.password !== undefined) {
+        entries.push({
+          key: `sigur_${scope}_password`,
+          value: values.password || null,
+          description: `Sigur ${scope} password override`,
+        });
+      }
+    };
+
+    upsertConnectionEntries('internal', config.internal);
+    upsertConnectionEntries('external', config.external);
+
+    if (config.archiveDepartmentId !== undefined) {
+      entries.push({
+        key: 'sigur_archive_department_id',
+        value: config.archiveDepartmentId == null ? null : String(config.archiveDepartmentId),
+        description: 'Sigur archive department ID for fired employees',
+      });
+    }
+
+    if (config.archiveDepartmentName !== undefined) {
+      entries.push({
+        key: 'sigur_archive_department_name',
+        value: config.archiveDepartmentName?.trim() || null,
+        description: 'Sigur archive department name for fired employees',
+      });
+    }
+
+    if (entries.length > 0) {
+      await this.setMultiple(entries, userId);
+      this.invalidateCache();
+    }
+
+    return this.getSigurConnectionSettings();
   },
 
   async getSigurMonitorConfig(): Promise<ISigurMonitorSettings> {

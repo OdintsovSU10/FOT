@@ -106,7 +106,7 @@ export const skudWriteController = {
       deleteAccessPointCacheEntry('__all__');
       if (connection) deleteAccessPointCacheEntry(`__all__:${connection}`);
 
-      if (!sigurService.isConfigured()) {
+      if (!(await sigurService.isConfigured())) {
         res.status(400).json({ success: false, error: 'Sigur не настроен' });
         return;
       }
@@ -200,7 +200,7 @@ export const skudWriteController = {
         res.status(400).json({ success: false, error: 'startDate и endDate обязательны (YYYY-MM-DD)' });
         return;
       }
-      if (!sigurService.isConfigured()) {
+      if (!(await sigurService.isConfigured())) {
         res.status(503).json({ success: false, error: 'Sigur не настроен' });
         return;
       }

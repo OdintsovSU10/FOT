@@ -155,6 +155,7 @@ router.post(
 router.post(
   '/:id/fire',
   requireAnyPageAccess(['/employees', '/staff-control'], 'edit'),
+  requireCritical2FA,
   employeesController.fire
 );
 
@@ -169,6 +170,7 @@ router.post(
 router.post(
   '/:id/move-department',
   requireAnyPageAccess(['/employees', '/staff-control'], 'edit'),
+  requireCritical2FA,
   employeesController.moveDepartment
 );
 

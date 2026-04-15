@@ -7,7 +7,7 @@ import type { AccessPointOption, IAccessPointSetting } from '../../types';
 interface IAccessPointsTabProps {
   connected: boolean | null;
   canEdit: boolean;
-  selectedConnection: 'internal' | 'external';
+  selectedConnection: 'external';
   setError: (error: string) => void;
 }
 

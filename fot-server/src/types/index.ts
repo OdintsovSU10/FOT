@@ -112,6 +112,7 @@ export interface Employee {
   middle_name: string | null;
   position_name: string | null;
   position_id: string | null;
+  sigur_employee_id: number | null;
   current_salary: number | null;
   salary_actual: number | null;
   salary_calculated: number | null;
@@ -317,23 +318,33 @@ export interface LeaveRequest {
 }
 
 // Заявка на повышение оклада
-export type SalaryRaiseStatus = 'draft' | 'supervisor_review' | 'hr_review' | 'finance_review' | 'approved' | 'rejected' | 'cancelled';
-export type SalaryRaiseRequestType = 'performance' | 'market_adjustment' | 'promotion' | 'new_responsibilities' | 'retention' | 'other';
+export type SalaryRaiseStatus = 'draft' | 'admin_review' | 'approved' | 'rejected' | 'cancelled';
+export type SalaryRaiseRequestType = 'other';
 
 export interface SalaryRaiseRequest {
   id: number;
   employee_id: number;
   author_user_id: string;
+  flow_version: number;
   status: SalaryRaiseStatus;
   employee_snapshot: Record<string, unknown>;
-  request_type: SalaryRaiseRequestType;
+  manager_snapshot: Record<string, unknown> | null;
+  current_salary_entered: number | null;
+  request_type: SalaryRaiseRequestType | null;
   requested_salary: number;
   raise_percentage: number;
-  desired_effective_date: string;
-  reason_brief: string;
-  achievements: Record<string, unknown>[];
+  desired_effective_date: string | null;
+  reason_brief: string | null;
+  achievements: unknown[];
   responsibility_changes: Record<string, unknown>;
   self_assessment: Record<string, unknown>;
+  work_object_id: string | null;
+  work_object_name: string | null;
+  job_summary: string | null;
+  manager_justification: string | null;
+  admin_review: Record<string, unknown> | null;
+  admin_reviewer_id: string | null;
+  admin_reviewed_at: string | null;
   supervisor_review: Record<string, unknown> | null;
   supervisor_reviewer_id: string | null;
   supervisor_reviewed_at: string | null;

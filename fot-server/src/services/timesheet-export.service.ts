@@ -3,6 +3,10 @@ import { resolveSchedulesForPeriod } from './schedule.service.js';
 import type { IResolvedSchedule } from '../types/index.js';
 import { buildAttendanceEntries } from './attendance.service.js';
 import type { IAttendanceObjectEntry } from './timesheet-object.service.js';
+import {
+  listEmployeeIdsAssignedToDepartmentPeriod,
+  resolveTimesheetPeriodRange,
+} from './timesheet-department-assignments.service.js';
 
 export type TimesheetExportHalf = 'H1' | 'H2' | 'FULL';
 
@@ -52,13 +56,13 @@ export async function fetchTimesheetDataForDepartment(
   month: string,
   departmentId: string | null,
   exportHalf: TimesheetExportHalf = 'FULL',
+  displayMode: 'actual' | 'capped_to_schedule' = 'actual',
 ): Promise<IDepartmentTimesheetData> {
-  const [yearStr, monthStr] = month.split('-');
-  const year = parseInt(yearStr);
-  const mon = parseInt(monthStr);
-  const startDate = `${month}-01`;
-  const daysInMonth = new Date(year, mon, 0).getDate();
-  const endDate = `${month}-${daysInMonth}`;
+  const periodRange = resolveTimesheetPeriodRange(month, exportHalf);
+  if (!periodRange) {
+    throw new Error('Invalid export month');
+  }
+  const { year, month: mon, daysInMonth, startDate, endDate } = periodRange;
   const today = new Date();
   const todayStr = today.toISOString().slice(0, 10);
   const exportDays = resolveTimesheetExportDays(year, mon, exportHalf);
@@ -75,18 +79,25 @@ export async function fetchTimesheetDataForDepartment(
   }
 
   // Сотрудники
-  let empQuery = supabase
-    .from('employees')
-    .select('id, full_name, position_id, org_department_id, sigur_employee_id, work_category')
-    .eq('employment_status', 'active')
-    .eq('is_archived', false)
-    .order('full_name');
+  const assignedEmployeeIds = departmentId
+    ? await listEmployeeIdsAssignedToDepartmentPeriod(departmentId, startDate, endDate)
+    : [];
+  let employees: Array<Record<string, unknown>> = [];
+  if (!departmentId || assignedEmployeeIds.length > 0) {
+    let empQuery = supabase
+      .from('employees')
+      .select('id, full_name, position_id, org_department_id, sigur_employee_id, work_category')
+      .eq('employment_status', 'active')
+      .eq('is_archived', false)
+      .order('full_name');
 
-  if (departmentId) {
-    empQuery = empQuery.eq('org_department_id', departmentId);
+    if (departmentId) {
+      empQuery = empQuery.in('id', assignedEmployeeIds);
+    }
+
+    const { data } = await empQuery;
+    employees = (data || []) as Array<Record<string, unknown>>;
   }
-
-  const { data: employees } = await empQuery;
   const empArr: IExportEmployee[] = (employees || []).map(e => ({
     id: e.id as number,
     full_name: e.full_name as string,
@@ -116,6 +127,7 @@ export async function fetchTimesheetDataForDepartment(
     dailySchedulesMap,
     calendarMonth: null,
     todayStr,
+    displayMode,
   });
 
   const dataMap = new Map<number, Map<string, { status: string; hours: number; corrected?: boolean }>>();
@@ -124,7 +136,9 @@ export async function fetchTimesheetDataForDepartment(
     for (const [date, entry] of dateMap) {
       dataMap.get(employeeId)!.set(date, {
         status: entry.status,
-        hours: typeof entry.hours_worked === 'number' ? entry.hours_worked : 0,
+        hours: typeof entry.display_hours_worked === 'number'
+          ? entry.display_hours_worked
+          : (typeof entry.hours_worked === 'number' ? entry.hours_worked : 0),
         corrected: entry.is_correction,
       });
     }

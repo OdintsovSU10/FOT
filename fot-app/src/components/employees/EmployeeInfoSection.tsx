@@ -5,6 +5,7 @@ import type { Employee, EmployeeInput } from '../../types';
 interface IEmployeeInfoSectionProps {
   employee: Employee;
   isEditing: boolean;
+  isSigurLinked: boolean;
   editData: Partial<EmployeeInput>;
   onEditDataChange: (data: Partial<EmployeeInput>) => void;
   onSave: () => void;
@@ -42,6 +43,7 @@ const formatSalary = (salary: number | null) => {
 export const EmployeeInfoSection: FC<IEmployeeInfoSectionProps> = ({
   employee,
   isEditing,
+  isSigurLinked,
   editData,
   onEditDataChange,
   onSave,
@@ -63,14 +65,21 @@ export const EmployeeInfoSection: FC<IEmployeeInfoSectionProps> = ({
             <label>Должность</label>
             <span className="form-readonly">{employee.position_name || '—'}</span>
           </div>
-          <div className="form-group">
-            <label>Дата рождения</label>
-            <input
-              type="date"
-              value={editData.birth_date || ''}
-              onChange={e => onEditDataChange({ ...editData, birth_date: e.target.value || undefined })}
-            />
-          </div>
+          {isSigurLinked ? (
+            <div className="form-group">
+              <label>Режим редактирования</label>
+              <span className="form-readonly">Для связанных с Sigur сотрудников в этой версии можно менять только ФИО.</span>
+            </div>
+          ) : (
+            <div className="form-group">
+              <label>Дата рождения</label>
+              <input
+                type="date"
+                value={editData.birth_date || ''}
+                onChange={e => onEditDataChange({ ...editData, birth_date: e.target.value || undefined })}
+              />
+            </div>
+          )}
         </div>
         <div className="card-edit-actions">
           <button className="btn-cancel" onClick={onCancel}>

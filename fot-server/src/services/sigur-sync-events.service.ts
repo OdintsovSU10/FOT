@@ -45,7 +45,7 @@ export async function syncEventsLogic(
   onProgress?: (data: Record<string, unknown>) => void,
   context?: ISyncContext,
 ): Promise<ISyncEventsResult> {
-  if (!sigurService.isConfigured()) throw new Error('Sigur не настроен');
+  if (!(await sigurService.isConfigured())) throw new Error('Sigur не настроен');
 
   const send = onProgress || (() => {});
   const days = buildInclusiveDateRange(startDate, endDate);

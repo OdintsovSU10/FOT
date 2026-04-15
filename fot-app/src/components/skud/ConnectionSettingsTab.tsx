@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
 import type { FC } from 'react';
-import { Wifi, WifiOff, RefreshCw, Eye, Search, ChevronDown } from 'lucide-react';
+import { Wifi, WifiOff, RefreshCw, Eye, Search, ChevronDown, LockKeyhole, Pencil, Save } from 'lucide-react';
 import { sigurService } from '../../services/sigurService';
 import { sortDepartmentOptions } from '../../utils/departmentUtils';
 import type { IPreviewData, SettingsTab } from './sigur-settings.types';
+import type { SigurConnectionSettings } from '../../types';
 import { FIELD_LABELS, DIRECTION_LABELS } from './sigur-settings.utils';
 import { StructureSyncSection } from './StructureSyncSection';
 import { EventsSyncSection } from './EventsSyncSection';
@@ -11,25 +12,33 @@ import { EventsSyncSection } from './EventsSyncSection';
 interface IConnectionSettingsTabProps {
   connected: boolean | null;
   checking: boolean;
-  selectedConnection: 'internal' | 'external';
   availableConnections: { internal: boolean; external: boolean };
   canEdit: boolean;
   error: string;
   setError: (error: string) => void;
-  setSelectedConnection: (conn: 'internal' | 'external') => void;
-  checkConnection: (connType?: 'internal' | 'external') => void;
+  checkConnection: () => Promise<boolean>;
   setActiveTab: (tab: SettingsTab) => void;
   syncFilterSummary: string;
 }
 
+interface IConnectionDraft {
+  url: string;
+  username: string;
+  password: string;
+}
+
+const SOURCE_LABELS: Record<SigurConnectionSettings['internal']['source'], string> = {
+  system_settings: 'Сохранённые настройки',
+  env: '.env',
+  unset: 'Не настроено',
+};
+
 export const ConnectionSettingsTab: FC<IConnectionSettingsTabProps> = ({
   connected,
   checking,
-  selectedConnection,
   availableConnections,
   canEdit,
   setError,
-  setSelectedConnection,
   checkConnection,
   setActiveTab,
   syncFilterSummary,
@@ -44,6 +53,13 @@ export const ConnectionSettingsTab: FC<IConnectionSettingsTabProps> = ({
   const [deptOpen, setDeptOpen] = useState(false);
   const [deptSearch, setDeptSearch] = useState('');
   const deptRef = useRef<HTMLDivElement>(null);
+  const [connectionSettings, setConnectionSettings] = useState<SigurConnectionSettings | null>(null);
+  const [settingsLoading, setSettingsLoading] = useState(true);
+  const [settingsSaving, setSettingsSaving] = useState(false);
+  const [archiveBusy, setArchiveBusy] = useState(false);
+  const [savedFlash, setSavedFlash] = useState(false);
+  const [showConnectionForm, setShowConnectionForm] = useState(true);
+  const [draft, setDraft] = useState<IConnectionDraft>({ url: '', username: '', password: '' });
 
   // Закрытие dropdown по клику вне
   useEffect(() => {
@@ -71,6 +87,46 @@ export const ConnectionSettingsTab: FC<IConnectionSettingsTabProps> = ({
     setPreviewEnd(`${y}-${mStr}-${dStr}`);
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    setSettingsLoading(true);
+
+    sigurService.getConnectionSettings()
+      .then(settings => {
+        if (cancelled) return;
+        setConnectionSettings(settings);
+        setDraft({
+          url: settings.external.url || '',
+          username: settings.external.username || '',
+          password: '',
+        });
+        const hasSavedCredentials = Boolean(
+          settings.external.url
+          && settings.external.username
+          && settings.external.hasPassword
+          && settings.external.source !== 'unset',
+        );
+        setShowConnectionForm(!hasSavedCredentials);
+      })
+      .catch(err => {
+        if (cancelled) return;
+        setError(err instanceof Error ? err.message : 'Не удалось загрузить настройки подключения Sigur');
+      })
+      .finally(() => {
+        if (!cancelled) setSettingsLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [setError]);
+
+  useEffect(() => {
+    if (connected === false) {
+      setShowConnectionForm(true);
+    }
+  }, [connected]);
+
   // Загрузка отделов из whitelist синхронизации
   useEffect(() => {
     if (!connected) return;
@@ -92,7 +148,7 @@ export const ConnectionSettingsTab: FC<IConnectionSettingsTabProps> = ({
     try {
       const startTime = `${previewStart}T00:00:00`;
       const endTime = `${previewEnd}T23:59:59`;
-      const data = await sigurService.preview(startTime, endTime, previewDepartment || undefined, selectedConnection);
+      const data = await sigurService.preview(startTime, endTime, previewDepartment || undefined, 'external');
       setPreviewData(data);
     } catch {
       setError('Ошибка загрузки данных предпросмотра');
@@ -106,12 +162,85 @@ export const ConnectionSettingsTab: FC<IConnectionSettingsTabProps> = ({
     setDiscoverData(null);
     setError('');
     try {
-      const result = await sigurService.discover(selectedConnection);
+      const result = await sigurService.discover('external');
       setDiscoverData(result);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Ошибка диагностики API');
     } finally {
       setDiscovering(false);
+    }
+  };
+
+  const updateDraft = (field: keyof IConnectionDraft, value: string) => {
+    setDraft(prev => ({ ...prev, [field]: value }));
+    setSavedFlash(false);
+  };
+
+  const handleCancelConnectionSettings = () => {
+    setDraft({
+      url: connectionSettings?.external.url || '',
+      username: connectionSettings?.external.username || '',
+      password: '',
+    });
+    setSavedFlash(false);
+    setError('');
+    setShowConnectionForm(false);
+  };
+
+  const handleSaveConnectionSettings = async () => {
+    setSettingsSaving(true);
+    setError('');
+    try {
+      const payload = {
+        external: {
+          url: draft.url,
+          username: draft.username,
+          ...(draft.password.trim() ? { password: draft.password } : {}),
+        },
+      } as Parameters<typeof sigurService.saveConnectionSettings>[0];
+
+      if (connectionSettings) {
+        payload.archiveDepartmentId = connectionSettings.archiveDepartmentId ?? null;
+        payload.archiveDepartmentName = connectionSettings.archiveDepartmentName ?? null;
+      }
+
+      const nextSettings = await sigurService.saveConnectionSettings(payload);
+      setConnectionSettings(nextSettings);
+      setDraft({ url: nextSettings.external.url || '', username: nextSettings.external.username || '', password: '' });
+      setSavedFlash(true);
+      window.setTimeout(() => setSavedFlash(false), 2500);
+      const isConnected = await checkConnection();
+      const hasSavedCredentials = Boolean(
+        nextSettings.external.url
+        && nextSettings.external.username
+        && nextSettings.external.hasPassword
+        && nextSettings.external.source !== 'unset',
+      );
+      if (isConnected && hasSavedCredentials) {
+        setShowConnectionForm(false);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось сохранить настройки подключения Sigur');
+    } finally {
+      setSettingsSaving(false);
+    }
+  };
+
+  const handleEnsureArchiveDepartment = async () => {
+    setArchiveBusy(true);
+    setError('');
+    try {
+      const archive = await sigurService.ensureArchiveDepartment('external');
+      setConnectionSettings(prev => prev ? ({
+        ...prev,
+        archiveDepartmentId: archive.sigurDepartmentId,
+        archiveDepartmentName: archive.name,
+      }) : prev);
+      void checkConnection();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось создать архивный отдел Sigur');
+    } finally {
+      setArchiveBusy(false);
     }
   };
 
@@ -128,41 +257,149 @@ export const ConnectionSettingsTab: FC<IConnectionSettingsTabProps> = ({
     return null;
   };
 
+  const effectiveConnections = connectionSettings?.connections ?? availableConnections;
+  const externalConfig = connectionSettings?.external;
+
   return (
     <>
       {/* Секция 1: Подключение */}
       <div className="sigur-section">
-        <h2 className="sigur-section-title">
-          {connected ? <Wifi size={18} /> : <WifiOff size={18} />}
-          Подключение к Sigur
-        </h2>
+        <div className="sigur-section-title-row">
+          <h2 className="sigur-section-title">
+            {connected ? <Wifi size={18} /> : <WifiOff size={18} />}
+            Подключение к Sigur
+          </h2>
+          {!showConnectionForm && canEdit && (
+            <button
+              className="sigur-btn"
+              onClick={() => setShowConnectionForm(true)}
+              disabled={settingsSaving}
+            >
+              <Pencil size={14} />
+              Редактировать
+            </button>
+          )}
+        </div>
         <div className="sigur-connection-row">
           {statusBadge()}
-          <div className="sigur-conn-toggle">
-            <button
-              className={`sigur-conn-toggle-btn ${selectedConnection === 'internal' ? 'active' : ''}`}
-              onClick={() => { setSelectedConnection('internal'); checkConnection('internal'); }}
-              disabled={checking || !availableConnections.internal}
-              title={availableConnections.internal ? 'Локальная сеть' : 'Не настроено в .env'}
-            >
-              Internal
-            </button>
-            <button
-              className={`sigur-conn-toggle-btn ${selectedConnection === 'external' ? 'active' : ''}`}
-              onClick={() => { setSelectedConnection('external'); checkConnection('external'); }}
-              disabled={checking || !availableConnections.external}
-              title={availableConnections.external ? 'Внешний доступ' : 'Не настроено в .env'}
-            >
-              External
-            </button>
-          </div>
+          <span className="sigur-source-badge ready">Используется только внешний контур</span>
           <button
             className="sigur-btn"
-            onClick={() => checkConnection()}
+            onClick={() => { void checkConnection(); }}
             disabled={checking}
           >
             <RefreshCw size={14} />
             Проверить
+          </button>
+        </div>
+
+        {showConnectionForm && (
+          <div className="sigur-conn-config-grid">
+            <div className="sigur-conn-config-card">
+              <div className="sigur-conn-config-head">
+                <div>
+                  <div className="sigur-conn-config-title">External</div>
+                  <div className="sigur-conn-config-hint">Единственный рабочий контур для удалённой работы и серверных задач.</div>
+                </div>
+                <div className="sigur-conn-config-meta">
+                  <span className={`sigur-source-badge ${externalConfig?.source || 'unset'}`}>
+                    {SOURCE_LABELS[externalConfig?.source || 'unset']}
+                  </span>
+                  <span className={`sigur-source-badge ${effectiveConnections.external ? 'ready' : 'unset'}`}>
+                    {effectiveConnections.external ? 'Готово к подключению' : 'Нет полного контура'}
+                  </span>
+                </div>
+              </div>
+
+              <div className="sigur-conn-form-grid">
+                <label>
+                  URL
+                  <input
+                    className="sigur-form-input"
+                    type="text"
+                    placeholder="https://..."
+                    value={draft.url}
+                    onChange={event => updateDraft('url', event.target.value)}
+                    disabled={!canEdit || settingsSaving}
+                  />
+                </label>
+                <label>
+                  Логин
+                  <input
+                    className="sigur-form-input"
+                    type="text"
+                    placeholder="Логин Sigur"
+                    value={draft.username}
+                    onChange={event => updateDraft('username', event.target.value)}
+                    disabled={!canEdit || settingsSaving}
+                  />
+                </label>
+                <div className="sigur-conn-password-block">
+                  <div className="sigur-conn-password-status">
+                    <LockKeyhole size={14} />
+                    {externalConfig?.hasPassword ? 'Пароль уже сохранён. Введите новый, если хотите заменить.' : 'Введите пароль для внешнего контура Sigur.'}
+                  </div>
+                  <input
+                    className="sigur-form-input"
+                    type="password"
+                    placeholder={externalConfig?.hasPassword ? 'Новый пароль или оставьте пустым' : 'Пароль Sigur'}
+                    value={draft.password}
+                    onChange={event => updateDraft('password', event.target.value)}
+                    disabled={!canEdit || settingsSaving}
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {showConnectionForm && (
+          <div className="sigur-conn-actions">
+            <button
+              className="sigur-btn"
+              onClick={handleCancelConnectionSettings}
+              disabled={settingsSaving}
+            >
+              Отмена
+            </button>
+            <button
+              className={`sigur-btn sigur-btn-primary ${savedFlash ? 'sigur-btn-saved' : ''}`}
+              onClick={() => void handleSaveConnectionSettings()}
+              disabled={!canEdit || settingsSaving || settingsLoading}
+            >
+              <Save size={14} />
+              {savedFlash ? 'Сохранено' : settingsSaving ? 'Сохранение...' : 'Сохранить параметры'}
+            </button>
+            <span className="sigur-muted">
+              URL и логин сохраняются в настройках портала. Пустой пароль не затирает текущий секрет, а оставляет его без изменений.
+            </span>
+          </div>
+        )}
+
+        <div className="sigur-archive-card">
+          <div>
+            <div className="sigur-conn-config-title">Архивный отдел для уволенных</div>
+            <div className="sigur-conn-config-hint">
+              При увольнении linked-сотрудник переносится в этот отдел в Sigur, затем блокируется.
+            </div>
+          </div>
+          <div className="sigur-archive-status">
+            {connectionSettings?.archiveDepartmentId ? (
+              <>
+                <span>Отдел: <strong>{connectionSettings.archiveDepartmentName || 'Уволенные'}</strong></span>
+                <span>ID: <strong>{connectionSettings.archiveDepartmentId}</strong></span>
+              </>
+            ) : (
+              <span>Архивный отдел пока не создан.</span>
+            )}
+          </div>
+          <button
+            className="sigur-btn"
+            onClick={() => void handleEnsureArchiveDepartment()}
+            disabled={!canEdit || archiveBusy || !connected}
+          >
+            <LockKeyhole size={14} />
+            {archiveBusy ? 'Создание...' : connectionSettings?.archiveDepartmentId ? 'Проверить архивный отдел' : 'Создать архивный отдел'}
           </button>
         </div>
       </div>

@@ -4,7 +4,7 @@ import { sigurMonitorController } from '../controllers/sigur-monitor.controller.
 import { sigurSyncController } from '../controllers/sigur-sync.controller.js';
 import { sigurAdminController } from '../controllers/sigur-admin.controller.js';
 import { sigurFilterController } from '../controllers/sigur-filter.controller.js';
-import { authenticate, requirePageAccess } from '../middleware/auth.js';
+import { authenticate, requireAnyPageAccess, requireCritical2FA, requirePageAccess } from '../middleware/auth.js';
 
 const router = Router();
 
@@ -12,6 +12,9 @@ const router = Router();
 router.use(authenticate);
 
 // === Read-only эндпоинты ===
+
+// GET /api/sigur/connection-settings — текущие параметры подключения и архивного отдела
+router.get('/connection-settings', requirePageAccess('/skud-settings', 'view'), sigurController.getConnectionSettings);
 
 // === Monitor эндпоинты (admin+) ===
 
@@ -56,6 +59,13 @@ router.get('/discover', requirePageAccess('/skud-settings', 'view'), sigurContro
 // GET /api/sigur/preview — предпросмотр сырых данных Sigur
 router.get('/preview', requirePageAccess('/skud-settings', 'view'), sigurController.preview);
 
+// GET /api/sigur/employees/:id/access-points — прямые точки доступа сотрудника
+router.get(
+  '/employees/:id/access-points',
+  requireAnyPageAccess(['/employee', '/employee/history', '/employees', '/staff-control', '/skud-settings'], 'view'),
+  sigurController.getEmployeeAccessPoints,
+);
+
 // === Sync эндпоинты ===
 
 // POST /api/sigur/sync-all — полная синхронизация структуры (SSE)
@@ -78,6 +88,30 @@ router.post('/sync-positions', requirePageAccess('/skud-settings', 'edit'), sigu
 
 // POST /api/sigur/match-employees — ручное сопоставление сотрудников
 router.post('/match-employees', requirePageAccess('/skud-settings', 'edit'), sigurSyncController.matchEmployees);
+
+// PUT /api/sigur/connection-settings — сохранить временные параметры подключения
+router.put(
+  '/connection-settings',
+  requirePageAccess('/skud-settings', 'edit'),
+  requireCritical2FA,
+  sigurController.saveConnectionSettings,
+);
+
+// POST /api/sigur/archive-department/ensure — создать/проверить архивный отдел
+router.post(
+  '/archive-department/ensure',
+  requirePageAccess('/skud-settings', 'edit'),
+  requireCritical2FA,
+  sigurController.ensureArchiveDepartment,
+);
+
+// PUT /api/sigur/employees/:id/access-points — сохранить прямые точки доступа сотрудника
+router.put(
+  '/employees/:id/access-points',
+  requireAnyPageAccess(['/employees', '/staff-control', '/skud-settings'], 'edit'),
+  requireCritical2FA,
+  sigurController.saveEmployeeAccessPoints,
+);
 
 // === Фильтр синхронизации ===
 

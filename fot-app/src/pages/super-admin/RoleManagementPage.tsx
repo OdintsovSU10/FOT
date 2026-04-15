@@ -61,6 +61,16 @@ const getPermissionSelection = (permissions: string[], group: PermissionGroup): 
   return selectedOption?.code ?? null;
 };
 
+const hasPermissionSelection = (permissions: string[], optionCode: string): boolean => (
+  permissions.includes(optionCode)
+);
+
+const TIMESHEET_ROLE_HINTS = [
+  'Бригадир: /timesheet edit + data.scope.department + Подача',
+  'Руководитель строительства: /timesheet-hr edit + data.scope.department|all + Проверка',
+  'HR по табелям: /timesheet-hr view|edit + data.scope.all + Мониторинг',
+];
+
 const updatePermissionSelection = (
   currentPermissions: string[],
   group: PermissionGroup,
@@ -727,25 +737,50 @@ export const RoleManagementPage: FC = () => {
                               </div>
                             </div>
 
+                            {group.code === 'timesheet.workflow' && (
+                              <div className={styles.behaviorHintList}>
+                                {TIMESHEET_ROLE_HINTS.map((hint) => (
+                                  <div key={hint} className={styles.behaviorHintItem}>{hint}</div>
+                                ))}
+                              </div>
+                            )}
+
                             <div className={styles.segmentedControl}>
-                              <button
-                                type="button"
-                                className={`${styles.segmentedButton} ${selectedCode === null ? styles.segmentedButtonActive : ''}`}
-                                onClick={() => handlePermissionChange(group, null)}
-                              >
-                                Не выбрано
-                              </button>
-                              {group.options.map((option) => (
+                              {group.exclusive && (
                                 <button
-                                  key={option.code}
                                   type="button"
-                                  className={`${styles.segmentedButton} ${selectedCode === option.code ? styles.segmentedButtonActive : ''}`}
-                                  onClick={() => handlePermissionChange(group, option.code)}
-                                  title={option.description}
+                                  className={`${styles.segmentedButton} ${selectedCode === null ? styles.segmentedButtonActive : ''}`}
+                                  onClick={() => handlePermissionChange(group, null)}
                                 >
-                                  {option.label}
+                                  Не выбрано
                                 </button>
-                              ))}
+                              )}
+                              {!group.exclusive && (
+                                <button
+                                  type="button"
+                                  className={styles.segmentedButton}
+                                  onClick={() => handlePermissionChange(group, null)}
+                                >
+                                  Сбросить
+                                </button>
+                              )}
+                              {group.options.map((option) => {
+                                const isActive = group.exclusive
+                                  ? selectedCode === option.code
+                                  : hasPermissionSelection(draftPermissions, option.code);
+
+                                return (
+                                  <button
+                                    key={option.code}
+                                    type="button"
+                                    className={`${styles.segmentedButton} ${isActive ? styles.segmentedButtonActive : ''}`}
+                                    onClick={() => handlePermissionChange(group, option.code)}
+                                    title={option.description}
+                                  >
+                                    {option.label}
+                                  </button>
+                                );
+                              })}
                             </div>
                           </div>
                         );

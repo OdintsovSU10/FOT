@@ -21,8 +21,6 @@ const TravelConfigTab = lazy(() => import('../../components/skud/TravelConfigTab
   default: module.TravelConfigTab,
 })));
 
-const SIGUR_CONNECTION_STORAGE_KEY = 'sigur_selected_connection';
-
 export const SigurSettingsPage = () => {
   const { canEditPage } = useAuth();
   const canEdit = canEditPage('/skud-settings');
@@ -32,10 +30,6 @@ export const SigurSettingsPage = () => {
   // Подключение
   const [connected, setConnected] = useState<boolean | null>(null);
   const [checking, setChecking] = useState(false);
-  const [selectedConnection, setSelectedConnection] = useState<'internal' | 'external'>(() => {
-    const saved = localStorage.getItem(SIGUR_CONNECTION_STORAGE_KEY);
-    return saved === 'internal' || saved === 'external' ? saved : 'external';
-  });
   const [availableConnections, setAvailableConnections] = useState<{ internal: boolean; external: boolean }>({ internal: false, external: false });
   const [error, setError] = useState('');
 
@@ -48,26 +42,24 @@ export const SigurSettingsPage = () => {
       .catch(() => setSyncFilterCount(null));
   }, []);
 
-  useEffect(() => {
-    localStorage.setItem(SIGUR_CONNECTION_STORAGE_KEY, selectedConnection);
-  }, [selectedConnection]);
-
-  const checkConnection = useCallback(async (connType?: 'internal' | 'external') => {
+  const checkConnection = useCallback(async (): Promise<boolean> => {
     setChecking(true);
     setError('');
     try {
-      const result = await sigurService.testConnection(connType ?? selectedConnection);
+      const result = await sigurService.testConnection('external');
       setConnected(result.success);
       if (result.connections) {
         setAvailableConnections(result.connections);
       }
+      return result.success;
     } catch {
       setConnected(false);
       setError('Не удалось проверить подключение');
+      return false;
     } finally {
       setChecking(false);
     }
-  }, [selectedConnection]);
+  }, []);
 
   useEffect(() => {
     checkConnection();
@@ -142,12 +134,10 @@ export const SigurSettingsPage = () => {
           <ConnectionSettingsTab
             connected={connected}
             checking={checking}
-            selectedConnection={selectedConnection}
             availableConnections={availableConnections}
             canEdit={canEdit}
             error={error}
             setError={setError}
-            setSelectedConnection={setSelectedConnection}
             checkConnection={checkConnection}
             setActiveTab={setActiveTab}
             syncFilterSummary={syncFilterSummary}
@@ -170,7 +160,7 @@ export const SigurSettingsPage = () => {
           <AccessPointsTab
             connected={connected}
             canEdit={canEdit}
-            selectedConnection={selectedConnection}
+            selectedConnection="external"
             setError={setError}
           />
         </Suspense>
@@ -180,7 +170,7 @@ export const SigurSettingsPage = () => {
         <Suspense fallback={tabFallback}>
           <TravelObjectsTab
             canEdit={canEdit}
-            selectedConnection={selectedConnection}
+            selectedConnection="external"
             setError={setError}
           />
         </Suspense>

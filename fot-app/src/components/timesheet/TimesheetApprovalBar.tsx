@@ -15,6 +15,7 @@ interface IProps {
   departmentId: string | null;
   month: string; // YYYY-MM
   compact?: boolean;
+  allowReview?: boolean;
 }
 
 const STATUS_COLORS: Record<TimesheetApprovalStatus, string> = {
@@ -136,10 +137,10 @@ const PeriodCard: FC<IPeriodCardProps> = ({
   );
 };
 
-export const TimesheetApprovalBar: FC<IProps> = ({ departmentId, month, compact = false }) => {
-  const { canEditPage } = useAuth();
-  const canSubmitDepartment = canEditPage('/timesheet');
-  const canReviewApproval = canEditPage('/timesheet') || canEditPage('/timesheet-hr');
+export const TimesheetApprovalBar: FC<IProps> = ({ departmentId, month, compact = false, allowReview = true }) => {
+  const { hasPermission } = useAuth();
+  const canSubmitDepartment = hasPermission('timesheet.workflow.submit');
+  const canReviewApproval = allowReview && hasPermission('timesheet.workflow.review');
   const queryClient = useQueryClient();
   const { data: approvalsByHalf } = useTimesheetApprovalStatuses(departmentId, month);
   const [loadingHalf, setLoadingHalf] = useState<TimesheetApprovalHalf | null>(null);

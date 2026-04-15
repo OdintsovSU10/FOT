@@ -1,7 +1,7 @@
 import axios, { AxiosInstance, AxiosError } from 'axios';
 import https from 'https';
-import { env } from '../config/env.js';
 import { IS_PRODUCTION } from '../config/features.js';
+import { settingsService } from './settings.service.js';
 
 export type ConnectionType = 'external' | 'internal';
 
@@ -27,71 +27,89 @@ const PAGE_SIZE = 3000;
 export class SigurServiceBase {
   private tokens: Partial<Record<ConnectionType, SigurTokenInfo>> = {};
   private clients: Partial<Record<ConnectionType, AxiosInstance>> = {};
+  private connectionFingerprints: Partial<Record<ConnectionType, string>> = {};
 
-  private getConnectionConfig(type: ConnectionType): SigurConnectionConfig | null {
-    if (type === 'external') {
-      if (env.SIGUR_EXTERNAL_URL && env.SIGUR_EXTERNAL_USERNAME && env.SIGUR_EXTERNAL_PASSWORD) {
-        return {
-          url: env.SIGUR_EXTERNAL_URL,
-          username: env.SIGUR_EXTERNAL_USERNAME,
-          password: env.SIGUR_EXTERNAL_PASSWORD,
-        };
-      }
-    } else {
-      if (env.SIGUR_INTERNAL_URL && env.SIGUR_INTERNAL_USERNAME && env.SIGUR_INTERNAL_PASSWORD) {
-        return {
-          url: env.SIGUR_INTERNAL_URL,
-          username: env.SIGUR_INTERNAL_USERNAME,
-          password: env.SIGUR_INTERNAL_PASSWORD,
-        };
-      }
-    }
-    return null;
+  private async getConnectionConfig(type: ConnectionType): Promise<SigurConnectionConfig | null> {
+    if (IS_PRODUCTION && type === 'internal') return null;
+
+    const resolved = await settingsService.getResolvedSigurConnectionConfig(type);
+    if (!resolved) return null;
+
+    return {
+      url: resolved.url,
+      username: resolved.username,
+      password: resolved.password,
+    };
   }
 
-  private isConnectionAvailable(type: ConnectionType): boolean {
-    if (IS_PRODUCTION && type === 'internal') return false;
-    return this.getConnectionConfig(type) !== null;
+  private async isConnectionAvailable(type: ConnectionType): Promise<boolean> {
+    return (await this.getConnectionConfig(type)) !== null;
+  }
+
+  private getConfigFingerprint(config: SigurConnectionConfig): string {
+    return `${config.url}::${config.username}`;
+  }
+
+  private async ensureFreshConnectionState(connection: ConnectionType): Promise<SigurConnectionConfig> {
+    const config = await this.getConnectionConfig(connection);
+    if (!config) {
+      throw new Error(
+        IS_PRODUCTION
+          ? 'Sigur не настроен. В production требуется внешний канал Sigur'
+          : 'Sigur не настроен. Укажите параметры подключения во временных настройках или в .env',
+      );
+    }
+
+    const nextFingerprint = this.getConfigFingerprint(config);
+    const previousFingerprint = this.connectionFingerprints[connection];
+
+    if (previousFingerprint && previousFingerprint !== nextFingerprint) {
+      delete this.tokens[connection];
+      delete this.clients[connection];
+    }
+
+    this.connectionFingerprints[connection] = nextFingerprint;
+    return config;
   }
 
   /** Определяет доступный тип подключения. */
-  protected resolveConnectionType(preferred?: ConnectionType): ConnectionType {
+  protected async resolveConnectionType(preferred?: ConnectionType): Promise<ConnectionType> {
     if (preferred) {
-      if (this.isConnectionAvailable(preferred)) return preferred;
+      if (await this.isConnectionAvailable(preferred)) return preferred;
     }
-    if (this.isConnectionAvailable('internal')) return 'internal';
-    if (this.isConnectionAvailable('external')) return 'external';
+    if (await this.isConnectionAvailable('external')) return 'external';
+    if (await this.isConnectionAvailable('internal')) return 'internal';
     throw new Error(
       IS_PRODUCTION
-        ? 'Sigur не настроен. В production требуется SIGUR_EXTERNAL_* в .env'
-        : 'Sigur не настроен. Укажите SIGUR_INTERNAL_* или SIGUR_EXTERNAL_* в .env',
+        ? 'Sigur не настроен. В production требуется внешний канал Sigur'
+        : 'Sigur не настроен. Укажите параметры Sigur во временных настройках или в .env',
     );
   }
 
   /** Проверяет, настроено ли хотя бы одно подключение к Sigur. */
-  isConfigured(): boolean {
-    return this.isConnectionAvailable('external') || this.isConnectionAvailable('internal');
+  async isConfigured(): Promise<boolean> {
+    return (await this.isConnectionAvailable('external')) || (await this.isConnectionAvailable('internal'));
   }
 
   /**
    * Фоновые процессы всегда должны идти через внешний канал, если он настроен.
    * Во внутренний откатываемся только как в fallback для локальной/аварийной среды.
    */
-  getBackgroundConnectionType(): ConnectionType {
-    if (this.isConnectionAvailable('external')) return 'external';
-    if (this.isConnectionAvailable('internal')) return 'internal';
+  async getBackgroundConnectionType(): Promise<ConnectionType> {
+    if (await this.isConnectionAvailable('external')) return 'external';
+    if (await this.isConnectionAvailable('internal')) return 'internal';
     throw new Error(
       IS_PRODUCTION
-        ? 'Sigur не настроен. В production требуется SIGUR_EXTERNAL_* в .env'
-        : 'Sigur не настроен. Укажите SIGUR_INTERNAL_* или SIGUR_EXTERNAL_* в .env',
+        ? 'Sigur не настроен. В production требуется внешний канал Sigur'
+        : 'Sigur не настроен. Укажите параметры Sigur во временных настройках или в .env',
     );
   }
 
   /** Возвращает информацию о доступных подключениях. */
-  getAvailableConnections(): { external: boolean; internal: boolean } {
+  async getAvailableConnections(): Promise<{ external: boolean; internal: boolean }> {
     return {
-      external: this.isConnectionAvailable('external'),
-      internal: this.isConnectionAvailable('internal'),
+      external: await this.isConnectionAvailable('external'),
+      internal: await this.isConnectionAvailable('internal'),
     };
   }
 
@@ -110,8 +128,8 @@ export class SigurServiceBase {
 
   /** Авторизуется на сервере Sigur и получает токен. */
   async authenticate(connection?: ConnectionType): Promise<string> {
-    const connType = this.resolveConnectionType(connection);
-    const config = this.getConnectionConfig(connType)!;
+    const connType = await this.resolveConnectionType(connection);
+    const config = await this.ensureFreshConnectionState(connType);
 
     const client = this.createClient(config);
 
@@ -151,7 +169,8 @@ export class SigurServiceBase {
   }
 
   private async getClient(connection?: ConnectionType): Promise<AxiosInstance> {
-    const connType = this.resolveConnectionType(connection);
+    const connType = await this.resolveConnectionType(connection);
+    await this.ensureFreshConnectionState(connType);
 
     if (!this.clients[connType] || !this.tokens[connType]) {
       await this.authenticate(connType);
@@ -166,7 +185,7 @@ export class SigurServiceBase {
       return this.authenticate(connection);
     }
 
-    const config = this.getConnectionConfig(connection)!;
+    const config = await this.ensureFreshConnectionState(connection);
     try {
       const client = this.createClient(config);
       const response = await client.post('/api/v1/jwt/refresh', tokenInfo.refreshToken, {
@@ -204,23 +223,72 @@ export class SigurServiceBase {
     }
   }
 
-  /** Выполняет GET-запрос с автоматической переавторизацией при 401. */
-  protected async request<T>(endpoint: string, params?: Record<string, any>, connection?: ConnectionType): Promise<T> {
-    const connType = this.resolveConnectionType(connection);
+  invalidateConnectionState(connection?: ConnectionType): void {
+    const connections: ConnectionType[] = connection ? [connection] : ['external', 'internal'];
+    for (const connType of connections) {
+      delete this.tokens[connType];
+      delete this.clients[connType];
+      delete this.connectionFingerprints[connType];
+    }
+  }
+
+  private async sendRequest<T>(
+    method: 'get' | 'post' | 'put' | 'patch' | 'delete',
+    endpoint: string,
+    options: {
+      params?: Record<string, any>;
+      data?: unknown;
+      headers?: Record<string, string>;
+    } = {},
+    connection?: ConnectionType,
+  ): Promise<T> {
+    const connType = await this.resolveConnectionType(connection);
     let client = await this.getClient(connType);
 
     try {
-      const response = await client.get<T>(endpoint, { params });
+      const response = await client.request<T>({
+        method,
+        url: endpoint,
+        params: options.params,
+        data: options.data,
+        headers: options.headers,
+      });
       return response.data;
     } catch (error) {
       if (error instanceof AxiosError && error.response?.status === 401) {
         await this.refreshTokens(connType);
         client = this.clients[connType]!;
-        const response = await client.get<T>(endpoint, { params });
+        const response = await client.request<T>({
+          method,
+          url: endpoint,
+          params: options.params,
+          data: options.data,
+          headers: options.headers,
+        });
         return response.data;
       }
       throw error;
     }
+  }
+
+  /** Выполняет GET-запрос с автоматической переавторизацией при 401. */
+  protected async request<T>(endpoint: string, params?: Record<string, any>, connection?: ConnectionType): Promise<T> {
+    return this.sendRequest<T>('get', endpoint, { params }, connection);
+  }
+
+  protected async mutate<T>(
+    method: 'post' | 'put' | 'patch' | 'delete',
+    endpoint: string,
+    body?: unknown,
+    params?: Record<string, any>,
+    connection?: ConnectionType,
+    headers?: Record<string, string>,
+  ): Promise<T> {
+    return this.sendRequest<T>(method, endpoint, {
+      params,
+      data: body,
+      headers,
+    }, connection);
   }
 
   /** Добавляет таймзону +03:00 если она отсутствует. */

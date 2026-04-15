@@ -29,7 +29,7 @@ async function runStructureSyncCycle(): Promise<void> {
       await acquirePresencePollingLock();
       lockAcquired = true;
 
-      const connectionType = sigurService.getBackgroundConnectionType();
+      const connectionType = await sigurService.getBackgroundConnectionType();
       const context: ISyncContext = {};
       console.log(`[structure-scheduler] starting hourly sync connection=${connectionType}: departments + positions + employees`);
 
@@ -58,9 +58,9 @@ async function runStructureSyncCycle(): Promise<void> {
   return syncInFlight;
 }
 
-export function startStructureSyncScheduler(): void {
+export async function startStructureSyncScheduler(): Promise<void> {
   if (schedulerTimer || startupTimeout) return;
-  if (!sigurService.isConfigured()) {
+  if (!(await sigurService.isConfigured())) {
     console.log('[structure-scheduler] Sigur not configured, skipping');
     return;
   }

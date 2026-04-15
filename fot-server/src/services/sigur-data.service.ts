@@ -13,7 +13,7 @@ export class SigurDataService extends SigurServiceBase {
   async testConnection(
     connection?: ConnectionType,
   ): Promise<{ success: boolean; message: string; connection: ConnectionType }> {
-    const connType = this.resolveConnectionType(connection);
+    const connType = await this.resolveConnectionType(connection);
 
     try {
       await this.authenticate(connType);
@@ -498,5 +498,75 @@ export class SigurDataService extends SigurServiceBase {
 
   async getEmployeeById(id: number, connection?: ConnectionType) {
     return this.request<Record<string, unknown>>(`/api/v1/employees/${id}`, undefined, connection);
+  }
+
+  async updateEmployee(
+    id: number,
+    body: Record<string, unknown>,
+    connection?: ConnectionType,
+  ): Promise<Record<string, unknown>> {
+    return this.mutate<Record<string, unknown>>('put', `/api/v1/employees/${id}`, body, undefined, connection);
+  }
+
+  async blockEmployee(id: number, connection?: ConnectionType): Promise<void> {
+    await this.mutate<void>('put', `/api/v1/employees/${id}/block`, undefined, undefined, connection);
+  }
+
+  async unblockEmployee(id: number, connection?: ConnectionType): Promise<void> {
+    await this.mutate<void>('put', `/api/v1/employees/${id}/unblock`, undefined, undefined, connection);
+  }
+
+  async createDepartment(
+    body: Record<string, unknown>,
+    connection?: ConnectionType,
+  ): Promise<Record<string, unknown>> {
+    return this.mutate<Record<string, unknown>>('post', '/api/v1/departments', body, undefined, connection);
+  }
+
+  async createPosition(
+    body: Record<string, unknown>,
+    connection?: ConnectionType,
+  ): Promise<Record<string, unknown>> {
+    return this.mutate<Record<string, unknown>>('post', '/api/v1/positions', body, undefined, connection);
+  }
+
+  async getEmployeeAccessPointBindings(connection?: ConnectionType): Promise<Record<string, unknown>[]> {
+    try {
+      return await this.fetchAllPaginated<Record<string, unknown>>(
+        '/api/v1/bindings/employees-accesspoints',
+        undefined,
+        connection,
+      );
+    } catch {
+      return [];
+    }
+  }
+
+  async createEmployeeAccessPointBindings(
+    employeeIds: number[],
+    accessPointIds: number[],
+    connection?: ConnectionType,
+  ): Promise<void> {
+    await this.mutate<void>(
+      'post',
+      '/api/v1/bindings/employees-accesspoints',
+      { employeeIds, accessPointIds },
+      undefined,
+      connection,
+    );
+  }
+
+  async deleteEmployeeAccessPointBindings(
+    employeeIds: number[],
+    accessPointIds: number[],
+    connection?: ConnectionType,
+  ): Promise<void> {
+    await this.mutate<void>(
+      'post',
+      '/api/v1/bindings/employees-accesspoints/delete',
+      { employeeIds, accessPointIds },
+      undefined,
+      connection,
+    );
   }
 }

@@ -1,5 +1,5 @@
-import { type FC, useEffect, useMemo, useState } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { type FC, useEffect, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import {
   settingsService,
   type IR2Status,
@@ -17,12 +17,6 @@ import {
   useTimesheetReminderSettings,
   useTimesheetTeamManagementSettings,
 } from '../../hooks/useSettingsData';
-import {
-  getTimesheetResponsibleCandidatesQueryKey,
-  getTimesheetResponsiblesQueryKey,
-} from '../../hooks/useTimesheetApprovalData';
-import { useStructureTree } from '../../hooks/useStructure';
-import { timesheetApprovalService, type ITimesheetResponsibleCandidate } from '../../services/timesheetApprovalService';
 import styles from './SystemSettingsPage.module.css';
 
 export const SystemSettingsPage: FC = () => {
@@ -34,7 +28,6 @@ export const SystemSettingsPage: FC = () => {
   const monitorSettingsQuery = useSigurMonitorSettings();
   const reminderSettingsQuery = useTimesheetReminderSettings();
   const teamManagementSettingsQuery = useTimesheetTeamManagementSettings();
-  const structureQuery = useStructureTree();
   const status: IR2Status | null = r2StatusQuery.data ?? null;
 
   // Form
@@ -65,52 +58,15 @@ export const SystemSettingsPage: FC = () => {
   });
   const [reminderSaving, setReminderSaving] = useState(false);
   const [reminderResult, setReminderResult] = useState<{ ok: boolean; msg: string } | null>(null);
-  const [selectedDepartmentId, setSelectedDepartmentId] = useState('');
-  const [primaryUserId, setPrimaryUserId] = useState('');
-  const [backupUserId, setBackupUserId] = useState('');
-  const [responsiblesSaving, setResponsiblesSaving] = useState(false);
-  const [responsiblesResult, setResponsiblesResult] = useState<{ ok: boolean; msg: string } | null>(null);
   const [teamManagementSettings, setTeamManagementSettings] = useState<ITimesheetTeamManagementSettings>({
     enabled: false,
   });
   const [teamManagementSaving, setTeamManagementSaving] = useState(false);
   const [teamManagementResult, setTeamManagementResult] = useState<{ ok: boolean; msg: string } | null>(null);
-
-  const departments = useMemo(() => {
-    const flatten = (nodes: Array<{ id: string; name: string; children?: unknown[] }>): Array<{ id: string; name: string }> => {
-      const result: Array<{ id: string; name: string }> = [];
-      for (const node of nodes) {
-        result.push({ id: node.id, name: node.name });
-        if (Array.isArray(node.children)) {
-          result.push(...flatten(node.children as Array<{ id: string; name: string; children?: unknown[] }>));
-        }
-      }
-      return result;
-    };
-
-    return flatten(structureQuery.data?.departments ?? []).sort((a, b) => a.name.localeCompare(b.name, 'ru'));
-  }, [structureQuery.data]);
-
-  const responsiblesQuery = useQuery({
-    queryKey: getTimesheetResponsiblesQueryKey(selectedDepartmentId || null),
-    queryFn: () => timesheetApprovalService.getResponsibles(selectedDepartmentId),
-    enabled: selectedDepartmentId.length > 0,
-    staleTime: 60_000,
-  });
-
-  const candidatesQuery = useQuery({
-    queryKey: getTimesheetResponsibleCandidatesQueryKey(selectedDepartmentId || null),
-    queryFn: () => timesheetApprovalService.getResponsibleCandidates(selectedDepartmentId),
-    enabled: selectedDepartmentId.length > 0,
-    staleTime: 60_000,
-  });
-
-  const candidates: ITimesheetResponsibleCandidate[] = candidatesQuery.data ?? [];
   const loading = r2StatusQuery.isLoading
     || monitorSettingsQuery.isLoading
     || reminderSettingsQuery.isLoading
-    || teamManagementSettingsQuery.isLoading
-    || structureQuery.isLoading;
+    || teamManagementSettingsQuery.isLoading;
 
   useEffect(() => {
     if (status?.bucket_name) {
@@ -135,20 +91,6 @@ export const SystemSettingsPage: FC = () => {
       setTeamManagementSettings(teamManagementSettingsQuery.data);
     }
   }, [teamManagementSettingsQuery.data]);
-
-  useEffect(() => {
-    if (!selectedDepartmentId && departments.length > 0) {
-      setSelectedDepartmentId(departments[0].id);
-    }
-  }, [departments, selectedDepartmentId]);
-
-  useEffect(() => {
-    const responsibles = responsiblesQuery.data ?? [];
-    const primary = responsibles.find(item => item.role === 'primary')?.user_id || '';
-    const backup = responsibles.find(item => item.role === 'backup')?.user_id || '';
-    setPrimaryUserId(primary);
-    setBackupUserId(backup);
-  }, [responsiblesQuery.data, selectedDepartmentId]);
 
   const handleSave = async () => {
     setSaving(true);
@@ -239,33 +181,6 @@ export const SystemSettingsPage: FC = () => {
       setTeamManagementResult({ ok: false, msg: 'Ошибка сохранения настроек управления составом табеля' });
     } finally {
       setTeamManagementSaving(false);
-    }
-  };
-
-  const handleSaveResponsibles = async () => {
-    if (!selectedDepartmentId) return;
-    if (primaryUserId && primaryUserId === backupUserId) {
-      setResponsiblesResult({ ok: false, msg: 'Основной и резервный ответственные должны отличаться' });
-      return;
-    }
-
-    setResponsiblesSaving(true);
-    setResponsiblesResult(null);
-    try {
-      await timesheetApprovalService.saveResponsibles({
-        department_id: selectedDepartmentId,
-        primary_user_id: primaryUserId || null,
-        backup_user_id: backupUserId || null,
-      });
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: getTimesheetResponsiblesQueryKey(selectedDepartmentId) }),
-        queryClient.invalidateQueries({ queryKey: getTimesheetResponsibleCandidatesQueryKey(selectedDepartmentId) }),
-      ]);
-      setResponsiblesResult({ ok: true, msg: 'Ответственные по табелю сохранены' });
-    } catch {
-      setResponsiblesResult({ ok: false, msg: 'Ошибка сохранения ответственных по табелю' });
-    } finally {
-      setResponsiblesSaving(false);
     }
   };
 
@@ -557,81 +472,6 @@ export const SystemSettingsPage: FC = () => {
 
       <div className={styles.section}>
         <div className={styles.sectionHeader}>
-          <h2 className={styles.sectionTitle}>Ответственные за табель</h2>
-        </div>
-
-        <p className={styles.description}>
-          Для каждого отдела назначьте основного и резервного ответственного. Напоминания и эскалации будут уходить именно им.
-        </p>
-
-        <div className={styles.formGrid}>
-          <div className={styles.formGroup}>
-            <label className={styles.formLabel}>Отдел</label>
-            <select
-              className={styles.formInput}
-              value={selectedDepartmentId}
-              onChange={e => setSelectedDepartmentId(e.target.value)}
-            >
-              {departments.map(department => (
-                <option key={department.id} value={department.id}>{department.name}</option>
-              ))}
-            </select>
-          </div>
-          <div className={styles.formGroup}>
-            <label className={styles.formLabel}>Основной ответственный</label>
-            <select
-              className={styles.formInput}
-              value={primaryUserId}
-              onChange={e => setPrimaryUserId(e.target.value)}
-              disabled={candidatesQuery.isLoading}
-            >
-              <option value="">Не назначен</option>
-              {candidates.map(candidate => (
-                <option key={candidate.user_id} value={candidate.user_id}>
-                  {candidate.full_name || `Пользователь ${candidate.user_id}`}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className={styles.formGroup}>
-            <label className={styles.formLabel}>Резервный ответственный</label>
-            <select
-              className={styles.formInput}
-              value={backupUserId}
-              onChange={e => setBackupUserId(e.target.value)}
-              disabled={candidatesQuery.isLoading}
-            >
-              <option value="">Не назначен</option>
-              {candidates.map(candidate => (
-                <option key={candidate.user_id} value={candidate.user_id}>
-                  {candidate.full_name || `Пользователь ${candidate.user_id}`}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
-
-        <div className={styles.actions}>
-          <button className={styles.btnPrimary} onClick={handleSaveResponsibles} disabled={responsiblesSaving || !selectedDepartmentId}>
-            {responsiblesSaving ? 'Сохранение...' : 'Сохранить ответственных'}
-          </button>
-        </div>
-
-        {candidatesQuery.isLoading && <div className={styles.testResult}>Загрузка сотрудников отдела...</div>}
-        {!candidatesQuery.isLoading && selectedDepartmentId && candidates.length === 0 && (
-          <div className={`${styles.testResult} ${styles.testError}`}>
-            В выбранном отделе нет одобренных пользователей, которых можно назначить ответственными.
-          </div>
-        )}
-        {responsiblesResult && (
-          <div className={`${styles.testResult} ${responsiblesResult.ok ? styles.testSuccess : styles.testError}`}>
-            {responsiblesResult.msg}
-          </div>
-        )}
-      </div>
-
-      <div className={styles.section}>
-        <div className={styles.sectionHeader}>
           <h2 className={styles.sectionTitle}>Управление составом табеля</h2>
           <span className={`${styles.statusBadge} ${teamManagementSettings.enabled ? styles.statusConnected : styles.statusDisconnected}`}>
             {teamManagementSettings.enabled ? 'Разрешено' : 'Закрыто'}
@@ -665,6 +505,7 @@ export const SystemSettingsPage: FC = () => {
           </div>
         )}
       </div>
+
     </div>
   );
 };

@@ -96,6 +96,14 @@
   font-weight: 600;
 }
 
+.sigur-section-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
 /* Статус подключения */
 .sigur-connection-row {
   display: flex;
@@ -221,6 +229,146 @@
 .sigur-btn-danger:disabled {
   background: #6c757d;
   border-color: #6c757d;
+}
+
+.sigur-conn-config-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.sigur-conn-config-card,
+.sigur-archive-card {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-hover);
+  padding: 14px;
+}
+
+.sigur-conn-config-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.sigur-conn-config-title {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.sigur-conn-config-hint,
+.sigur-muted {
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+.sigur-conn-config-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-end;
+}
+
+.sigur-source-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-secondary);
+}
+
+.sigur-source-badge.system_settings {
+  color: #2563eb;
+  border-color: rgba(37, 99, 235, 0.3);
+  background: rgba(37, 99, 235, 0.08);
+}
+
+.sigur-source-badge.env,
+.sigur-source-badge.ready {
+  color: #15803d;
+  border-color: rgba(21, 128, 61, 0.28);
+  background: rgba(21, 128, 61, 0.08);
+}
+
+.sigur-source-badge.unset {
+  color: #b45309;
+  border-color: rgba(180, 83, 9, 0.28);
+  background: rgba(180, 83, 9, 0.08);
+}
+
+.sigur-conn-form-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.sigur-conn-form-grid label {
+  display: grid;
+  gap: 6px;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+.sigur-form-input {
+  width: 100%;
+  min-width: 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-primary);
+  font-size: 0.875rem;
+}
+
+.sigur-conn-password-block {
+  display: grid;
+  gap: 8px;
+}
+
+.sigur-checkbox-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+.sigur-conn-password-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+.sigur-conn-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 14px;
+}
+
+.sigur-archive-card {
+  margin-top: 14px;
+  display: grid;
+  gap: 10px;
+}
+
+.sigur-archive-status {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
 }
 
 /* Предпросмотр */

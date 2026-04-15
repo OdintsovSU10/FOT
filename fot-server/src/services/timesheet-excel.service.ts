@@ -32,6 +32,14 @@ const formatHHMM = (decimalHours: number): string => {
   return `${h}:${String(m).padStart(2, '0')}`;
 };
 
+const CORRECTION_MARK = '*';
+
+const formatExportCellValue = (value: string, corrected?: boolean): string => {
+  if (!corrected) return value;
+  if (!value.trim()) return CORRECTION_MARK;
+  return `${value}${CORRECTION_MARK}`;
+};
+
 const pad2 = (n: number) => String(n).padStart(2, '0');
 
 // Column indices
@@ -71,7 +79,7 @@ const groupObjectEntriesForExport = (data: IDepartmentTimesheetData): Map<number
     };
 
     current.dayMap.set(entry.work_date, {
-      hours: entry.hours_worked,
+      hours: typeof entry.display_hours_worked === 'number' ? entry.display_hours_worked : entry.hours_worked,
       corrected: entry.is_correction,
     });
     current.hasCorrection = current.hasCorrection || entry.is_correction;
@@ -160,8 +168,13 @@ export function buildTimesheetSheet(
   r2.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
   ws.getRow(2).height = 30;
 
-  // --- Row 3: empty ---
-  ws.getRow(3).height = 5;
+  // --- Row 3: note ---
+  ws.mergeCells(3, 1, 3, totalCols);
+  const r3 = ws.getCell(3, 1);
+  r3.value = `${CORRECTION_MARK} — корректировка`;
+  r3.font = { size: 9, italic: true, color: { argb: 'FF546E7A' } };
+  r3.alignment = { horizontal: 'left', vertical: 'middle' };
+  ws.getRow(3).height = 18;
 
   // --- Row 4-5: Headers ---
   // Row 4: merged labels
@@ -324,15 +337,15 @@ export function buildTimesheetSheet(
 
           const label = STATUS_LABELS[entry.status];
           if (label) {
-            cell.value = label;
+            cell.value = formatExportCellValue(label, entry.corrected);
             if (statusFills[entry.status]) cell.fill = statusFills[entry.status];
           } else if (entry.hours > 0) {
-            cell.value = formatHHMM(entry.hours);
+            cell.value = formatExportCellValue(formatHHMM(entry.hours), entry.corrected);
             rowDaysCount++;
             rowHoursSum += entry.hours;
             if (entry.corrected) cell.fill = correctedFill;
           } else {
-            cell.value = '';
+            cell.value = formatExportCellValue('', entry.corrected);
           }
           return;
         }
@@ -345,7 +358,7 @@ export function buildTimesheetSheet(
             return;
           }
 
-          cell.value = formatHHMM(objectEntry.hours);
+          cell.value = formatExportCellValue(formatHHMM(objectEntry.hours), objectEntry.corrected);
           if (objectEntry.corrected) cell.fill = correctedFill;
           rowDaysCount++;
           rowHoursSum += objectEntry.hours;

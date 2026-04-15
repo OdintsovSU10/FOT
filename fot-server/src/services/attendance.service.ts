@@ -44,6 +44,7 @@ export interface IAttendanceEntry {
   work_date: string;
   status: TimeStatus;
   hours_worked: number | null;
+  display_hours_worked: number | null;
   base_hours_worked: number | null;
   travel_minutes_credited: number;
   travel_hours_credited: number;
@@ -84,6 +85,36 @@ interface ISummaryRow {
 
 function roundHours(value: number): number {
   return Math.round(value * 100) / 100;
+}
+
+function clampToScheduleHours(value: number, plannedHours: number): number {
+  return roundHours(Math.max(0, Math.min(value, plannedHours)));
+}
+
+function distributeDisplayHours(values: number[], total: number): number[] {
+  if (values.length === 0) return [];
+  if (total <= 0) return values.map(() => 0);
+
+  const totalActual = values.reduce((sum, value) => sum + value, 0);
+  if (totalActual <= 0 || total >= totalActual) {
+    return values.map(value => roundHours(value));
+  }
+
+  const rawShares = values.map(value => (value / totalActual) * total);
+  const flooredShares = rawShares.map(value => Math.floor(value * 100) / 100);
+  let remainder = Math.round((total - flooredShares.reduce((sum, value) => sum + value, 0)) * 100);
+
+  const byFraction = rawShares
+    .map((value, index) => ({ index, fraction: value - flooredShares[index] }))
+    .sort((left, right) => right.fraction - left.fraction);
+
+  for (const item of byFraction) {
+    if (remainder <= 0) break;
+    flooredShares[item.index] = roundHours(flooredShares[item.index] + 0.01);
+    remainder -= 1;
+  }
+
+  return flooredShares.map(value => roundHours(value));
 }
 
 function getSummaryHours(summary: ISummaryRow): number {
@@ -200,9 +231,11 @@ export async function buildAttendanceEntries(params: {
   dailySchedulesMap: Map<number, Map<string, IResolvedSchedule>>;
   calendarMonth: IProductionCalendarMonth | null;
   todayStr?: string;
+  displayMode?: 'actual' | 'capped_to_schedule';
 }): Promise<IAttendanceBuildResult> {
   const { employees, startDate, endDate, dailySchedulesMap, calendarMonth } = params;
   const todayStr = params.todayStr ?? formatDateToISO(new Date());
+  const displayMode = params.displayMode ?? 'actual';
   const employeeIds = employees.map((employee) => employee.id);
 
   const [summaries, adjustments, travelSummaries] = await Promise.all([
@@ -269,6 +302,7 @@ export async function buildAttendanceEntries(params: {
       work_date: adjustment.work_date,
       status: adjustment.status,
       hours_worked: adjustment.hours_override,
+      display_hours_worked: adjustment.hours_override,
       base_hours_worked: adjustment.hours_override,
       travel_minutes_credited: 0,
       travel_hours_credited: 0,
@@ -301,6 +335,7 @@ export async function buildAttendanceEntries(params: {
       work_date: summary.date,
       status: isPresent ? 'work' : 'absent',
       hours_worked: isPresent ? hoursWorked : 0,
+      display_hours_worked: isPresent ? hoursWorked : 0,
       base_hours_worked: baseHours,
       travel_minutes_credited: 0,
       travel_hours_credited: 0,
@@ -353,6 +388,7 @@ export async function buildAttendanceEntries(params: {
             work_date: workDate,
             status: isPresent ? 'work' : 'absent',
             hours_worked: isPresent ? hoursWorked : 0,
+            display_hours_worked: isPresent ? hoursWorked : 0,
             base_hours_worked: baseHours,
             travel_minutes_credited: 0,
             travel_hours_credited: 0,
@@ -370,6 +406,7 @@ export async function buildAttendanceEntries(params: {
             work_date: workDate,
             status: 'absent',
             hours_worked: 0,
+            display_hours_worked: 0,
             base_hours_worked: 0,
             travel_minutes_credited: 0,
             travel_hours_credited: 0,
@@ -391,6 +428,7 @@ export async function buildAttendanceEntries(params: {
         work_date: workDate,
         status: 'remote',
         hours_worked: plannedHours,
+        display_hours_worked: plannedHours,
         base_hours_worked: plannedHours,
         travel_minutes_credited: 0,
         travel_hours_credited: 0,
@@ -434,11 +472,40 @@ export async function buildAttendanceEntries(params: {
     const totalBaseHours = roundHours(dayObjectEntries.reduce((sum, item) => sum + item.base_hours_worked, 0));
     entry.status = totalHours > 0 || entry.first_entry ? 'work' : entry.status;
     entry.hours_worked = totalHours;
+    entry.display_hours_worked = totalHours;
     entry.base_hours_worked = totalBaseHours;
     entry.is_correction = entry.is_correction || dayObjectEntries.some(item => item.is_correction);
     entry.object_detail_mode = 'available';
     entry.object_detail_message = null;
     entry.object_detail_count = dayObjectEntries.length;
+  }
+
+  if (displayMode === 'capped_to_schedule') {
+    for (const entry of entries) {
+      const schedule = dailySchedulesMap.get(entry.employee_id)?.get(entry.work_date);
+      if (entry.hours_worked == null || !schedule) {
+        entry.display_hours_worked = entry.hours_worked;
+        continue;
+      }
+
+      const [yearPart, monthPart, dayPart] = entry.work_date.split('-').map(Number);
+      const plannedHours = getScheduleForDate(schedule, new Date(yearPart, monthPart - 1, dayPart)).work_hours;
+      entry.display_hours_worked = clampToScheduleHours(entry.hours_worked, plannedHours);
+
+      const dayObjectEntries = objectAttendanceData.objectEntriesByEmployeeDate
+        .get(entry.employee_id)
+        ?.get(entry.work_date) || [];
+      if (dayObjectEntries.length === 0) continue;
+
+      const distributed = distributeDisplayHours(
+        dayObjectEntries.map(item => item.hours_worked),
+        entry.display_hours_worked ?? 0,
+      );
+
+      dayObjectEntries.forEach((item, index) => {
+        item.display_hours_worked = distributed[index] ?? 0;
+      });
+    }
   }
 
   entries.sort((left, right) => {

@@ -1,8 +1,8 @@
 import { Fragment, type FC, type MouseEvent as ReactMouseEvent, useCallback, useEffect, useMemo, useState } from 'react';
+import { ChevronDown, ChevronUp, UserMinus } from 'lucide-react';
 import type { TimesheetEntry, TimesheetEmployee, TimesheetObjectEntry, TimesheetStatus } from '../../types';
 import type { IResolvedSchedule } from '../../types/schedule';
 import type { IProductionCalendarMonth } from '../../types/timesheet';
-import { ChevronDown, ChevronUp, UserMinus } from 'lucide-react';
 import {
   getDaysInMonth,
   isWeekend,
@@ -17,12 +17,15 @@ import {
 } from '../../utils/scheduleUtils';
 import { formatTimesheetEmployeeName } from '../../utils/timesheetDisplay';
 
+type TimesheetViewMode = 'employees' | 'objects';
+
 interface ITimesheetGridProps {
   employees: TimesheetEmployee[];
   entries: TimesheetEntry[];
   objectEntries: TimesheetObjectEntry[];
   year: number;
   month: number;
+  viewMode?: TimesheetViewMode;
   schedules?: Record<number, IResolvedSchedule>;
   dailySchedules?: Record<number, Record<string, IResolvedSchedule>>;
   calendar?: IProductionCalendarMonth | null;
@@ -46,13 +49,6 @@ interface ITimesheetGridProps {
   ) => void;
 }
 
-interface IRowData {
-  employee: TimesheetEmployee;
-  days: Map<number, TimesheetEntry>;
-  objectRows: IObjectRowData[];
-  hasExpandableObjects: boolean;
-}
-
 interface IObjectRowData {
   object_key: string;
   object_id: string | null;
@@ -60,15 +56,59 @@ interface IObjectRowData {
   days: Map<number, TimesheetObjectEntry>;
 }
 
-const EMPTY_CELL_SELECTION = new Set<string>();
-const getBulkCellKey = (employeeId: number, day: number): string => `${employeeId}:${day}`;
+interface IEmployeeRowData {
+  employee: TimesheetEmployee;
+  days: Map<number, TimesheetEntry>;
+  objectRows: IObjectRowData[];
+  hasExpandableObjects: boolean;
+}
+
+interface IObjectViewRow {
+  employee: TimesheetEmployee;
+  object_key: string;
+  object_id: string | null;
+  object_name: string;
+  days: Map<number, TimesheetObjectEntry>;
+  dailyEntries: Map<number, TimesheetEntry>;
+  isSynthetic: boolean;
+}
+
+interface IObjectViewGroup {
+  object_key: string;
+  object_id: string | null;
+  object_name: string;
+  rows: IObjectViewRow[];
+  isSynthetic: boolean;
+}
 
 interface IBulkCellCoord {
-  employeeId: number;
+  rowKey: string;
   day: number;
 }
 
-/** Format decimal hours to "Xч Yм" */
+const EMPTY_CELL_SELECTION = new Set<string>();
+const UNASSIGNED_OBJECT_KEY = '__timesheet_unassigned__';
+const UNASSIGNED_OBJECT_NAME = 'Не определён / без объекта';
+
+const getEmployeeBulkRowKey = (employeeId: number): string => `employee:${employeeId}`;
+const getObjectBulkRowKey = (employeeId: number, objectKey: string): string => `object:${employeeId}:${encodeURIComponent(objectKey)}`;
+const getEmployeeBulkCellKey = (employeeId: number, day: number): string => `${getEmployeeBulkRowKey(employeeId)}:${day}`;
+const getObjectBulkCellKey = (employeeId: number, objectKey: string, day: number): string => (
+  `${getObjectBulkRowKey(employeeId, objectKey)}:${day}`
+);
+
+const roundHours = (value: number): number => Math.round(value * 100) / 100;
+const getVisibleHours = (entry: TimesheetEntry | null | undefined): number | null => (
+  entry?.display_hours_worked ?? entry?.hours_worked ?? null
+);
+const getObjectVisibleHours = (entry: TimesheetObjectEntry | null | undefined): number => (
+  entry?.display_hours_worked ?? entry?.hours_worked ?? 0
+);
+
+const hasPositiveHours = (value: number | null | undefined): boolean => (
+  typeof value === 'number' && value > 0.001
+);
+
 const formatHM = (decimal: number): string => {
   const h = Math.floor(decimal);
   const m = Math.round((decimal - h) * 60);
@@ -76,7 +116,6 @@ const formatHM = (decimal: number): string => {
   return `${h}ч${m}м`;
 };
 
-/** Short format for day cells: "X:MM" */
 const formatCellHM = (decimal: number): string => {
   const h = Math.floor(decimal);
   const m = Math.round((decimal - h) * 60);
@@ -96,8 +135,15 @@ const STATUS_CELL_TEXT: Record<TimesheetStatus, string> = {
   manual: '',
 };
 
-const getDayCellClass = (entry: TimesheetEntry | null, weekend: boolean, today: boolean, future: boolean, thresholdHours = 8): string => {
+const getDayCellClass = (
+  entry: TimesheetEntry | null,
+  weekend: boolean,
+  today: boolean,
+  future: boolean,
+  thresholdHours = 8,
+): string => {
   const classes = ['ts-day'];
+  const visibleHours = getVisibleHours(entry);
   if (today) classes.push('ts-day--today');
   if (weekend && !entry) {
     classes.push('ts-day--weekend');
@@ -110,7 +156,7 @@ const getDayCellClass = (entry: TimesheetEntry | null, weekend: boolean, today: 
   switch (entry.status) {
     case 'work':
     case 'manual':
-      if (entry.hours_worked && entry.hours_worked >= thresholdHours) classes.push('ts-day--full');
+      if (hasPositiveHours(visibleHours) && (visibleHours as number) >= thresholdHours) classes.push('ts-day--full');
       else classes.push('ts-day--partial');
       break;
     case 'remote':
@@ -138,21 +184,23 @@ const getDayCellClass = (entry: TimesheetEntry | null, weekend: boolean, today: 
 };
 
 const getDayCellText = (entry: TimesheetEntry | null, weekend: boolean): string => {
+  const visibleHours = getVisibleHours(entry);
   if (weekend && !entry) return '—';
   if (!entry) return '';
   const special = STATUS_CELL_TEXT[entry.status];
   if (special) return special;
-  if (entry.hours_worked != null) return formatCellHM(entry.hours_worked);
+  if (visibleHours != null) return formatCellHM(visibleHours);
   return '';
 };
 
 const getDayCellTitle = (entry: TimesheetEntry | null, weekend: boolean): string | undefined => {
+  const visibleHours = getVisibleHours(entry);
   if (weekend && !entry) return 'Выходной';
   if (!entry) return undefined;
 
   const parts: string[] = [];
-  if (entry.hours_worked != null) {
-    parts.push(`Часы: ${formatHM(entry.hours_worked)}`);
+  if (visibleHours != null) {
+    parts.push(`Часы: ${formatHM(visibleHours)}`);
   }
   if ((entry.travel_delay_minutes || 0) > 0) {
     parts.push(`Превышение лимита передвижения: ${formatHM((entry.travel_delay_minutes || 0) / 60)}`);
@@ -167,14 +215,21 @@ const getDayCellTitle = (entry: TimesheetEntry | null, weekend: boolean): string
   return parts.length > 0 ? parts.join(' • ') : undefined;
 };
 
-const getObjectCellTitle = (entry: TimesheetObjectEntry | null): string | undefined => {
-  if (!entry) return undefined;
-  const parts = [`Объект: ${entry.object_name}`, `Часы: ${formatHM(entry.hours_worked)}`];
-  if (entry.is_correction) {
-    parts.push('Есть корректировка по объекту');
+const getObjectCellTitle = (entry: TimesheetObjectEntry | null, objectName?: string): string | undefined => {
+  if (!entry && !objectName) return undefined;
+  const parts = [`Объект: ${objectName || entry?.object_name || UNASSIGNED_OBJECT_NAME}`];
+  if (entry) {
+    parts.push(`Часы: ${formatHM(getObjectVisibleHours(entry))}`);
+    if (entry.is_correction) {
+      parts.push('Есть корректировка по объекту');
+    }
   }
   return parts.join(' • ');
 };
+
+const compareEmployeeNames = (left: TimesheetEmployee, right: TimesheetEmployee): number => (
+  left.full_name.localeCompare(right.full_name, 'ru')
+);
 
 export const TimesheetGrid: FC<ITimesheetGridProps> = ({
   employees,
@@ -182,6 +237,7 @@ export const TimesheetGrid: FC<ITimesheetGridProps> = ({
   objectEntries,
   year,
   month,
+  viewMode = 'employees',
   schedules = {},
   dailySchedules = {},
   calendar = null,
@@ -203,20 +259,20 @@ export const TimesheetGrid: FC<ITimesheetGridProps> = ({
   const days = visibleDays || Array.from({ length: daysCount }, (_, i) => i + 1);
   const [expandedEmployeeIds, setExpandedEmployeeIds] = useState<Set<number>>(new Set());
   const [bulkDragAnchor, setBulkDragAnchor] = useState<IBulkCellCoord | null>(null);
+  const [bulkDragBaseKeys, setBulkDragBaseKeys] = useState<Set<string>>(new Set());
   const [bulkDragPreviewKeys, setBulkDragPreviewKeys] = useState<Set<string> | null>(null);
-  const rows: IRowData[] = useMemo(() => {
-    const dc = getDaysInMonth(year, month);
+
+  const employeeRows = useMemo<IEmployeeRowData[]>(() => {
+    const visibleDateSet = new Set(
+      days.map(day => `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`),
+    );
     const entryMap = new Map<string, TimesheetEntry>();
     for (const entry of entries) {
       entryMap.set(`${entry.employee_id}_${entry.work_date}`, entry);
     }
 
-    const visibleDateSet = new Set(
-      days.map(day => `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`),
-    );
     const objectsByEmployee = new Map<number, Map<string, IObjectRowData>>();
     const distinctObjectsByEmployee = new Map<number, Set<string>>();
-
     for (const objectEntry of objectEntries) {
       if (!visibleDateSet.has(objectEntry.work_date)) continue;
       if (!objectsByEmployee.has(objectEntry.employee_id)) {
@@ -227,7 +283,6 @@ export const TimesheetGrid: FC<ITimesheetGridProps> = ({
       }
 
       distinctObjectsByEmployee.get(objectEntry.employee_id)!.add(objectEntry.object_key);
-
       const byObject = objectsByEmployee.get(objectEntry.employee_id)!;
       const current = byObject.get(objectEntry.object_key) || {
         object_key: objectEntry.object_key,
@@ -235,30 +290,26 @@ export const TimesheetGrid: FC<ITimesheetGridProps> = ({
         object_name: objectEntry.object_name,
         days: new Map<number, TimesheetObjectEntry>(),
       };
-      const dayNumber = Number.parseInt(objectEntry.work_date.slice(-2), 10);
-      if (Number.isFinite(dayNumber)) {
-        current.days.set(dayNumber, objectEntry);
-      }
+      current.days.set(Number.parseInt(objectEntry.work_date.slice(-2), 10), objectEntry);
       byObject.set(objectEntry.object_key, current);
     }
 
-    return employees.map(emp => {
+    return employees.map(employee => {
       const dayMap = new Map<number, TimesheetEntry>();
-
-      for (let d = 1; d <= dc; d++) {
-        const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-        const entry = entryMap.get(`${emp.id}_${dateStr}`);
+      for (const day of days) {
+        const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+        const entry = entryMap.get(`${employee.id}_${dateStr}`);
         if (entry) {
-          dayMap.set(d, entry);
+          dayMap.set(day, entry);
         }
       }
 
-      const employeeObjectRows = [...(objectsByEmployee.get(emp.id)?.values() || [])]
+      const employeeObjectRows = [...(objectsByEmployee.get(employee.id)?.values() || [])]
         .sort((left, right) => left.object_name.localeCompare(right.object_name, 'ru'));
-      const hasExpandableObjects = (distinctObjectsByEmployee.get(emp.id)?.size || 0) > 1;
+      const hasExpandableObjects = (distinctObjectsByEmployee.get(employee.id)?.size || 0) > 1;
 
       return {
-        employee: emp,
+        employee,
         days: dayMap,
         objectRows: hasExpandableObjects ? employeeObjectRows : [],
         hasExpandableObjects,
@@ -266,14 +317,142 @@ export const TimesheetGrid: FC<ITimesheetGridProps> = ({
     });
   }, [days, employees, entries, objectEntries, year, month]);
 
+  const objectViewGroups = useMemo<IObjectViewGroup[]>(() => {
+    const employeeById = new Map(employees.map(employee => [employee.id, employee]));
+    const dailyEntryByEmployee = new Map<number, Map<number, TimesheetEntry>>();
+    for (const row of employeeRows) {
+      dailyEntryByEmployee.set(row.employee.id, row.days);
+    }
+
+    const visibleDateSet = new Set(
+      days.map(day => `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`),
+    );
+    const groups = new Map<string, IObjectViewGroup>();
+    const ensureGroup = (
+      objectKey: string,
+      objectId: string | null,
+      objectName: string,
+      isSynthetic: boolean,
+    ): IObjectViewGroup => {
+      const existing = groups.get(objectKey);
+      if (existing) return existing;
+      const next: IObjectViewGroup = {
+        object_key: objectKey,
+        object_id: objectId,
+        object_name: objectName,
+        rows: [],
+        isSynthetic,
+      };
+      groups.set(objectKey, next);
+      return next;
+    };
+
+    const ensureRow = (
+      group: IObjectViewGroup,
+      employee: TimesheetEmployee,
+      isSynthetic: boolean,
+    ): IObjectViewRow => {
+      const existing = group.rows.find(row => row.employee.id === employee.id);
+      if (existing) return existing;
+      const next: IObjectViewRow = {
+        employee,
+        object_key: group.object_key,
+        object_id: group.object_id,
+        object_name: group.object_name,
+        days: new Map<number, TimesheetObjectEntry>(),
+        dailyEntries: dailyEntryByEmployee.get(employee.id) || new Map<number, TimesheetEntry>(),
+        isSynthetic,
+      };
+      group.rows.push(next);
+      return next;
+    };
+
+    const allocatedHoursByEmployeeDay = new Map<string, number>();
+
+    for (const objectEntry of objectEntries) {
+      if (!visibleDateSet.has(objectEntry.work_date)) continue;
+      const employee = employeeById.get(objectEntry.employee_id);
+      if (!employee) continue;
+
+      const normalizedName = objectEntry.object_name?.trim() || UNASSIGNED_OBJECT_NAME;
+      const normalizedKey = normalizedName === UNASSIGNED_OBJECT_NAME ? UNASSIGNED_OBJECT_KEY : objectEntry.object_key;
+      const group = ensureGroup(
+        normalizedKey,
+        normalizedKey === UNASSIGNED_OBJECT_KEY ? null : objectEntry.object_id,
+        normalizedName,
+        normalizedKey === UNASSIGNED_OBJECT_KEY,
+      );
+      const row = ensureRow(group, employee, normalizedKey === UNASSIGNED_OBJECT_KEY);
+      const day = Number.parseInt(objectEntry.work_date.slice(-2), 10);
+      row.days.set(day, {
+        ...objectEntry,
+        object_key: normalizedKey,
+        object_id: normalizedKey === UNASSIGNED_OBJECT_KEY ? null : objectEntry.object_id,
+        object_name: normalizedName,
+      });
+
+      const allocationKey = `${objectEntry.employee_id}_${objectEntry.work_date}`;
+      allocatedHoursByEmployeeDay.set(
+        allocationKey,
+        roundHours((allocatedHoursByEmployeeDay.get(allocationKey) || 0) + getObjectVisibleHours(objectEntry)),
+      );
+    }
+
+    for (const row of employeeRows) {
+      for (const day of days) {
+        const dailyEntry = row.days.get(day);
+        const visibleHours = getVisibleHours(dailyEntry);
+        if (!hasPositiveHours(visibleHours)) continue;
+
+        const workDate = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+        const allocatedHours = allocatedHoursByEmployeeDay.get(`${row.employee.id}_${workDate}`) || 0;
+        const remainingHours = roundHours((visibleHours as number) - allocatedHours);
+        if (remainingHours <= 0.001) continue;
+
+        const group = ensureGroup(UNASSIGNED_OBJECT_KEY, null, UNASSIGNED_OBJECT_NAME, true);
+        const objectRow = ensureRow(group, row.employee, true);
+        objectRow.days.set(day, {
+          adjustment_id: null,
+          employee_id: row.employee.id,
+          work_date: workDate,
+          object_key: UNASSIGNED_OBJECT_KEY,
+          object_id: null,
+          object_name: UNASSIGNED_OBJECT_NAME,
+          hours_worked: remainingHours,
+          display_hours_worked: remainingHours,
+          base_hours_worked: remainingHours,
+          is_correction: false,
+        });
+      }
+    }
+
+    return [...groups.values()]
+      .map(group => ({
+        ...group,
+        rows: [...group.rows].sort((left, right) => compareEmployeeNames(left.employee, right.employee)),
+      }))
+      .sort((left, right) => {
+        if (left.object_key === UNASSIGNED_OBJECT_KEY) return 1;
+        if (right.object_key === UNASSIGNED_OBJECT_KEY) return -1;
+        return left.object_name.localeCompare(right.object_name, 'ru');
+      });
+  }, [days, employees, employeeRows, objectEntries, year, month]);
+
   const activeExpandedEmployeeIds = useMemo(() => (
     new Set(
-      [...expandedEmployeeIds].filter(employeeId => rows.some(row => row.employee.id === employeeId)),
+      [...expandedEmployeeIds].filter(employeeId => employeeRows.some(row => row.employee.id === employeeId)),
     )
-  ), [expandedEmployeeIds, rows]);
-  const employeeRowIndexById = useMemo(() => (
-    new Map(rows.map((row, index) => [row.employee.id, index]))
-  ), [rows]);
+  ), [expandedEmployeeIds, employeeRows]);
+
+  const objectViewRowsFlat = useMemo(() => (
+    objectViewGroups.flatMap(group => group.rows)
+  ), [objectViewGroups]);
+  const employeeRowIndexByKey = useMemo(() => (
+    new Map(employeeRows.map((row, index) => [getEmployeeBulkRowKey(row.employee.id), index]))
+  ), [employeeRows]);
+  const objectRowIndexByKey = useMemo(() => (
+    new Map(objectViewRowsFlat.map((row, index) => [getObjectBulkRowKey(row.employee.id, row.object_key), index]))
+  ), [objectViewRowsFlat]);
   const dayIndexByValue = useMemo(() => (
     new Map(days.map((day, index) => [day, index]))
   ), [days]);
@@ -288,53 +467,99 @@ export const TimesheetGrid: FC<ITimesheetGridProps> = ({
     });
   };
 
+  const mergeBulkSelections = useCallback((base: Set<string>, nextRange: Set<string>): Set<string> => {
+    const merged = new Set(base);
+    for (const cellKey of nextRange) {
+      merged.add(cellKey);
+    }
+    return merged;
+  }, []);
+
   const buildBulkRangeSelection = useCallback((anchor: IBulkCellCoord, current: IBulkCellCoord): Set<string> => {
-    const anchorRowIndex = employeeRowIndexById.get(anchor.employeeId);
-    const currentRowIndex = employeeRowIndexById.get(current.employeeId);
     const anchorDayIndex = dayIndexByValue.get(anchor.day);
     const currentDayIndex = dayIndexByValue.get(current.day);
 
-    if (
-      anchorRowIndex == null
-      || currentRowIndex == null
-      || anchorDayIndex == null
-      || currentDayIndex == null
-    ) {
+    if (anchorDayIndex == null || currentDayIndex == null) {
       return new Set();
     }
 
-    const startRowIndex = Math.min(anchorRowIndex, currentRowIndex);
-    const endRowIndex = Math.max(anchorRowIndex, currentRowIndex);
     const startDayIndex = Math.min(anchorDayIndex, currentDayIndex);
     const endDayIndex = Math.max(anchorDayIndex, currentDayIndex);
     const nextSelection = new Set<string>();
 
-    for (let rowIndex = startRowIndex; rowIndex <= endRowIndex; rowIndex += 1) {
-      const employee = rows[rowIndex]?.employee;
-      if (!employee) continue;
+    if (viewMode === 'objects') {
+      const anchorRowIndex = objectRowIndexByKey.get(anchor.rowKey);
+      const currentRowIndex = objectRowIndexByKey.get(current.rowKey);
+      if (anchorRowIndex == null || currentRowIndex == null) {
+        return new Set();
+      }
+
+      const startRowIndex = Math.min(anchorRowIndex, currentRowIndex);
+      const endRowIndex = Math.max(anchorRowIndex, currentRowIndex);
+
+      for (let rowIndex = startRowIndex; rowIndex <= endRowIndex; rowIndex += 1) {
+        const row = objectViewRowsFlat[rowIndex];
+        if (!row) continue;
+
+        for (let dayIndex = startDayIndex; dayIndex <= endDayIndex; dayIndex += 1) {
+          const day = days[dayIndex];
+          if (day == null) continue;
+          if (row.isSynthetic) continue;
+          nextSelection.add(getObjectBulkCellKey(row.employee.id, row.object_key, day));
+        }
+      }
+
+      return nextSelection;
+    }
+
+    const anchorRowIndex = employeeRowIndexByKey.get(anchor.rowKey);
+    const currentRowIndex = employeeRowIndexByKey.get(current.rowKey);
+    if (anchorRowIndex == null || currentRowIndex == null) {
+      return new Set();
+    }
+
+    const startEmployeeRowIndex = Math.min(anchorRowIndex, currentRowIndex);
+    const endEmployeeRowIndex = Math.max(anchorRowIndex, currentRowIndex);
+
+    for (let rowIndex = startEmployeeRowIndex; rowIndex <= endEmployeeRowIndex; rowIndex += 1) {
+      const row = employeeRows[rowIndex];
+      if (!row) continue;
 
       for (let dayIndex = startDayIndex; dayIndex <= endDayIndex; dayIndex += 1) {
         const day = days[dayIndex];
         if (day == null) continue;
         const workDate = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-        if (splitDayKeys.has(`${employee.id}_${workDate}`)) continue;
-        nextSelection.add(getBulkCellKey(employee.id, day));
+        if (splitDayKeys.has(`${row.employee.id}_${workDate}`)) continue;
+        nextSelection.add(getEmployeeBulkCellKey(row.employee.id, day));
       }
     }
 
     return nextSelection;
-  }, [dayIndexByValue, days, employeeRowIndexById, month, rows, splitDayKeys, year]);
+  }, [
+    dayIndexByValue,
+    viewMode,
+    objectRowIndexByKey,
+    employeeRowIndexByKey,
+    days,
+    objectViewRowsFlat,
+    employeeRows,
+    month,
+    splitDayKeys,
+    year,
+  ]);
 
   const finishBulkDragSelection = useCallback(() => {
     if (!bulkDragAnchor) return;
     onBulkSelectionChange?.(new Set(bulkDragPreviewKeys ?? []));
     setBulkDragAnchor(null);
+    setBulkDragBaseKeys(new Set());
     setBulkDragPreviewKeys(null);
   }, [bulkDragAnchor, bulkDragPreviewKeys, onBulkSelectionChange]);
 
   useEffect(() => {
     if (!bulkEditMode) {
       setBulkDragAnchor(null);
+      setBulkDragBaseKeys(new Set());
       setBulkDragPreviewKeys(null);
       return;
     }
@@ -349,27 +574,101 @@ export const TimesheetGrid: FC<ITimesheetGridProps> = ({
 
   const handleBulkCellMouseDown = useCallback((
     event: ReactMouseEvent<HTMLTableCellElement>,
-    employeeId: number,
+    rowKey: string,
     day: number,
+    blocked = false,
   ) => {
     if (!bulkEditMode || event.button !== 0) return;
-
-    const workDate = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-    if (splitDayKeys.has(`${employeeId}_${workDate}`)) {
+    if (blocked) {
       onBulkBlockedSelectionAttempt?.();
       return;
     }
 
     event.preventDefault();
-    const anchor = { employeeId, day };
+    const anchor = { rowKey, day };
+    const baseSelection = new Set(selectedCellKeys);
     setBulkDragAnchor(anchor);
-    setBulkDragPreviewKeys(buildBulkRangeSelection(anchor, anchor));
-  }, [buildBulkRangeSelection, bulkEditMode, month, onBulkBlockedSelectionAttempt, splitDayKeys, year]);
+    setBulkDragBaseKeys(baseSelection);
+    setBulkDragPreviewKeys(mergeBulkSelections(baseSelection, buildBulkRangeSelection(anchor, anchor)));
+  }, [
+    buildBulkRangeSelection,
+    bulkEditMode,
+    mergeBulkSelections,
+    onBulkBlockedSelectionAttempt,
+    selectedCellKeys,
+  ]);
 
-  const handleBulkCellMouseEnter = useCallback((employeeId: number, day: number) => {
+  const handleBulkCellMouseEnter = useCallback((rowKey: string, day: number) => {
     if (!bulkEditMode || !bulkDragAnchor) return;
-    setBulkDragPreviewKeys(buildBulkRangeSelection(bulkDragAnchor, { employeeId, day }));
-  }, [buildBulkRangeSelection, bulkDragAnchor, bulkEditMode]);
+    setBulkDragPreviewKeys(
+      mergeBulkSelections(
+        bulkDragBaseKeys,
+        buildBulkRangeSelection(bulkDragAnchor, { rowKey, day }),
+      ),
+    );
+  }, [buildBulkRangeSelection, bulkDragAnchor, bulkDragBaseKeys, bulkEditMode, mergeBulkSelections]);
+
+  if (compact && viewMode === 'objects') {
+    return (
+      <div className="ts-table-container">
+        <div className="ts-table-header-bar ts-table-header-bar--mobile">
+          <h3 className="ts-table-title">По объектам</h3>
+          <div className="ts-mobile-list-hint">
+            {objectViewGroups.length > 0 ? `${objectViewGroups.length} объектов` : 'Нет данных за выбранный период'}
+          </div>
+        </div>
+
+        <div className="ts-mobile-list">
+          {objectViewGroups.map(group => (
+            <article key={group.object_key} className="ts-mobile-card ts-mobile-card--expanded">
+              <div className="ts-object-group-card-header">
+                <div className="ts-object-group-card-title">{group.object_name}</div>
+                <div className="ts-object-group-card-meta">{group.rows.length} чел.</div>
+              </div>
+
+              <div className="ts-object-group-mobile-list">
+                {group.rows.map(row => (
+                  <div key={`${group.object_key}_${row.employee.id}`} className="ts-mobile-object-row">
+                    <div className="ts-mobile-object-name">{formatTimesheetEmployeeName(row.employee.full_name)}</div>
+                    <div className="ts-mobile-object-days">
+                      {days.map(day => {
+                        const objectEntry = row.days.get(day) || null;
+                        if (!objectEntry) return null;
+                        return (
+                          <button
+                            key={`${group.object_key}_${row.employee.id}_${day}`}
+                            type="button"
+                            className={`ts-mobile-object-chip${objectEntry.is_correction ? ' ts-mobile-object-chip--corrected' : ''}`}
+                            onClick={() => {
+                              if (row.isSynthetic) {
+                                onDayClick(row.employee, day, row.dailyEntries.get(day) || null);
+                                return;
+                              }
+                              onObjectDayClick(row.employee, day, {
+                                object_key: row.object_key,
+                                object_id: row.object_id,
+                                object_name: row.object_name,
+                              }, objectEntry);
+                            }}
+                          >
+                            {day}: {formatCellHM(getObjectVisibleHours(objectEntry))}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </article>
+          ))}
+
+          {objectViewGroups.length === 0 && (
+            <div className="ts-mobile-empty">Нет объектов для отображения</div>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   if (compact) {
     return (
@@ -377,12 +676,12 @@ export const TimesheetGrid: FC<ITimesheetGridProps> = ({
         <div className="ts-table-header-bar ts-table-header-bar--mobile">
           <h3 className="ts-table-title">Сотрудники</h3>
           <div className="ts-mobile-list-hint">
-            {rows.length > 0 ? `${rows.length} чел. • откройте дни по сотруднику` : 'Нет данных за месяц'}
+            {employeeRows.length > 0 ? `${employeeRows.length} чел. • откройте дни по сотруднику` : 'Нет данных за месяц'}
           </div>
         </div>
 
         <div className="ts-mobile-list">
-          {rows.map((row, index) => {
+          {employeeRows.map((row, index) => {
             const expanded = activeExpandedEmployeeIds.has(row.employee.id);
             const employeeIndex = index + 1;
             const displayName = formatTimesheetEmployeeName(row.employee.full_name);
@@ -437,28 +736,28 @@ export const TimesheetGrid: FC<ITimesheetGridProps> = ({
                       Нажмите на день, чтобы посмотреть или скорректировать отметку
                     </div>
                     <div className="ts-mobile-days">
-                      {days.map(d => {
-                        const sched = getScheduleForTimesheetDay(schedules, dailySchedules, row.employee.id, year, month, d);
-                        const dayOff = isScheduleDayOff(sched, calendar, year, month, d);
-                        const today = isToday(year, month, d);
-                        const future = isFutureDay(year, month, d);
-                        const entry = row.days.get(d) || null;
-                        const thresholdHours = getFullDayThresholdHoursForDay(sched, calendar, year, month, d);
+                      {days.map(day => {
+                        const sched = getScheduleForTimesheetDay(schedules, dailySchedules, row.employee.id, year, month, day);
+                        const dayOff = isScheduleDayOff(sched, calendar, year, month, day);
+                        const today = isToday(year, month, day);
+                        const future = isFutureDay(year, month, day);
+                        const entry = row.days.get(day) || null;
+                        const thresholdHours = getFullDayThresholdHoursForDay(sched, calendar, year, month, day);
                         const cls = getDayCellClass(entry, dayOff, today, future, thresholdHours);
                         const text = getDayCellText(entry, dayOff);
                         const title = getDayCellTitle(entry, dayOff);
 
                         return (
                           <button
-                            key={d}
+                            key={day}
                             type="button"
                             className={`${cls} ts-mobile-day-btn`}
                             title={title}
-                            onClick={() => onDayClick(row.employee, d, entry)}
+                            onClick={() => onDayClick(row.employee, day, entry)}
                           >
                             <span className="ts-mobile-day-head">
-                              <span className="ts-mobile-day-num">{d}</span>
-                              <span className="ts-mobile-day-weekday">{getWeekdayShort(year, month, d)}</span>
+                              <span className="ts-mobile-day-num">{day}</span>
+                              <span className="ts-mobile-day-weekday">{getWeekdayShort(year, month, day)}</span>
                             </span>
                             <span className="ts-mobile-day-value">{text || '·'}</span>
                           </button>
@@ -472,21 +771,21 @@ export const TimesheetGrid: FC<ITimesheetGridProps> = ({
                           <div key={objectRow.object_key} className="ts-mobile-object-row">
                             <div className="ts-mobile-object-name">{objectRow.object_name}</div>
                             <div className="ts-mobile-object-days">
-                              {days.map(d => {
-                                const objectEntry = objectRow.days.get(d) || null;
+                              {days.map(day => {
+                                const objectEntry = objectRow.days.get(day) || null;
                                 if (!objectEntry) return null;
                                 return (
                                   <button
-                                    key={`${objectRow.object_key}_${d}`}
+                                    key={`${objectRow.object_key}_${day}`}
                                     type="button"
                                     className={`ts-mobile-object-chip${objectEntry.is_correction ? ' ts-mobile-object-chip--corrected' : ''}`}
-                                    onClick={() => onObjectDayClick(row.employee, d, {
+                                    onClick={() => onObjectDayClick(row.employee, day, {
                                       object_key: objectRow.object_key,
                                       object_id: objectRow.object_id,
                                       object_name: objectRow.object_name,
                                     }, objectEntry)}
                                   >
-                                    {d}: {formatCellHM(objectEntry.hours_worked)}
+                                    {day}: {formatCellHM(getObjectVisibleHours(objectEntry))}
                                   </button>
                                 );
                               })}
@@ -501,9 +800,129 @@ export const TimesheetGrid: FC<ITimesheetGridProps> = ({
             );
           })}
 
-          {rows.length === 0 && (
+          {employeeRows.length === 0 && (
             <div className="ts-mobile-empty">Нет сотрудников для отображения</div>
           )}
+        </div>
+      </div>
+    );
+  }
+
+  if (viewMode === 'objects') {
+    return (
+      <div className="ts-table-container">
+        <div className="ts-table-header-bar">
+          <h3 className="ts-table-title">Табель по объектам</h3>
+          <div className="ts-legend">
+            <div className="ts-legend-item">
+              <span className="ts-legend-dot ts-legend-dot--full">8</span>Распределённые часы
+            </div>
+            <div className="ts-legend-item">
+              <span className="ts-legend-dot ts-legend-dot--corrected">К</span>Корректировка
+            </div>
+            <div className="ts-legend-item">
+              <span className="ts-legend-dot ts-legend-dot--weekend">—</span>Выходной
+            </div>
+          </div>
+        </div>
+
+        <div className="ts-table-scroll">
+          <table className={`ts-table ts-table--objects${bulkEditMode ? ' ts-table--bulk-mode' : ''}`}>
+            <thead>
+              <tr>
+                <th className="ts-col-sticky">Объект / сотрудник</th>
+                {days.map(day => {
+                  const weekend = isWeekend(year, month, day);
+                  const today = isToday(year, month, day);
+                  let cls = '';
+                  if (today) cls = 'ts-th--today';
+                  else if (weekend) cls = 'ts-th--weekend';
+                  return (
+                    <th key={day} className={cls}>
+                      {day}<br />
+                      <span style={{ fontWeight: 400 }}>{getWeekdayShort(year, month, day)}</span>
+                    </th>
+                  );
+                })}
+              </tr>
+            </thead>
+            <tbody>
+              {objectViewGroups.map(group => (
+                <Fragment key={group.object_key}>
+                  <tr className="ts-object-group-row">
+                    <td className="ts-col-sticky ts-object-group-cell" colSpan={days.length + 1}>
+                      <span className="ts-object-group-name">{group.object_name}</span>
+                      <span className="ts-object-group-meta">{group.rows.length} чел.</span>
+                    </td>
+                  </tr>
+                  {group.rows.map(row => (
+                    <tr key={`${group.object_key}_${row.employee.id}`}>
+                      <td
+                        className="ts-col-sticky ts-object-employee-cell"
+                        onClick={bulkEditMode ? undefined : () => onEmployeeClick(row.employee)}
+                      >
+                        <div className="ts-object-employee-name" title={row.employee.full_name}>
+                          {formatTimesheetEmployeeName(row.employee.full_name)}
+                        </div>
+                      </td>
+                      {days.map(day => {
+                        const objectEntry = row.days.get(day) || null;
+                        const sched = getScheduleForTimesheetDay(schedules, dailySchedules, row.employee.id, year, month, day);
+                        const dayOff = isScheduleDayOff(sched, calendar, year, month, day);
+                        const future = isFutureDay(year, month, day);
+                        const text = objectEntry ? formatCellHM(getObjectVisibleHours(objectEntry)) : '';
+                        const targeted = bulkEditMode && activeSelectedCellKeys.has(getObjectBulkCellKey(row.employee.id, row.object_key, day));
+                        const title = bulkEditMode
+                          ? [getObjectCellTitle(objectEntry, row.object_name), 'Зажмите левую кнопку мыши и протяните диапазон для массовой корректировки по объектам']
+                            .filter(Boolean)
+                            .join(' • ')
+                          : getObjectCellTitle(objectEntry, row.object_name);
+                        const isClickable = !future && !dayOff;
+                        const isBlocked = row.isSynthetic;
+                        return (
+                          <td
+                            key={`${group.object_key}_${row.employee.id}_${day}`}
+                            className={`ts-day ts-day--object${objectEntry?.is_correction ? ' ts-day--corrected' : ''}${targeted ? ' ts-day--bulk-target' : ''}${bulkEditMode && !isBlocked ? ' ts-day--bulk-selectable' : ''}`}
+                            title={title}
+                            onMouseDown={bulkEditMode && isClickable ? (event) => handleBulkCellMouseDown(
+                              event,
+                              getObjectBulkRowKey(row.employee.id, row.object_key),
+                              day,
+                              isBlocked,
+                            ) : undefined}
+                            onMouseEnter={bulkEditMode && isClickable ? () => handleBulkCellMouseEnter(
+                              getObjectBulkRowKey(row.employee.id, row.object_key),
+                              day,
+                            ) : undefined}
+                            onClick={!bulkEditMode && isClickable ? () => {
+                              if (row.isSynthetic) {
+                                onDayClick(row.employee, day, row.dailyEntries.get(day) || null);
+                                return;
+                              }
+                              onObjectDayClick(row.employee, day, {
+                                object_key: row.object_key,
+                                object_id: row.object_id,
+                                object_name: row.object_name,
+                              }, objectEntry);
+                            } : undefined}
+                          >
+                            {text}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
+                </Fragment>
+              ))}
+              {objectViewGroups.length === 0 && (
+                <tr>
+                  <td colSpan={days.length + 1} className="ts-loading">
+                    Нет объектов для отображения
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
         </div>
       </div>
     );
@@ -549,30 +968,30 @@ export const TimesheetGrid: FC<ITimesheetGridProps> = ({
           <thead>
             <tr>
               <th className="ts-col-sticky">Сотрудник</th>
-              {days.map(d => {
-                const weekend = isWeekend(year, month, d);
-                const today = isToday(year, month, d);
+              {days.map(day => {
+                const weekend = isWeekend(year, month, day);
+                const today = isToday(year, month, day);
                 let cls = '';
                 if (today) cls = 'ts-th--today';
                 else if (weekend) cls = 'ts-th--weekend';
                 return (
-                  <th key={d} className={cls}>
-                    {d}<br />
-                    <span style={{ fontWeight: 400 }}>{getWeekdayShort(year, month, d)}</span>
+                  <th key={day} className={cls}>
+                    {day}<br />
+                    <span style={{ fontWeight: 400 }}>{getWeekdayShort(year, month, day)}</span>
                   </th>
                 );
               })}
             </tr>
           </thead>
           <tbody>
-            {rows.map((row, index) => {
+            {employeeRows.map((row, index) => {
               const employeeIndex = index + 1;
               const displayName = formatTimesheetEmployeeName(row.employee.full_name);
               const expanded = activeExpandedEmployeeIds.has(row.employee.id);
 
               return (
                 <Fragment key={row.employee.id}>
-                  <tr key={row.employee.id}>
+                  <tr>
                     <td
                       className={`ts-col-sticky ts-employee-cell${bulkEditMode ? ' ts-employee-cell--bulk' : ''}`}
                       onClick={bulkEditMode ? undefined : () => onEmployeeClick(row.employee)}
@@ -597,34 +1016,34 @@ export const TimesheetGrid: FC<ITimesheetGridProps> = ({
                             {displayName}
                           </div>
                         </div>
-                          {canManageTeam && onExcludeEmployee && (
-                            <div
-                              className="ts-employee-cell-actions"
-                              onClick={event => event.stopPropagation()}
+                        {canManageTeam && onExcludeEmployee && (
+                          <div
+                            className="ts-employee-cell-actions"
+                            onClick={event => event.stopPropagation()}
+                          >
+                            <button
+                              type="button"
+                              className="ts-employee-inline-btn"
+                              title="Исключить сотрудника"
+                              aria-label="Исключить сотрудника"
+                              onClick={() => onExcludeEmployee(row.employee)}
+                              disabled={pendingEmployeeId === row.employee.id}
                             >
-                              <button
-                                type="button"
-                                className="ts-employee-inline-btn"
-                                title="Исключить сотрудника"
-                                aria-label="Исключить сотрудника"
-                                onClick={() => onExcludeEmployee(row.employee)}
-                                disabled={pendingEmployeeId === row.employee.id}
-                              >
-                                <UserMinus size={12} />
-                                {pendingEmployeeId === row.employee.id ? '...' : 'Искл.'}
-                              </button>
-                            </div>
-                          )}
+                              <UserMinus size={12} />
+                              {pendingEmployeeId === row.employee.id ? '...' : 'Искл.'}
+                            </button>
+                          </div>
+                        )}
                       </div>
                     </td>
-                    {days.map(d => {
-                      const sched = getScheduleForTimesheetDay(schedules, dailySchedules, row.employee.id, year, month, d);
-                      const dayOff = isScheduleDayOff(sched, calendar, year, month, d);
-                      const today = isToday(year, month, d);
-                      const future = isFutureDay(year, month, d);
-                      const entry = row.days.get(d) || null;
-                      const thresholdHours = getFullDayThresholdHoursForDay(sched, calendar, year, month, d);
-                      const targeted = bulkEditMode && activeSelectedCellKeys.has(getBulkCellKey(row.employee.id, d));
+                    {days.map(day => {
+                      const sched = getScheduleForTimesheetDay(schedules, dailySchedules, row.employee.id, year, month, day);
+                      const dayOff = isScheduleDayOff(sched, calendar, year, month, day);
+                      const today = isToday(year, month, day);
+                      const future = isFutureDay(year, month, day);
+                      const entry = row.days.get(day) || null;
+                      const thresholdHours = getFullDayThresholdHoursForDay(sched, calendar, year, month, day);
+                      const targeted = bulkEditMode && activeSelectedCellKeys.has(getEmployeeBulkCellKey(row.employee.id, day));
                       const cls = `${getDayCellClass(entry, dayOff, today, future, thresholdHours)}${targeted ? ' ts-day--bulk-target' : ''}${bulkEditMode ? ' ts-day--bulk-selectable' : ''}`;
                       const text = getDayCellText(entry, dayOff);
                       const title = getDayCellTitle(entry, dayOff);
@@ -636,12 +1055,20 @@ export const TimesheetGrid: FC<ITimesheetGridProps> = ({
 
                       return (
                         <td
-                          key={d}
+                          key={day}
                           className={cls}
                           title={bulkTitle}
-                          onMouseDown={bulkEditMode ? (event) => handleBulkCellMouseDown(event, row.employee.id, d) : undefined}
-                          onMouseEnter={bulkEditMode ? () => handleBulkCellMouseEnter(row.employee.id, d) : undefined}
-                          onClick={bulkEditMode ? undefined : () => onDayClick(row.employee, d, entry)}
+                          onMouseDown={bulkEditMode ? (event) => handleBulkCellMouseDown(
+                            event,
+                            getEmployeeBulkRowKey(row.employee.id),
+                            day,
+                            splitDayKeys.has(`${row.employee.id}_${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`),
+                          ) : undefined}
+                          onMouseEnter={bulkEditMode ? () => handleBulkCellMouseEnter(
+                            getEmployeeBulkRowKey(row.employee.id),
+                            day,
+                          ) : undefined}
+                          onClick={bulkEditMode ? undefined : () => onDayClick(row.employee, day, entry)}
                         >
                           {text}
                         </td>
@@ -655,20 +1082,20 @@ export const TimesheetGrid: FC<ITimesheetGridProps> = ({
                           ↳ {objectRow.object_name}
                         </div>
                       </td>
-                      {days.map(d => {
-                        const objectEntry = objectRow.days.get(d) || null;
-                        const sched = getScheduleForTimesheetDay(schedules, dailySchedules, row.employee.id, year, month, d);
-                        const dayOff = isScheduleDayOff(sched, calendar, year, month, d);
-                        const future = isFutureDay(year, month, d);
-                        const text = objectEntry ? formatCellHM(objectEntry.hours_worked) : '';
-                        const title = getObjectCellTitle(objectEntry);
+                      {days.map(day => {
+                        const objectEntry = objectRow.days.get(day) || null;
+                        const sched = getScheduleForTimesheetDay(schedules, dailySchedules, row.employee.id, year, month, day);
+                        const dayOff = isScheduleDayOff(sched, calendar, year, month, day);
+                        const future = isFutureDay(year, month, day);
+                        const text = objectEntry ? formatCellHM(getObjectVisibleHours(objectEntry)) : '';
+                        const title = getObjectCellTitle(objectEntry, objectRow.object_name);
                         const isClickable = !future && !dayOff;
                         return (
                           <td
-                            key={`${objectRow.object_key}_${d}`}
+                            key={`${objectRow.object_key}_${day}`}
                             className={`ts-day ts-day--object${objectEntry?.is_correction ? ' ts-day--corrected' : ''}`}
                             title={title}
-                            onClick={isClickable ? () => onObjectDayClick(row.employee, d, {
+                            onClick={isClickable ? () => onObjectDayClick(row.employee, day, {
                               object_key: objectRow.object_key,
                               object_id: objectRow.object_id,
                               object_name: objectRow.object_name,
@@ -683,7 +1110,7 @@ export const TimesheetGrid: FC<ITimesheetGridProps> = ({
                 </Fragment>
               );
             })}
-            {rows.length === 0 && (
+            {employeeRows.length === 0 && (
               <tr>
                 <td colSpan={days.length + 1} className="ts-loading">
                   Нет сотрудников для отображения

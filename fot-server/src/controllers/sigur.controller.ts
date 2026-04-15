@@ -1,21 +1,142 @@
 import { Response } from 'express';
+import { supabase } from '../config/database.js';
+import { auditService } from '../services/audit.service.js';
+import { canAccessEmployeeInScope } from '../services/data-scope.service.js';
+import {
+  ensureArchiveSigurDepartment,
+  getEmployeeAccessPointBindings,
+  replaceEmployeeAccessPointBindings,
+} from '../services/sigur-linked-employees.service.js';
+import { settingsService } from '../services/settings.service.js';
 import { sigurService } from '../services/sigur.service.js';
+import { resolveField } from '../services/sigur-sync-shared.js';
 import { mapSigurEvent } from '../utils/sigur.mapper.js';
 import type { AuthenticatedRequest } from '../types/index.js';
 
+async function ensureSigurConfigured(
+  res: Response,
+  customMessage?: string,
+): Promise<boolean> {
+  if (await sigurService.isConfigured()) {
+    return true;
+  }
+
+  res.status(503).json({
+    success: false,
+    error: customMessage || 'Sigur не настроен. Укажите параметры подключения во временных настройках или в .env',
+    connections: await sigurService.getAvailableConnections(),
+  });
+  return false;
+}
+
+function toAccessPointOption(raw: Record<string, unknown>): { id: number | null; name: string } | null {
+  const id = resolveField<number>(raw, 'id', 'ID', 'Id') ?? null;
+  const name = String(resolveField<string>(raw, 'name', 'Name', 'title') || '').trim();
+  if (!name) return null;
+  return { id, name };
+}
+
 export const sigurController = {
+  async getConnectionSettings(_req: AuthenticatedRequest, res: Response): Promise<void> {
+    try {
+      const [settings, connections] = await Promise.all([
+        settingsService.getSigurConnectionSettings(),
+        sigurService.getAvailableConnections(),
+      ]);
+
+      res.json({
+        success: true,
+        data: {
+          ...settings,
+          connections,
+        },
+      });
+    } catch (error) {
+      console.error('Sigur get connection settings error:', error);
+      res.status(500).json({ success: false, error: 'Ошибка получения настроек подключения Sigur' });
+    }
+  },
+
+  async saveConnectionSettings(req: AuthenticatedRequest, res: Response): Promise<void> {
+    try {
+      const {
+        internal,
+        external,
+        archiveDepartmentId,
+        archiveDepartmentName,
+      } = req.body as {
+        internal?: { url?: string | null; username?: string | null; password?: string | null };
+        external?: { url?: string | null; username?: string | null; password?: string | null };
+        archiveDepartmentId?: number | null;
+        archiveDepartmentName?: string | null;
+      };
+
+      const settings = await settingsService.setSigurConnectionSettings({
+        internal,
+        external,
+        archiveDepartmentId,
+        archiveDepartmentName,
+      }, req.user.id);
+
+      sigurService.invalidateConnectionState();
+
+      await auditService.logFromRequest(req, req.user.id, 'UPDATE_EMPLOYEE', {
+        entityType: 'sigur_settings',
+        entityId: 'connection',
+        details: {
+          updatedScopes: [
+            internal ? 'internal' : null,
+            external ? 'external' : null,
+            archiveDepartmentId !== undefined || archiveDepartmentName !== undefined ? 'archive' : null,
+          ].filter(Boolean),
+        },
+      });
+
+      res.json({
+        success: true,
+        data: {
+          ...settings,
+          connections: await sigurService.getAvailableConnections(),
+        },
+      });
+    } catch (error) {
+      console.error('Sigur save connection settings error:', error);
+      res.status(500).json({ success: false, error: 'Ошибка сохранения настроек подключения Sigur' });
+    }
+  },
+
+  async ensureArchiveDepartment(req: AuthenticatedRequest, res: Response): Promise<void> {
+    try {
+      if (!(await ensureSigurConfigured(res))) {
+        return;
+      }
+
+      const connection = (req.body.connection as 'external' | 'internal') || undefined;
+      const archive = await ensureArchiveSigurDepartment(req.user.id, connection);
+
+      await auditService.logFromRequest(req, req.user.id, 'UPDATE_EMPLOYEE', {
+        entityType: 'sigur_settings',
+        entityId: 'archive_department',
+        details: archive,
+      });
+
+      res.json({ success: true, data: archive });
+    } catch (error) {
+      console.error('Sigur ensure archive department error:', error);
+      res.status(500).json({ success: false, error: 'Ошибка создания архивного отдела Sigur' });
+    }
+  },
+
   /**
    * GET /api/sigur/test
    * Проверка соединения с Sigur
    */
   async testConnection(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
-      if (!sigurService.isConfigured()) {
-        res.status(503).json({
-          success: false,
-          error: 'Sigur не настроен. Укажите SIGUR_EXTERNAL_* или SIGUR_INTERNAL_* в .env',
-          connections: sigurService.getAvailableConnections(),
-        });
+      if (!(await ensureSigurConfigured(
+        res,
+        'Sigur не настроен. Укажите параметры подключения во временных настройках или в .env',
+      ))) {
         return;
       }
 
@@ -26,7 +147,7 @@ export const sigurController = {
         success: result.success,
         message: result.message,
         connection: result.connection,
-        connections: sigurService.getAvailableConnections(),
+        connections: await sigurService.getAvailableConnections(),
       });
     } catch (error) {
       console.error('Sigur test connection error:', error);
@@ -40,8 +161,7 @@ export const sigurController = {
    */
   async stream(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
-      if (!sigurService.isConfigured()) {
-        res.status(503).json({ success: false, error: 'Sigur не настроен' });
+      if (!(await ensureSigurConfigured(res))) {
         return;
       }
 
@@ -124,8 +244,7 @@ export const sigurController = {
    */
   async getEmployees(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
-      if (!sigurService.isConfigured()) {
-        res.status(503).json({ success: false, error: 'Sigur не настроен' });
+      if (!(await ensureSigurConfigured(res))) {
         return;
       }
 
@@ -147,8 +266,7 @@ export const sigurController = {
    */
   async getDepartments(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
-      if (!sigurService.isConfigured()) {
-        res.status(503).json({ success: false, error: 'Sigur не настроен' });
+      if (!(await ensureSigurConfigured(res))) {
         return;
       }
 
@@ -170,8 +288,7 @@ export const sigurController = {
    */
   async getAccessPoints(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
-      if (!sigurService.isConfigured()) {
-        res.status(503).json({ success: false, error: 'Sigur не настроен' });
+      if (!(await ensureSigurConfigured(res))) {
         return;
       }
 
@@ -191,8 +308,7 @@ export const sigurController = {
    */
   async getEvents(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
-      if (!sigurService.isConfigured()) {
-        res.status(503).json({ success: false, error: 'Sigur не настроен' });
+      if (!(await ensureSigurConfigured(res))) {
         return;
       }
 
@@ -218,8 +334,7 @@ export const sigurController = {
    */
   async getEventTypes(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
-      if (!sigurService.isConfigured()) {
-        res.status(503).json({ success: false, error: 'Sigur не настроен' });
+      if (!(await ensureSigurConfigured(res))) {
         return;
       }
 
@@ -239,8 +354,7 @@ export const sigurController = {
    */
   async getCards(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
-      if (!sigurService.isConfigured()) {
-        res.status(503).json({ success: false, error: 'Sigur не настроен' });
+      if (!(await ensureSigurConfigured(res))) {
         return;
       }
 
@@ -260,8 +374,7 @@ export const sigurController = {
    */
   async getZones(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
-      if (!sigurService.isConfigured()) {
-        res.status(503).json({ success: false, error: 'Sigur не настроен' });
+      if (!(await ensureSigurConfigured(res))) {
         return;
       }
 
@@ -281,8 +394,7 @@ export const sigurController = {
    */
   async getAccessRules(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
-      if (!sigurService.isConfigured()) {
-        res.status(503).json({ success: false, error: 'Sigur не настроен' });
+      if (!(await ensureSigurConfigured(res))) {
         return;
       }
 
@@ -302,8 +414,7 @@ export const sigurController = {
    */
   async discover(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
-      if (!sigurService.isConfigured()) {
-        res.status(503).json({ success: false, error: 'Sigur не настроен' });
+      if (!(await ensureSigurConfigured(res))) {
         return;
       }
 
@@ -391,8 +502,7 @@ export const sigurController = {
    */
   async preview(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
-      if (!sigurService.isConfigured()) {
-        res.status(503).json({ success: false, error: 'Sigur не настроен' });
+      if (!(await ensureSigurConfigured(res))) {
         return;
       }
 
@@ -478,6 +588,124 @@ export const sigurController = {
     } catch (error) {
       console.error('Sigur preview error:', error);
       res.status(500).json({ success: false, error: 'Ошибка предварительного просмотра данных Sigur' });
+    }
+  },
+
+  async getEmployeeAccessPoints(req: AuthenticatedRequest, res: Response): Promise<void> {
+    try {
+      const employeeId = Number(req.params.id);
+      if (!Number.isInteger(employeeId) || !(await canAccessEmployeeInScope(req, employeeId))) {
+        res.status(403).json({ success: false, error: 'Нет доступа к сотруднику' });
+        return;
+      }
+
+      if (!(await ensureSigurConfigured(res))) {
+        return;
+      }
+
+      const connection = (req.query.connection as 'external' | 'internal') || undefined;
+      const { data: employee, error: employeeError } = await supabase
+        .from('employees')
+        .select('id, sigur_employee_id')
+        .eq('id', employeeId)
+        .maybeSingle();
+
+      if (employeeError) throw employeeError;
+      if (!employee) {
+        res.status(404).json({ success: false, error: 'Сотрудник не найден' });
+        return;
+      }
+
+      const accessPointsRaw = await sigurService.getAccessPoints(connection) as Record<string, unknown>[];
+      const accessPoints = accessPointsRaw
+        .map(point => toAccessPointOption(point))
+        .filter((point): point is { id: number | null; name: string } => !!point)
+        .filter(point => point.id != null)
+        .sort((left, right) => left.name.localeCompare(right.name, 'ru'));
+
+      if (!employee.sigur_employee_id) {
+        res.json({
+          success: true,
+          data: {
+            linked: false,
+            accessPoints,
+            bindings: [],
+          },
+        });
+        return;
+      }
+
+      const bindings = await getEmployeeAccessPointBindings(employee.sigur_employee_id, connection);
+
+      res.json({
+        success: true,
+        data: {
+          linked: true,
+          accessPoints,
+          bindings,
+        },
+      });
+    } catch (error) {
+      console.error('Sigur get employee access points error:', error);
+      res.status(500).json({ success: false, error: 'Ошибка получения точек доступа сотрудника из Sigur' });
+    }
+  },
+
+  async saveEmployeeAccessPoints(req: AuthenticatedRequest, res: Response): Promise<void> {
+    try {
+      const employeeId = Number(req.params.id);
+      if (!Number.isInteger(employeeId) || !(await canAccessEmployeeInScope(req, employeeId))) {
+        res.status(403).json({ success: false, error: 'Нет доступа к сотруднику' });
+        return;
+      }
+
+      if (!(await ensureSigurConfigured(res))) {
+        return;
+      }
+
+      const { accessPointIds } = req.body as { accessPointIds?: unknown };
+      if (!Array.isArray(accessPointIds) || accessPointIds.some(value => !Number.isInteger(value))) {
+        res.status(400).json({ success: false, error: 'accessPointIds должен быть массивом целых чисел' });
+        return;
+      }
+
+      const connection = (req.body.connection as 'external' | 'internal') || undefined;
+      const { data: employee, error: employeeError } = await supabase
+        .from('employees')
+        .select('id, sigur_employee_id')
+        .eq('id', employeeId)
+        .maybeSingle();
+
+      if (employeeError) throw employeeError;
+      if (!employee) {
+        res.status(404).json({ success: false, error: 'Сотрудник не найден' });
+        return;
+      }
+      if (!employee.sigur_employee_id) {
+        res.status(409).json({ success: false, error: 'Сотрудник не связан с Sigur' });
+        return;
+      }
+
+      const result = await replaceEmployeeAccessPointBindings(
+        employee.sigur_employee_id,
+        accessPointIds as number[],
+        connection,
+      );
+
+      await auditService.logFromRequest(req, req.user.id, 'UPDATE_EMPLOYEE', {
+        entityType: 'employee',
+        entityId: String(employeeId),
+        details: {
+          source: 'sigur_access_points',
+          addedIds: result.addedIds,
+          removedIds: result.removedIds,
+        },
+      });
+
+      res.json({ success: true, data: result });
+    } catch (error) {
+      console.error('Sigur save employee access points error:', error);
+      res.status(500).json({ success: false, error: 'Ошибка сохранения точек доступа сотрудника в Sigur' });
     }
   },
 

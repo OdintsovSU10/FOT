@@ -236,8 +236,8 @@ export async function pollEventsOnce(now = new Date()): Promise<void> {
   let connectionType: ConnectionType | null = null;
 
   try {
-    if (!sigurService.isConfigured()) return;
-    connectionType = sigurService.getBackgroundConnectionType();
+    if (!(await sigurService.isConfigured())) return;
+    connectionType = await sigurService.getBackgroundConnectionType();
 
     window = await resolvePollingWindow(now);
     console.log(
@@ -540,9 +540,9 @@ async function runPollCycle(): Promise<void> {
   return pollInFlight;
 }
 
-export function startPresencePolling(): void {
+export async function startPresencePolling(): Promise<void> {
   if (pollingTimer || startupTimeout) return;
-  if (!sigurService.isConfigured()) {
+  if (!(await sigurService.isConfigured())) {
     console.log('[presence-polling] Sigur not configured, skipping');
     return;
   }
@@ -616,7 +616,7 @@ export async function acquirePresencePollingLock(): Promise<void> {
     });
   } catch (error) {
     manualSyncLocks = 0;
-    startPresencePolling();
+    void startPresencePolling();
     throw error;
   }
 }
@@ -650,6 +650,6 @@ export async function releasePresencePollingLock(): Promise<void> {
 
   manualSyncLocks = 0;
   if (manualSyncLocks === 0) {
-    startPresencePolling();
+    void startPresencePolling();
   }
 }

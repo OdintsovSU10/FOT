@@ -4,12 +4,13 @@ import type { AssignmentType, EmployeeAssignmentWithNames } from './organization
 export interface Employee {
   id: number;
   full_name: string;
-  full_name_encrypted: string;
+  full_name_encrypted?: string;
   last_name: string | null;
   first_name: string | null;
   middle_name: string | null;
   position_name: string | null;
   position_id: string | null;
+  sigur_employee_id: number | null;
   hire_date: string;
   birth_date: string | null;
   current_salary: number | null;

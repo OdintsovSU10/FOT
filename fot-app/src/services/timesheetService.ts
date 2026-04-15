@@ -12,6 +12,7 @@ interface TimesheetFilters {
   month: string; // YYYY-MM
   department_id?: string;
   employee_id?: number;
+  half?: TimesheetExportHalf;
 }
 
 type TimesheetExportHalf = 'H1' | 'H2' | 'FULL';
@@ -37,6 +38,7 @@ export const timesheetService = {
     params.append('month', filters.month);
     if (filters.department_id) params.append('department_id', filters.department_id);
     if (filters.employee_id) params.append('employee_id', String(filters.employee_id));
+    if (filters.half) params.append('half', filters.half);
     const res = await apiClient.get<ApiResponse<TimesheetResponse>>(`/timesheet?${params.toString()}`);
     if (!res.data) throw new Error(res.error || 'Ошибка загрузки табеля');
     return res.data;
@@ -121,6 +123,7 @@ export const timesheetService = {
   async addEmployeeToDepartment(data: {
     employee_id: number;
     department_id: string;
+    effective_from: string;
   }): Promise<void> {
     const res = await apiClient.post<ApiResponse<null>>('/timesheet/team-management/add-employee', data);
     if (res.error) throw new Error(res.error || 'Ошибка добавления сотрудника');

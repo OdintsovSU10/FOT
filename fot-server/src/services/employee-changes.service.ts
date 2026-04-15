@@ -1,5 +1,10 @@
 import { supabase } from '../config/database.js';
 import { employeeCache } from './employee-cache.service.js';
+import {
+  formatDateShift,
+  getEmployeeAssignments,
+  isAssignmentActiveOnDateInclusive,
+} from './timesheet-department-assignments.service.js';
 
 interface ChangeOpts {
   reason?: string;
@@ -17,6 +22,26 @@ const syncEmployeeSalarySnapshot = async (employeeId: number, salary: number | n
       current_salary: salary,
       // Legacy mirror for old screens/imports until salary_actual is retired fully.
       salary_actual: salary,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', employeeId);
+};
+
+const syncEmployeeAssignmentSnapshot = async (employeeId: number, referenceDate = today()): Promise<void> => {
+  const assignments = await getEmployeeAssignments(employeeId);
+  const activeAssignment = [...assignments]
+    .reverse()
+    .find(assignment => isAssignmentActiveOnDateInclusive(
+      assignment.effective_from,
+      assignment.effective_to,
+      referenceDate,
+    )) || null;
+
+  await supabase
+    .from('employees')
+    .update({
+      position_id: activeAssignment?.position_id || null,
+      org_department_id: activeAssignment?.org_department_id || null,
       updated_at: new Date().toISOString(),
     })
     .eq('id', employeeId);
@@ -87,25 +112,7 @@ export const employeeChangesService = {
         created_by: opts.createdBy || null,
       });
 
-    // Обновляем position_id только если эта запись — самая поздняя
-    const { data: latest } = await supabase
-      .from('employee_assignments')
-      .select('position_id')
-      .eq('employee_id', employeeId)
-      .order('effective_from', { ascending: false })
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .single();
-
-    if (latest) {
-      await supabase
-        .from('employees')
-        .update({
-          position_id: latest.position_id,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', employeeId);
-    }
+    await syncEmployeeAssignmentSnapshot(employeeId);
 
     employeeCache.invalidate(employeeId);
   },
@@ -122,42 +129,80 @@ export const employeeChangesService = {
       .eq('id', employeeId)
       .single();
 
-    // Новое назначение
-    await supabase
-      .from('employee_assignments')
-      .insert({
-        employee_id: employeeId,
-        org_department_id: departmentId,
-        position_id: emp?.position_id || null,
-        effective_from: date,
-        is_primary: true,
-        assignment_type: 'main',
-        change_reason: opts.reason || 'Перевод в другой отдел',
-        created_by: opts.createdBy || null,
-      });
+    const assignments = await getEmployeeAssignments(employeeId);
+    const previousDay = formatDateShift(date, -1);
+    const nextAssignment = assignments.find(assignment => assignment.effective_from > date) || null;
+    const sameDayAssignment = assignments.find(assignment => assignment.effective_from === date) || null;
+    const activeAssignment = assignments.find(assignment => isAssignmentActiveOnDateInclusive(
+      assignment.effective_from,
+      assignment.effective_to,
+      date,
+    )) || null;
 
-    // Обновляем отдел только из самой поздней записи
-    const { data: latest } = await supabase
-      .from('employee_assignments')
-      .select('org_department_id')
-      .eq('employee_id', employeeId)
-      .order('effective_from', { ascending: false })
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .single();
+    if (activeAssignment && activeAssignment.id !== sameDayAssignment?.id) {
+      const { error: closeError } = await supabase
+        .from('employee_assignments')
+        .update({
+          effective_to: previousDay,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', activeAssignment.id)
+        .eq('employee_id', employeeId);
+
+      if (closeError) throw closeError;
+    }
+
+    const nextEffectiveTo = nextAssignment ? formatDateShift(nextAssignment.effective_from, -1) : null;
+
+    if (sameDayAssignment) {
+      const { error: updateError } = await supabase
+        .from('employee_assignments')
+        .update({
+          org_department_id: departmentId,
+          position_id: emp?.position_id || null,
+          effective_to: nextEffectiveTo,
+          is_primary: true,
+          assignment_type: 'main',
+          change_reason: opts.reason || 'Перевод в другой отдел',
+          created_by: opts.createdBy || null,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', sameDayAssignment.id)
+        .eq('employee_id', employeeId);
+
+      if (updateError) throw updateError;
+    } else {
+      const { error: insertError } = await supabase
+        .from('employee_assignments')
+        .insert({
+          employee_id: employeeId,
+          org_department_id: departmentId,
+          position_id: emp?.position_id || null,
+          effective_from: date,
+          effective_to: nextEffectiveTo,
+          is_primary: true,
+          assignment_type: 'main',
+          change_reason: opts.reason || 'Перевод в другой отдел',
+          created_by: opts.createdBy || null,
+        });
+
+      if (insertError) throw insertError;
+    }
 
     const updateData: Record<string, unknown> = {
-      org_department_id: latest?.org_department_id || departmentId,
       updated_at: new Date().toISOString(),
     };
     if (opts.lockDepartment !== undefined) {
       updateData.department_locked = opts.lockDepartment;
     }
 
-    await supabase
+    const { error: employeeError } = await supabase
       .from('employees')
       .update(updateData)
       .eq('id', employeeId);
+    if (employeeError) throw employeeError;
+
+    await syncEmployeeAssignmentSnapshot(employeeId);
 
     employeeCache.invalidate(employeeId);
   },
@@ -229,23 +274,7 @@ export const employeeChangesService = {
 
     await supabase.from('employee_assignments').update(updateData).eq('id', assignmentId).eq('employee_id', employeeId);
 
-    // Пересчитать текущие position_id / org_department_id
-    const { data: latest } = await supabase
-      .from('employee_assignments')
-      .select('position_id, org_department_id')
-      .eq('employee_id', employeeId)
-      .order('effective_from', { ascending: false })
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .single();
-
-    if (latest) {
-      await supabase.from('employees').update({
-        position_id: latest.position_id,
-        org_department_id: latest.org_department_id,
-        updated_at: new Date().toISOString(),
-      }).eq('id', employeeId);
-    }
+    await syncEmployeeAssignmentSnapshot(employeeId);
 
     employeeCache.invalidate(employeeId);
   },
@@ -256,20 +285,7 @@ export const employeeChangesService = {
   async deleteAssignment(assignmentId: string, employeeId: number): Promise<void> {
     await supabase.from('employee_assignments').delete().eq('id', assignmentId).eq('employee_id', employeeId);
 
-    const { data: latest } = await supabase
-      .from('employee_assignments')
-      .select('position_id, org_department_id')
-      .eq('employee_id', employeeId)
-      .order('effective_from', { ascending: false })
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .single();
-
-    await supabase.from('employees').update({
-      position_id: latest?.position_id || null,
-      org_department_id: latest?.org_department_id || null,
-      updated_at: new Date().toISOString(),
-    }).eq('id', employeeId);
+    await syncEmployeeAssignmentSnapshot(employeeId);
 
     employeeCache.invalidate(employeeId);
   },

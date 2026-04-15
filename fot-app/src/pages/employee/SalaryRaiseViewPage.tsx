@@ -1,65 +1,71 @@
-import { type FC, useState, useEffect } from 'react';
+import { type FC, useEffect, useMemo, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { useNavigate, useParams, useLocation } from 'react-router-dom';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
+import { useToast } from '../../contexts/ToastContext';
 import {
   salaryRaiseService,
-  REQUEST_TYPE_LABELS,
-  STATUS_LABELS,
   STATUS_COLORS,
-  RATING_OPTIONS,
-  IMPACT_OPTIONS,
-  RECOMMENDATION_OPTIONS,
-  type ISupervisorReview,
-  type IHrReview,
-  type IFinanceReview,
+  STATUS_LABELS,
+  type SalaryRaiseMetricDetailItem,
+  type SalaryRaiseMetricSummary,
 } from '../../services/salaryRaiseService';
-import { useSalaryRaiseRequest } from '../../hooks/useSalaryRaiseData';
+import {
+  useSalaryRaiseRequest,
+  useSalaryRaiseReviewContext,
+} from '../../hooks/useSalaryRaiseData';
 import styles from './SalaryRaiseViewPage.module.css';
 
-const formatSalary = (v: number | null | undefined) =>
-  v != null ? new Intl.NumberFormat('ru-RU').format(v) + ' ₽' : '—';
-const formatDate = (d: string | null | undefined) =>
-  d ? new Date(d).toLocaleDateString('ru-RU') : '—';
-
-const EMPTY_SUPERVISOR: ISupervisorReview = {
-  support: true, recommended_salary: 0, argumentation: '',
-  employee_year_rating: 'средний', reliability_rating: 'средний',
-  loss_risk: 'средний', replaceable: false, confirmed_new_duties: false,
-  impact_deadlines: 'умеренное', impact_quality: 'умеренное',
-  impact_safety: 'незначительное', impact_contractors: 'незначительное',
-  systemic_issues: false, recommendation: 'support',
+const formatSalary = (value: number | null | undefined): string => {
+  if (value == null) return '—';
+  return `${new Intl.NumberFormat('ru-RU').format(value)} ₽`;
 };
 
-const EMPTY_HR: IHrReview = {
-  rules_compliance: true, previous_review_date: '', grade_compliance: true,
-  salary_range_position: '', comparison_with_peers: '', hr_restrictions: 'нет',
-  market_assessment: '', hr_recommendation: 'support',
+const formatDate = (value: string | null | undefined): string => {
+  if (!value) return '—';
+  const normalized = value.slice(0, 10);
+  const [year, month, day] = normalized.split('-');
+
+  if (year && month && day) {
+    return `${Number(day)}.${month}.${year}`;
+  }
+
+  return new Date(value).toLocaleDateString('ru-RU');
 };
 
-const EMPTY_FINANCE: IFinanceReview = {
-  current_budget: 0, monthly_fot_load: 0, yearly_fot_load: 0,
-  coverage_source_exists: true, fits_department_limit: true, recommendation: 'approve',
+const formatDateTime = (value: string | null | undefined): string => {
+  if (!value) return '—';
+  return new Date(value).toLocaleString('ru-RU');
 };
+
+const formatSignedSalary = (value: number): string => {
+  const sign = value > 0 ? '+' : '';
+  return `${sign}${new Intl.NumberFormat('ru-RU').format(value)} ₽`;
+};
+
+const EMPTY_DETAILS: SalaryRaiseMetricDetailItem[] = [];
+const EMPTY_SUMMARY: SalaryRaiseMetricSummary[] = [];
 
 export const SalaryRaiseViewPage: FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { id } = useParams<{ id: string }>();
+  const queryClient = useQueryClient();
+  const toast = useToast();
   const { user, canEditPage } = useAuth();
+  const { id } = useParams<{ id: string }>();
+
+  const requestId = id ? Number(id) : null;
   const isReviewContext = location.pathname.startsWith('/salary-raise-review');
   const backPath = isReviewContext ? '/salary-raise-review' : '/employee/salary-raise';
-  const requestId = id ? Number(id) : null;
-  const queryClient = useQueryClient();
 
-  const [submitting, setSubmitting] = useState(false);
-
-  // Review forms
-  const [supReview, setSupReview] = useState<ISupervisorReview>({ ...EMPTY_SUPERVISOR });
-  const [hrReview, setHrReview] = useState<IHrReview>({ ...EMPTY_HR });
-  const [finReview, setFinReview] = useState<IFinanceReview>({ ...EMPTY_FINANCE });
   const requestQuery = useSalaryRaiseRequest(requestId, !!requestId);
+  const reviewContextQuery = useSalaryRaiseReviewContext(requestId, isReviewContext && !!requestId);
   const request = requestQuery.data ?? null;
+  const reviewContext = reviewContextQuery.data ?? null;
+
+  const [selectedMetric, setSelectedMetric] = useState<string | null>(null);
+  const [reviewComment, setReviewComment] = useState('');
+  const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     if (requestQuery.isError) {
@@ -68,56 +74,88 @@ export const SalaryRaiseViewPage: FC = () => {
   }, [backPath, navigate, requestQuery.isError]);
 
   useEffect(() => {
-    if (!request) return;
-    setSupReview(request.supervisor_review ? request.supervisor_review as ISupervisorReview : { ...EMPTY_SUPERVISOR });
-    setHrReview(request.hr_review ? request.hr_review as IHrReview : { ...EMPTY_HR });
-    setFinReview(request.finance_review ? request.finance_review as IFinanceReview : { ...EMPTY_FINANCE });
-  }, [request]);
+    const summary = reviewContext?.summary ?? EMPTY_SUMMARY;
+    if (summary.length === 0) {
+      setSelectedMetric(null);
+      return;
+    }
 
-  if (requestQuery.isLoading) return <div className={styles.loading}>Загрузка...</div>;
-  if (!request) return null;
+    const stillExists = selectedMetric && summary.some((item) => item.key === selectedMetric);
+    if (stillExists) return;
 
-  const snapshot = request.employee_snapshot;
+    const nextMetric = summary.find((item) => item.count > 0)?.key ?? summary[0]?.key ?? null;
+    setSelectedMetric(nextMetric);
+  }, [reviewContext, selectedMetric]);
+
+  const selectedSummary = useMemo(
+    () => reviewContext?.summary.find((item) => item.key === selectedMetric) ?? null,
+    [reviewContext, selectedMetric],
+  );
+
+  const selectedDetails = useMemo(
+    () => {
+      if (!selectedMetric) return EMPTY_DETAILS;
+      return reviewContext?.details_by_metric[selectedMetric] ?? EMPTY_DETAILS;
+    },
+    [reviewContext, selectedMetric],
+  );
+
+  if (requestQuery.isLoading || (isReviewContext && reviewContextQuery.isLoading)) {
+    return <div className={styles.loading}>Загрузка...</div>;
+  }
+
+  if (!request) {
+    return null;
+  }
+
   const isAuthor = user?.id === request.author_user_id;
-  const canCancel = isAuthor && ['draft', 'supervisor_review'].includes(request.status);
-  const canEdit = isAuthor && request.status === 'draft';
+  const canEditOwnDraft = !isReviewContext
+    && isAuthor
+    && request.status === 'draft'
+    && canEditPage('/employee/salary-raise');
+  const canCancelOwnDraft = canEditOwnDraft;
+  const canAdminReview = isReviewContext
+    && request.status === 'admin_review'
+    && canEditPage('/salary-raise-review');
 
-  // Determine review permissions
-  const canReview = canEditPage('/salary-raise-review');
-  const showSupervisorForm = request.status === 'supervisor_review' && canReview;
-  const showHrForm = request.status === 'hr_review' && canReview;
-  const showFinanceForm = request.status === 'finance_review' && canReview;
+  const currentSalary = request.current_salary_entered ?? 0;
+  const salaryDelta = request.requested_salary - currentSalary;
+  const managerName = request.manager_snapshot?.full_name
+    || request.employee_snapshot.supervisor_name
+    || '—';
+  const managerDepartment = request.manager_snapshot?.department_name
+    || request.employee_snapshot.department_name
+    || '—';
 
-  const handleReview = async (
-    type: 'supervisor' | 'hr' | 'finance',
-    action: 'approve' | 'reject',
-  ) => {
+  const handleCancel = async () => {
     setSubmitting(true);
+
     try {
-      if (type === 'supervisor') {
-        await salaryRaiseService.supervisorReview(request.id, action, supReview);
-      } else if (type === 'hr') {
-        await salaryRaiseService.hrReview(request.id, action, hrReview);
-      } else {
-        await salaryRaiseService.financeReview(request.id, action, finReview);
-      }
+      await salaryRaiseService.cancel(request.id);
       await queryClient.invalidateQueries({ queryKey: ['salary-raise'] });
-      await requestQuery.refetch();
-    } catch (err) {
-      console.error('Review error:', err);
+      toast.success('Заявка отменена');
+      navigate('/employee/salary-raise');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Не удалось отменить заявку');
     } finally {
       setSubmitting(false);
     }
   };
 
-  const handleCancel = async () => {
+  const handleAdminReview = async (action: 'approve' | 'reject') => {
     setSubmitting(true);
+
     try {
-      await salaryRaiseService.cancel(request.id);
+      await salaryRaiseService.adminReview(request.id, {
+        action,
+        comment: reviewComment.trim() || undefined,
+      });
+
       await queryClient.invalidateQueries({ queryKey: ['salary-raise'] });
       await requestQuery.refetch();
-    } catch (err) {
-      console.error('Cancel error:', err);
+      toast.success(action === 'approve' ? 'Заявка одобрена' : 'Заявка отклонена');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Не удалось обновить статус заявки');
     } finally {
       setSubmitting(false);
     }
@@ -125,338 +163,300 @@ export const SalaryRaiseViewPage: FC = () => {
 
   return (
     <div className={styles.page}>
-      <span className={styles.backLink} onClick={() => navigate(backPath)}>
+      <button className={styles.backLink} onClick={() => navigate(backPath)}>
         ← Назад к заявкам
-      </span>
+      </button>
 
-      {/* Status bar */}
-      <div className={styles.statusBar}>
-        <div className={styles.statusInfo}>
-          <span className={styles.statusBadge} style={{
-            background: STATUS_COLORS[request.status] + '18',
-            color: STATUS_COLORS[request.status],
-          }}>
+      <section className={styles.hero}>
+        <div className={styles.heroMain}>
+          <div className={styles.heroLabel}>
+            {isReviewContext ? 'Карточка для администратора' : 'Карточка заявки'}
+          </div>
+          <h1 className={styles.title}>{request.employee_snapshot.full_name}</h1>
+          <p className={styles.subtitle}>
+            {request.employee_snapshot.position_name || 'Должность не указана'}
+            {' • '}
+            {request.employee_snapshot.department_name || 'Подразделение не указано'}
+          </p>
+        </div>
+
+        <div className={styles.heroAside}>
+          <span
+            className={styles.statusBadge}
+            style={{
+              color: STATUS_COLORS[request.status],
+              backgroundColor: `${STATUS_COLORS[request.status]}1A`,
+            }}
+          >
             {STATUS_LABELS[request.status]}
           </span>
-          <span className={styles.statusDate}>
-            Создана: {formatDate(request.created_at)}
-          </span>
+          <div className={styles.heroMeta}>Создана {formatDateTime(request.created_at)}</div>
+          <div className={styles.heroMeta}>Обновлена {formatDateTime(request.updated_at)}</div>
         </div>
-        <div className={styles.statusActions}>
-          {canEdit && (
-            <button className={styles.btnEdit} onClick={() => navigate(`/employee/salary-raise/${request.id}/edit`)}>
-              Редактировать
-            </button>
-          )}
-          {canCancel && (
-            <button className={styles.btnCancel} onClick={handleCancel} disabled={submitting}>
-              Отменить
-            </button>
-          )}
-        </div>
-      </div>
+      </section>
 
-      {/* Блок А — Данные сотрудника */}
-      <div className={styles.section}>
-        <h3 className={styles.sectionTitle}>
-          <span className={`${styles.sectionLabel} ${styles.sectionLabelBlue}`}>А</span> Данные сотрудника
-        </h3>
-        <div className={styles.infoGrid}>
-          <div className={styles.infoItem}><span className={styles.infoLabel}>ФИО</span><span className={styles.infoValue}>{snapshot.full_name}</span></div>
-          <div className={styles.infoItem}><span className={styles.infoLabel}>Должность</span><span className={styles.infoValue}>{snapshot.position_name || '—'}</span></div>
-          <div className={styles.infoItem}><span className={styles.infoLabel}>Отдел</span><span className={styles.infoValue}>{snapshot.department_name || '—'}</span></div>
-          <div className={styles.infoItem}><span className={styles.infoLabel}>Объект</span><span className={styles.infoValue}>{snapshot.work_object || '—'}</span></div>
-          <div className={styles.infoItem}><span className={styles.infoLabel}>Текущий оклад</span><span className={styles.infoValue}>{formatSalary(snapshot.current_salary)}</span></div>
-          <div className={styles.infoItem}><span className={styles.infoLabel}>Руководитель</span><span className={styles.infoValue}>{snapshot.supervisor_name || '—'}</span></div>
-        </div>
-      </div>
-
-      {/* Блок Б — Параметры */}
-      <div className={styles.section}>
-        <h3 className={styles.sectionTitle}>
-          <span className={`${styles.sectionLabel} ${styles.sectionLabelBlue}`}>Б</span> Параметры заявки
-        </h3>
-        <div className={styles.infoGrid}>
-          <div className={styles.infoItem}><span className={styles.infoLabel}>Тип</span><span className={styles.infoValue}>{REQUEST_TYPE_LABELS[request.request_type]}</span></div>
-          <div className={styles.infoItem}><span className={styles.infoLabel}>Запрашиваемый оклад</span><span className={styles.infoValue}>{formatSalary(request.requested_salary)} (+{(() => { const cur = snapshot.current_salary; return cur && cur > 0 ? (((request.requested_salary - cur) / cur) * 100).toFixed(1) : request.raise_percentage ?? 0; })()}%)</span></div>
-          <div className={styles.infoItem}><span className={styles.infoLabel}>Желаемая дата</span><span className={styles.infoValue}>{formatDate(request.desired_effective_date)}</span></div>
-          <div className={styles.infoItem}><span className={styles.infoLabel}>Дата найма</span><span className={styles.infoValue}>{formatDate(snapshot.hire_date)}</span></div>
-          <div className={styles.infoValueFull}><span className={styles.infoLabel}>Причина</span><p>{request.reason_brief}</p></div>
-        </div>
-      </div>
-
-      {/* Блок В — Достижения */}
-      {request.achievements.length > 0 && (
-        <div className={styles.section}>
-          <h3 className={styles.sectionTitle}>
-            <span className={`${styles.sectionLabel} ${styles.sectionLabelBlue}`}>В</span> Достижения
-          </h3>
-          {request.achievements.map((a, idx) => (
-            <div key={idx} className={styles.achievementCard}>
-              <div className={styles.achievementTitle}>{a.task || `Достижение ${idx + 1}`}</div>
-              <div className={styles.infoGrid}>
-                <div className={styles.infoItem}><span className={styles.infoLabel}>Период</span><span className={styles.infoValue}>{a.period || '—'}</span></div>
-                <div className={styles.infoItem}><span className={styles.infoLabel}>Эффект</span><span className={styles.infoValue}>{a.effect || '—'}</span></div>
-              </div>
-              {a.description && <p className={styles.infoValueFull} style={{ marginTop: 8 }}>{a.description}</p>}
-              {a.result && <div className={styles.infoItem} style={{ marginTop: 4 }}><span className={styles.infoLabel}>Результат</span><span className={styles.infoValue}>{a.result}</span></div>}
+      <div className={styles.layout}>
+        <div className={styles.mainColumn}>
+          <section className={styles.card}>
+            <div className={styles.cardHeader}>
+              <h2 className={styles.cardTitle}>Сотрудник и инициатор</h2>
             </div>
-          ))}
-        </div>
-      )}
 
-      {/* Блок Г — Обязанности (read-only) */}
-      {request.responsibility_changes && Object.values(request.responsibility_changes).some(Boolean) && (
-        <div className={styles.section}>
-          <h3 className={styles.sectionTitle}>
-            <span className={`${styles.sectionLabel} ${styles.sectionLabelBlue}`}>Г</span> Изменение обязанностей
-          </h3>
-          {[
-            { key: 'new_functions', label: 'Новые функции' },
-            { key: 'team_growth', label: 'Рост команды' },
-            { key: 'complexity_increase', label: 'Рост сложности' },
-            { key: 'cross_functional', label: 'Кросс-функциональность' },
-          ].map(({ key, label }) => {
-            const rc = request.responsibility_changes as unknown as Record<string, unknown>;
-            if (!rc[key]) return null;
-            return (
-              <div key={key} className={styles.toggleItem}>
-                <span className={styles.toggleIcon}>&#10003;</span>
-                <div>
-                  <div className={styles.toggleText}>{label}</div>
-                  {rc[`${key}_desc`] ? <div className={styles.toggleDesc}>{String(rc[`${key}_desc`])}</div> : null}
+            <div className={styles.infoGrid}>
+              <div className={styles.infoItem}>
+                <span className={styles.infoLabel}>ФИО сотрудника</span>
+                <span className={styles.infoValue}>{request.employee_snapshot.full_name}</span>
+              </div>
+              <div className={styles.infoItem}>
+                <span className={styles.infoLabel}>Руководитель</span>
+                <span className={styles.infoValue}>{managerName}</span>
+              </div>
+              <div className={styles.infoItem}>
+                <span className={styles.infoLabel}>Должность</span>
+                <span className={styles.infoValue}>{request.employee_snapshot.position_name || '—'}</span>
+              </div>
+              <div className={styles.infoItem}>
+                <span className={styles.infoLabel}>Подразделение</span>
+                <span className={styles.infoValue}>{request.employee_snapshot.department_name || '—'}</span>
+              </div>
+              <div className={styles.infoItem}>
+                <span className={styles.infoLabel}>Подразделение руководителя</span>
+                <span className={styles.infoValue}>{managerDepartment}</span>
+              </div>
+              <div className={styles.infoItem}>
+                <span className={styles.infoLabel}>Текущий объект в профиле</span>
+                <span className={styles.infoValue}>{request.employee_snapshot.work_object || '—'}</span>
+              </div>
+              <div className={styles.infoItem}>
+                <span className={styles.infoLabel}>Последнее повышение</span>
+                <span className={styles.infoValue}>{formatDate(request.employee_snapshot.last_raise_date)}</span>
+              </div>
+              <div className={styles.infoItem}>
+                <span className={styles.infoLabel}>Дата приёма</span>
+                <span className={styles.infoValue}>{formatDate(request.employee_snapshot.hire_date)}</span>
+              </div>
+            </div>
+          </section>
+
+          <section className={styles.card}>
+            <div className={styles.cardHeader}>
+              <h2 className={styles.cardTitle}>Параметры повышения</h2>
+            </div>
+
+            <div className={styles.salaryPanel}>
+              <div className={styles.salaryBlock}>
+                <span className={styles.infoLabel}>Текущий оклад</span>
+                <span className={styles.salaryValue}>{formatSalary(request.current_salary_entered)}</span>
+              </div>
+              <div className={styles.salaryArrow}>→</div>
+              <div className={styles.salaryBlock}>
+                <span className={styles.infoLabel}>Желаемый оклад</span>
+                <span className={styles.salaryValue}>{formatSalary(request.requested_salary)}</span>
+              </div>
+              <div className={styles.salaryMeta}>
+                <span className={styles.deltaBadge}>{formatSignedSalary(salaryDelta)}</span>
+                <span className={styles.percentBadge}>+{request.raise_percentage.toFixed(1)}%</span>
+              </div>
+            </div>
+
+            <div className={styles.infoGrid}>
+              <div className={styles.infoItem}>
+                <span className={styles.infoLabel}>Объект по заявке</span>
+                <span className={styles.infoValue}>{request.work_object_name || '—'}</span>
+              </div>
+            </div>
+
+            <div className={styles.textBlock}>
+              <span className={styles.infoLabel}>Какая работа выполняется сотрудником</span>
+              <p>{request.job_summary || '—'}</p>
+            </div>
+
+            <div className={styles.textBlock}>
+              <span className={styles.infoLabel}>Почему сотрудник заслуживает повышения</span>
+              <p>{request.manager_justification || '—'}</p>
+            </div>
+          </section>
+
+          <section className={styles.card}>
+            <div className={styles.cardHeader}>
+              <h2 className={styles.cardTitle}>Достижения за полгода</h2>
+              <span className={styles.cardHint}>Минимум 3 пункта</span>
+            </div>
+
+            <div className={styles.achievementList}>
+              {request.achievements.map((item, index) => (
+                <div key={`${request.id}-achievement-${index}`} className={styles.achievementItem}>
+                  <span className={styles.achievementIndex}>{index + 1}</span>
+                  <p>{item}</p>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          {request.admin_review && (
+            <section className={styles.card}>
+              <div className={styles.cardHeader}>
+                <h2 className={styles.cardTitle}>Решение администратора</h2>
+              </div>
+
+              <div className={styles.infoGrid}>
+                <div className={styles.infoItem}>
+                  <span className={styles.infoLabel}>Решение</span>
+                  <span className={styles.infoValue}>
+                    {request.admin_review.action === 'approve' ? 'Одобрено' : 'Отклонено'}
+                  </span>
+                </div>
+                <div className={styles.infoItem}>
+                  <span className={styles.infoLabel}>Дата решения</span>
+                  <span className={styles.infoValue}>{formatDateTime(request.admin_reviewed_at)}</span>
                 </div>
               </div>
-            );
-          })}
-        </div>
-      )}
 
-      {/* Блок Д — Самооценка (read-only) */}
-      {request.self_assessment && Object.values(request.self_assessment).some(Boolean) && (
-        <div className={styles.section}>
-          <h3 className={styles.sectionTitle}>
-            <span className={`${styles.sectionLabel} ${styles.sectionLabelBlue}`}>Д</span> Самооценка
-          </h3>
-          {[
-            { key: 'strengths', label: 'Сильные стороны' },
-            { key: 'development_areas', label: 'Области развития' },
-            { key: 'career_goals', label: 'Карьерные цели' },
-          ].map(({ key, label }) => {
-            const sa = request.self_assessment as unknown as Record<string, string>;
-            if (!sa[key]) return null;
-            return (
-              <div key={key} className={styles.infoItem} style={{ marginBottom: 12 }}>
-                <span className={styles.infoLabel}>{label}</span>
-                <span className={styles.infoValue} style={{ whiteSpace: 'pre-wrap' }}>{sa[key]}</span>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {/* Блок Е — Рецензия руководителя */}
-      {(request.supervisor_review || showSupervisorForm) && (
-        <div className={`${styles.reviewSection} ${showSupervisorForm ? styles.active : request.supervisor_review ? styles.completed : ''}`}>
-          <h3 className={styles.sectionTitle}>
-            <span className={`${styles.sectionLabel} ${styles.sectionLabelAmber}`}>Е</span> Рецензия руководителя
-          </h3>
-          {request.supervisor_review && !showSupervisorForm ? (
-            <>
-              <div className={styles.reviewerInfo}>
-                Рецензент: {request.supervisor_reviewer_id} | {formatDate(request.supervisor_reviewed_at)}
-              </div>
-              <div className={styles.infoGrid}>
-                <div className={styles.infoItem}><span className={styles.infoLabel}>Поддерживает</span><span className={styles.infoValue}>{(request.supervisor_review as ISupervisorReview).support ? 'Да' : 'Нет'}</span></div>
-                <div className={styles.infoItem}><span className={styles.infoLabel}>Рекомендуемый оклад</span><span className={styles.infoValue}>{formatSalary((request.supervisor_review as ISupervisorReview).recommended_salary)}</span></div>
-                <div className={styles.infoItem}><span className={styles.infoLabel}>Оценка сотрудника</span><span className={styles.infoValue}>{(request.supervisor_review as ISupervisorReview).employee_year_rating}</span></div>
-                <div className={styles.infoItem}><span className={styles.infoLabel}>Риск потери</span><span className={styles.infoValue}>{(request.supervisor_review as ISupervisorReview).loss_risk}</span></div>
-                <div className={styles.infoItem}><span className={styles.infoLabel}>Рекомендация</span><span className={styles.infoValue}>{RECOMMENDATION_OPTIONS.find(o => o.value === (request.supervisor_review as ISupervisorReview).recommendation)?.label}</span></div>
-              </div>
-              {(request.supervisor_review as ISupervisorReview).argumentation && (
-                <div className={styles.infoValueFull} style={{ marginTop: 12 }}>
-                  <span className={styles.infoLabel}>Аргументация</span>
-                  <p>{(request.supervisor_review as ISupervisorReview).argumentation}</p>
+              {request.admin_review.comment && (
+                <div className={styles.textBlock}>
+                  <span className={styles.infoLabel}>Комментарий администратора</span>
+                  <p>{request.admin_review.comment}</p>
                 </div>
               )}
-            </>
-          ) : showSupervisorForm ? (
-            <>
-              <div className={styles.formGrid}>
-                <div className={styles.formGroup}>
-                  <label className={styles.formLabel}>Рекомендуемый оклад (₽)</label>
-                  <input type="number" className={styles.formInput} value={supReview.recommended_salary || ''}
-                    onChange={e => setSupReview(p => ({ ...p, recommended_salary: Number(e.target.value) }))} />
-                </div>
-                <div className={styles.formGroup}>
-                  <label className={styles.formLabel}>Оценка за год</label>
-                  <select className={styles.formSelect} value={supReview.employee_year_rating}
-                    onChange={e => setSupReview(p => ({ ...p, employee_year_rating: e.target.value }))}>
-                    {RATING_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
-                  </select>
-                </div>
-                <div className={styles.formGroup}>
-                  <label className={styles.formLabel}>Надёжность</label>
-                  <select className={styles.formSelect} value={supReview.reliability_rating}
-                    onChange={e => setSupReview(p => ({ ...p, reliability_rating: e.target.value }))}>
-                    {RATING_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
-                  </select>
-                </div>
-                <div className={styles.formGroup}>
-                  <label className={styles.formLabel}>Риск потери</label>
-                  <select className={styles.formSelect} value={supReview.loss_risk}
-                    onChange={e => setSupReview(p => ({ ...p, loss_risk: e.target.value }))}>
-                    {RATING_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
-                  </select>
-                </div>
-                <div className={styles.formGroup}>
-                  <label className={styles.formLabel}>Влияние на сроки</label>
-                  <select className={styles.formSelect} value={supReview.impact_deadlines}
-                    onChange={e => setSupReview(p => ({ ...p, impact_deadlines: e.target.value }))}>
-                    {IMPACT_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
-                  </select>
-                </div>
-                <div className={styles.formGroup}>
-                  <label className={styles.formLabel}>Влияние на качество</label>
-                  <select className={styles.formSelect} value={supReview.impact_quality}
-                    onChange={e => setSupReview(p => ({ ...p, impact_quality: e.target.value }))}>
-                    {IMPACT_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
-                  </select>
-                </div>
-                <div className={styles.formGroup}>
-                  <label className={styles.formLabel}>Рекомендация</label>
-                  <select className={styles.formSelect} value={supReview.recommendation}
-                    onChange={e => setSupReview(p => ({ ...p, recommendation: e.target.value }))}>
-                    {RECOMMENDATION_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-                  </select>
-                </div>
-                <div className={styles.formGroupFull}>
-                  <label className={styles.formLabel}>Аргументация</label>
-                  <textarea className={styles.formTextarea} value={supReview.argumentation}
-                    onChange={e => setSupReview(p => ({ ...p, argumentation: e.target.value }))}
-                    placeholder="Обоснование вашего решения" />
-                </div>
-              </div>
-              <div className={styles.reviewActions}>
-                <button className={styles.btnApprove} onClick={() => handleReview('supervisor', 'approve')} disabled={submitting}>Одобрить</button>
-                <button className={styles.btnReject} onClick={() => handleReview('supervisor', 'reject')} disabled={submitting}>Отклонить</button>
-              </div>
-            </>
-          ) : null}
-        </div>
-      )}
+            </section>
+          )}
 
-      {/* Блок З — Рецензия HR */}
-      {(request.hr_review || showHrForm) && (
-        <div className={`${styles.reviewSection} ${showHrForm ? styles.active : request.hr_review ? styles.completed : ''}`}>
-          <h3 className={styles.sectionTitle}>
-            <span className={`${styles.sectionLabel} ${styles.sectionLabelPurple}`}>З</span> Рецензия HR
-          </h3>
-          {request.hr_review && !showHrForm ? (
-            <>
-              <div className={styles.reviewerInfo}>
-                Рецензент: {request.hr_reviewer_id} | {formatDate(request.hr_reviewed_at)}
+          {canAdminReview && (
+            <section className={styles.card}>
+              <div className={styles.cardHeader}>
+                <h2 className={styles.cardTitle}>Действия администратора</h2>
+                <span className={styles.cardHint}>После одобрения оклад применяется сразу</span>
               </div>
-              <div className={styles.infoGrid}>
-                <div className={styles.infoItem}><span className={styles.infoLabel}>Соответствие правилам</span><span className={styles.infoValue}>{(request.hr_review as IHrReview).rules_compliance ? 'Да' : 'Нет'}</span></div>
-                <div className={styles.infoItem}><span className={styles.infoLabel}>Соответствие грейду</span><span className={styles.infoValue}>{(request.hr_review as IHrReview).grade_compliance ? 'Да' : 'Нет'}</span></div>
-                <div className={styles.infoItem}><span className={styles.infoLabel}>Рыночная оценка</span><span className={styles.infoValue}>{(request.hr_review as IHrReview).market_assessment || '—'}</span></div>
-                <div className={styles.infoItem}><span className={styles.infoLabel}>Рекомендация</span><span className={styles.infoValue}>{RECOMMENDATION_OPTIONS.find(o => o.value === (request.hr_review as IHrReview).hr_recommendation)?.label}</span></div>
-              </div>
-            </>
-          ) : showHrForm ? (
-            <>
-              <div className={styles.formGrid}>
-                <div className={styles.formGroup}>
-                  <label className={styles.formLabel}>Позиция в вилке оклада</label>
-                  <input className={styles.formInput} value={hrReview.salary_range_position}
-                    onChange={e => setHrReview(p => ({ ...p, salary_range_position: e.target.value }))} placeholder="Нижняя / средняя / верхняя" />
-                </div>
-                <div className={styles.formGroup}>
-                  <label className={styles.formLabel}>Сравнение с коллегами</label>
-                  <input className={styles.formInput} value={hrReview.comparison_with_peers}
-                    onChange={e => setHrReview(p => ({ ...p, comparison_with_peers: e.target.value }))} />
-                </div>
-                <div className={styles.formGroup}>
-                  <label className={styles.formLabel}>Рыночная оценка</label>
-                  <input className={styles.formInput} value={hrReview.market_assessment}
-                    onChange={e => setHrReview(p => ({ ...p, market_assessment: e.target.value }))} placeholder="Оценка рыночного уровня" />
-                </div>
-                <div className={styles.formGroup}>
-                  <label className={styles.formLabel}>HR ограничения</label>
-                  <input className={styles.formInput} value={hrReview.hr_restrictions}
-                    onChange={e => setHrReview(p => ({ ...p, hr_restrictions: e.target.value }))} />
-                </div>
-                <div className={styles.formGroup}>
-                  <label className={styles.formLabel}>Рекомендация</label>
-                  <select className={styles.formSelect} value={hrReview.hr_recommendation}
-                    onChange={e => setHrReview(p => ({ ...p, hr_recommendation: e.target.value }))}>
-                    {RECOMMENDATION_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-                  </select>
-                </div>
-              </div>
-              <div className={styles.reviewActions}>
-                <button className={styles.btnApprove} onClick={() => handleReview('hr', 'approve')} disabled={submitting}>Одобрить</button>
-                <button className={styles.btnReject} onClick={() => handleReview('hr', 'reject')} disabled={submitting}>Отклонить</button>
-              </div>
-            </>
-          ) : null}
-        </div>
-      )}
 
-      {/* Блок И — Рецензия финансов */}
-      {(request.finance_review || showFinanceForm) && (
-        <div className={`${styles.reviewSection} ${showFinanceForm ? styles.active : request.finance_review ? styles.completed : ''}`}>
-          <h3 className={styles.sectionTitle}>
-            <span className={`${styles.sectionLabel} ${styles.sectionLabelGreen}`}>И</span> Финансовое согласование
-          </h3>
-          {request.finance_review && !showFinanceForm ? (
-            <>
-              <div className={styles.reviewerInfo}>
-                Рецензент: {request.finance_reviewer_id} | {formatDate(request.finance_reviewed_at)}
+              <div className={styles.formGroup}>
+                <label className={styles.infoLabel} htmlFor="salary-raise-admin-comment">
+                  Комментарий
+                </label>
+                <textarea
+                  id="salary-raise-admin-comment"
+                  className={styles.textarea}
+                  value={reviewComment}
+                  onChange={(event) => setReviewComment(event.target.value)}
+                  placeholder="Комментарий к решению (необязательно)"
+                />
               </div>
-              <div className={styles.infoGrid}>
-                <div className={styles.infoItem}><span className={styles.infoLabel}>Бюджет</span><span className={styles.infoValue}>{formatSalary((request.finance_review as IFinanceReview).current_budget)}</span></div>
-                <div className={styles.infoItem}><span className={styles.infoLabel}>Нагрузка на ФОТ (мес)</span><span className={styles.infoValue}>{formatSalary((request.finance_review as IFinanceReview).monthly_fot_load)}</span></div>
-                <div className={styles.infoItem}><span className={styles.infoLabel}>Нагрузка на ФОТ (год)</span><span className={styles.infoValue}>{formatSalary((request.finance_review as IFinanceReview).yearly_fot_load)}</span></div>
-                <div className={styles.infoItem}><span className={styles.infoLabel}>Укладывается в лимит</span><span className={styles.infoValue}>{(request.finance_review as IFinanceReview).fits_department_limit ? 'Да' : 'Нет'}</span></div>
+
+              <div className={styles.actionRow}>
+                <button
+                  className={styles.approveButton}
+                  onClick={() => handleAdminReview('approve')}
+                  disabled={submitting}
+                >
+                  Одобрить
+                </button>
+                <button
+                  className={styles.rejectButton}
+                  onClick={() => handleAdminReview('reject')}
+                  disabled={submitting}
+                >
+                  Отклонить
+                </button>
               </div>
-            </>
-          ) : showFinanceForm ? (
-            <>
-              <div className={styles.formGrid}>
-                <div className={styles.formGroup}>
-                  <label className={styles.formLabel}>Текущий бюджет (₽)</label>
-                  <input type="number" className={styles.formInput} value={finReview.current_budget || ''}
-                    onChange={e => setFinReview(p => ({ ...p, current_budget: Number(e.target.value) }))} />
-                </div>
-                <div className={styles.formGroup}>
-                  <label className={styles.formLabel}>Нагрузка на ФОТ (мес, ₽)</label>
-                  <input type="number" className={styles.formInput} value={finReview.monthly_fot_load || ''}
-                    onChange={e => setFinReview(p => ({ ...p, monthly_fot_load: Number(e.target.value) }))} />
-                </div>
-                <div className={styles.formGroup}>
-                  <label className={styles.formLabel}>Нагрузка на ФОТ (год, ₽)</label>
-                  <input type="number" className={styles.formInput} value={finReview.yearly_fot_load || ''}
-                    onChange={e => setFinReview(p => ({ ...p, yearly_fot_load: Number(e.target.value) }))} />
-                </div>
-                <div className={styles.formGroup}>
-                  <label className={styles.formLabel}>Решение</label>
-                  <select className={styles.formSelect} value={finReview.recommendation}
-                    onChange={e => setFinReview(p => ({ ...p, recommendation: e.target.value }))}>
-                    <option value="approve">Одобрить</option>
-                    <option value="reject">Отклонить</option>
-                  </select>
-                </div>
-              </div>
-              <div className={styles.reviewActions}>
-                <button className={styles.btnApprove} onClick={() => handleReview('finance', 'approve')} disabled={submitting}>Одобрить</button>
-                <button className={styles.btnReject} onClick={() => handleReview('finance', 'reject')} disabled={submitting}>Отклонить</button>
-              </div>
-            </>
-          ) : null}
+            </section>
+          )}
         </div>
-      )}
+
+        <aside className={styles.sideColumn}>
+          <section className={styles.card}>
+            <div className={styles.cardHeader}>
+              <h2 className={styles.cardTitle}>Статус и действия</h2>
+            </div>
+
+            <div className={styles.infoGrid}>
+              <div className={styles.infoItem}>
+                <span className={styles.infoLabel}>Статус</span>
+                <span className={styles.infoValue}>{STATUS_LABELS[request.status]}</span>
+              </div>
+            </div>
+
+            {canEditOwnDraft && (
+              <div className={styles.actionColumn}>
+                <button
+                  className={styles.secondaryButton}
+                  onClick={() => navigate(`/employee/salary-raise/${request.id}/edit`)}
+                >
+                  Редактировать черновик
+                </button>
+                {canCancelOwnDraft && (
+                  <button
+                    className={styles.ghostButton}
+                    onClick={handleCancel}
+                    disabled={submitting}
+                  >
+                    Отменить заявку
+                  </button>
+                )}
+              </div>
+            )}
+          </section>
+
+          {isReviewContext ? (
+            <section className={styles.card}>
+              <div className={styles.cardHeader}>
+                <div>
+                  <h2 className={styles.cardTitle}>Сводка по сотруднику</h2>
+                  <div className={styles.cardHint}>
+                    Период {formatDate(reviewContext?.period.start_date)} - {formatDate(reviewContext?.period.end_date)}
+                  </div>
+                </div>
+              </div>
+
+              <div className={styles.metricGrid}>
+                {(reviewContext?.summary ?? EMPTY_SUMMARY).map((metric) => (
+                  <button
+                    key={metric.key}
+                    className={`${styles.metricCard} ${metric.key === selectedMetric ? styles.metricCardActive : ''}`}
+                    onClick={() => setSelectedMetric(metric.key)}
+                  >
+                    <span className={styles.metricLabel}>{metric.label}</span>
+                    <strong className={styles.metricCount}>{metric.count}</strong>
+                    <span className={styles.metricHighlight}>{metric.highlight || 'Без доп. данных'}</span>
+                  </button>
+                ))}
+              </div>
+
+              {selectedSummary && (
+                <div className={styles.detailPanel}>
+                  <div className={styles.detailHeader}>
+                    <h3>{selectedSummary.label}</h3>
+                    <span>{selectedSummary.count} записей</span>
+                  </div>
+
+                  {selectedDetails.length === 0 ? (
+                    <div className={styles.emptyDetails}>За выбранный период деталей не найдено.</div>
+                  ) : (
+                    <div className={styles.detailList}>
+                      {selectedDetails.map((item) => (
+                        <div key={item.id} className={styles.detailItem}>
+                          <div className={styles.detailDate}>{formatDate(item.date)}</div>
+                          <div className={styles.detailBody}>
+                            <div className={styles.detailTitle}>{item.title}</div>
+                            <div className={styles.detailDescription}>{item.description}</div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </section>
+          ) : (
+            <section className={styles.card}>
+              <div className={styles.cardHeader}>
+                <h2 className={styles.cardTitle}>Статистика сотрудника</h2>
+              </div>
+              <p className={styles.note}>
+                Краткая статистика по табелю за последние 3 месяца доступна на странице админского рассмотрения.
+              </p>
+            </section>
+          )}
+        </aside>
+      </div>
     </div>
   );
 };

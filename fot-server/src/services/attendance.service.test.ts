@@ -26,8 +26,8 @@ const mockedState = vi.hoisted(() => ({
   isWorkingDay: true,
   needsSkudCheck: false,
   objectAttendanceData: {
-    objectEntries: [],
-    objectEntriesByEmployeeDate: new Map<number, Map<string, []>>(),
+    objectEntries: [] as Array<Record<string, unknown>>,
+    objectEntriesByEmployeeDate: new Map<number, Map<string, Array<Record<string, unknown>>>>(),
     employeeDistinctObjectKeys: new Map<number, Set<string>>(),
     legacyBlockedDays: new Map<string, string>(),
     rawFallbackSummaries: new Map<number, Map<string, {
@@ -217,6 +217,7 @@ describe('attendance.service', () => {
       work_date: '2026-04-01',
       status: 'manual',
       hours_worked: 8,
+      display_hours_worked: 8,
       travel_minutes_credited: 0,
       travel_hours_credited: 0,
       travel_delay_minutes: 5,
@@ -276,6 +277,7 @@ describe('attendance.service', () => {
       employee_id: 1,
       work_date: '2026-04-01',
       hours_worked: 8,
+      display_hours_worked: 8,
       base_hours_worked: 8,
       travel_minutes_credited: 0,
       travel_hours_credited: 0,
@@ -329,6 +331,7 @@ describe('attendance.service', () => {
       work_date: '2026-04-01',
       status: 'work',
       hours_worked: 8,
+      display_hours_worked: 8,
       base_hours_worked: 9,
       first_entry: '09:00:00',
       last_exit: '18:00:00',
@@ -370,6 +373,7 @@ describe('attendance.service', () => {
       work_date: '2026-04-01',
       status: 'absent',
       hours_worked: 0,
+      display_hours_worked: 0,
       base_hours_worked: 0,
       first_entry: null,
       last_exit: null,
@@ -413,5 +417,97 @@ describe('attendance.service', () => {
       status: 'manual',
     });
     expect(mockedState.queryLog.map(item => item.table)).toEqual(['attendance_adjustments']);
+  });
+
+  it('caps manager-facing display hours to schedule and redistributes object rows proportionally', async () => {
+    const objectEntryA = {
+      adjustment_id: 1,
+      employee_id: 1,
+      work_date: '2026-04-01',
+      object_key: 'obj-a',
+      object_id: 'obj-a',
+      object_name: 'Объект A',
+      hours_worked: 5,
+      display_hours_worked: 5,
+      base_hours_worked: 5,
+      is_correction: false,
+    };
+    const objectEntryB = {
+      adjustment_id: 2,
+      employee_id: 1,
+      work_date: '2026-04-01',
+      object_key: 'obj-b',
+      object_id: 'obj-b',
+      object_name: 'Объект B',
+      hours_worked: 5,
+      display_hours_worked: 5,
+      base_hours_worked: 5,
+      is_correction: false,
+    };
+
+    mockedState.objectAttendanceData = {
+      objectEntries: [objectEntryA, objectEntryB],
+      objectEntriesByEmployeeDate: new Map([
+        [1, new Map([['2026-04-01', [objectEntryA, objectEntryB]]])],
+      ]),
+      employeeDistinctObjectKeys: new Map([[1, new Set(['obj-a', 'obj-b'])]]),
+      legacyBlockedDays: new Map(),
+      rawFallbackSummaries: new Map(),
+    };
+
+    mockedState.resolver = (query) => {
+      if (query.table === 'skud_daily_summary') {
+        return {
+          data: [{
+            employee_id: 1,
+            date: '2026-04-01',
+            first_entry: '09:00:00',
+            last_exit: '19:00:00',
+            total_hours: 10,
+            total_minutes: 600,
+          }],
+          error: null,
+        };
+      }
+
+      if (query.table === 'attendance_adjustments' || query.table === 'user_profiles' || query.table === 'employees') {
+        return { data: [], error: null };
+      }
+
+      throw new Error(`Unexpected query for table ${query.table}`);
+    };
+
+    const result = await buildAttendanceEntries({
+      employees: [{ id: 1, full_name: 'Иван Иванов', work_category: 'office' }],
+      startDate: '2026-04-01',
+      endDate: '2026-04-01',
+      dailySchedulesMap: new Map([
+        [1, new Map([['2026-04-01', {} as IResolvedSchedule]])],
+      ]),
+      calendarMonth: { holidays: [], shortened_days: [], norm_days: 22 } as unknown as IProductionCalendarMonth,
+      todayStr: '2026-04-01',
+      displayMode: 'capped_to_schedule',
+    });
+
+    expect(result.entries[0]).toMatchObject({
+      employee_id: 1,
+      work_date: '2026-04-01',
+      hours_worked: 10,
+      display_hours_worked: 8,
+      base_hours_worked: 10,
+      object_detail_mode: 'available',
+    });
+    expect(result.objectEntries).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        object_key: 'obj-a',
+        hours_worked: 5,
+        display_hours_worked: 4,
+      }),
+      expect.objectContaining({
+        object_key: 'obj-b',
+        hours_worked: 5,
+        display_hours_worked: 4,
+      }),
+    ]));
   });
 });

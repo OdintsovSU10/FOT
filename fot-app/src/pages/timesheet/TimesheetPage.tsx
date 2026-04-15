@@ -55,6 +55,14 @@ interface IBulkCorrectionTarget {
   entry: TimesheetEntry | null;
 }
 
+interface IBulkObjectCorrectionTarget {
+  employee: TimesheetEmployee;
+  day: number;
+  workDate: string;
+  objectTarget: IObjectModalTarget;
+  objectEntry: TimesheetObjectEntry | null;
+}
+
 interface IObjectModalTarget {
   object_key: string;
   object_id: string | null;
@@ -62,6 +70,35 @@ interface IObjectModalTarget {
 }
 
 type TimesheetDisplaySegment = TimesheetApprovalHalf | 'FULL';
+type TimesheetViewMode = 'employees' | 'objects';
+
+const getTodayDateInputValue = (): string => new Date().toISOString().slice(0, 10);
+const UNASSIGNED_OBJECT_KEY = '__timesheet_unassigned__';
+const UNASSIGNED_OBJECT_NAME = 'Не определён / без объекта';
+
+const buildObjectBulkMetaKey = (employeeId: number, objectKey: string): string => `${employeeId}:${objectKey}`;
+
+const parseBulkCellKey = (
+  key: string,
+): { kind: 'employee'; employeeId: number; day: number } | { kind: 'object'; employeeId: number; objectKey: string; day: number } | null => {
+  const parts = key.split(':');
+  if (parts[0] === 'employee' && parts.length === 3) {
+    const employeeId = Number.parseInt(parts[1] || '', 10);
+    const day = Number.parseInt(parts[2] || '', 10);
+    if (!Number.isFinite(employeeId) || !Number.isFinite(day)) return null;
+    return { kind: 'employee', employeeId, day };
+  }
+
+  if (parts[0] === 'object' && parts.length === 4) {
+    const employeeId = Number.parseInt(parts[1] || '', 10);
+    const objectKey = decodeURIComponent(parts[2] || '');
+    const day = Number.parseInt(parts[3] || '', 10);
+    if (!Number.isFinite(employeeId) || !Number.isFinite(day) || !objectKey) return null;
+    return { kind: 'object', employeeId, objectKey, day };
+  }
+
+  return null;
+};
 
 const parseMonthParam = (value: string | null): { year: number; month: number } | null => {
   if (!/^\d{4}-\d{2}$/.test(value || '')) return null;
@@ -81,15 +118,22 @@ const fromMonthIndex = (index: number): { year: number; month: number } => ({
 });
 
 export const TimesheetPage: FC = () => {
-  const { hasPermission, profile, canEditPage } = useAuth();
+  const { hasPermission, profile, canEditPage, canViewPage } = useAuth();
   const toast = useToast();
   const queryClient = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
+  const isSuperAdmin = profile?.position_type === 'super_admin';
   const canEditTimesheet = canEditPage('/timesheet') || canEditPage('/timesheet-hr');
-  const canManageAllDepartments = hasPermission('data.scope.all');
-  const isDepartmentScope = !canManageAllDepartments && hasPermission('data.scope.department');
+  const canViewManagedTimesheet = canEditTimesheet || canViewPage('/timesheet') || canViewPage('/timesheet-hr');
+  const canEditTeamManagement = isSuperAdmin
+    || canEditPage('/timesheet/team-management')
+    || canEditPage('/timesheet')
+    || canEditPage('/timesheet-hr');
+  const canManageAllDepartments = isSuperAdmin || hasPermission('data.scope.all');
+  const isDepartmentScope = !canManageAllDepartments && Boolean(profile?.department_id) && canViewManagedTimesheet;
   const queryMonth = searchParams.get('month');
   const queryHalf = searchParams.get('half');
+  const queryView = searchParams.get('view');
   const now = useMemo(() => new Date(), []);
   const currentYear = now.getFullYear();
   const currentMonth = now.getMonth() + 1;
@@ -147,6 +191,7 @@ export const TimesheetPage: FC = () => {
   const effectiveSelectedDeptId = isDepartmentScope
     ? (selectedDeptId || profile?.department_id || null)
     : selectedDeptId;
+  const viewMode: TimesheetViewMode = queryView === 'objects' ? 'objects' : 'employees';
 
   // Close dept dropdown on outside click
   useEffect(() => {
@@ -160,20 +205,25 @@ export const TimesheetPage: FC = () => {
   }, []);
 
   const monthStr = useMemo(() => `${year}-${String(month).padStart(2, '0')}`, [year, month]);
+  const daysInMonth = useMemo(() => getDaysInMonth(year, month), [year, month]);
+  const isPastMonth = resolvedMonthIndex < currentMonthIndex;
+  const activeSegment = useMemo<TimesheetDisplaySegment>(() => {
+    if (queryHalf === 'FULL') return 'FULL';
+    if (queryHalf === 'H1' || queryHalf === 'H2') return queryHalf;
+    if (isPastMonth) return 'FULL';
+    if (resolvedMonthIndex === currentMonthIndex && currentDay > 15) return 'H2';
+    return 'H1';
+  }, [queryHalf, isPastMonth, resolvedMonthIndex, currentMonthIndex, currentDay]);
   const timesheetQuery = useQuery({
-    queryKey: ['timesheet-page', monthStr, effectiveSelectedDeptId ?? 'none'],
+    queryKey: ['timesheet-page', monthStr, activeSegment, effectiveSelectedDeptId ?? 'none'],
     queryFn: () => timesheetService.getAll({
       month: monthStr,
       department_id: effectiveSelectedDeptId || undefined,
+      half: activeSegment,
     }),
     enabled: Boolean(effectiveSelectedDeptId),
     staleTime: 30_000,
     placeholderData: previousData => previousData,
-  });
-  const teamManagementConfigQuery = useQuery({
-    queryKey: ['timesheet-team-management-config'],
-    queryFn: () => timesheetService.getTeamManagementConfig(),
-    staleTime: 60_000,
   });
   const employees = useMemo<TimesheetEmployee[]>(
     () => timesheetQuery.data?.employees || [],
@@ -203,15 +253,6 @@ export const TimesheetPage: FC = () => {
     staleTime: 30_000,
     placeholderData: previousData => previousData,
   });
-  const daysInMonth = useMemo(() => getDaysInMonth(year, month), [year, month]);
-  const isPastMonth = resolvedMonthIndex < currentMonthIndex;
-  const activeSegment = useMemo<TimesheetDisplaySegment>(() => {
-    if (queryHalf === 'FULL') return 'FULL';
-    if (queryHalf === 'H1' || queryHalf === 'H2') return queryHalf;
-    if (isPastMonth) return 'FULL';
-    if (resolvedMonthIndex === currentMonthIndex && currentDay > 15) return 'H2';
-    return 'H1';
-  }, [queryHalf, isPastMonth, resolvedMonthIndex, currentMonthIndex, currentDay]);
   const visibleDays = useMemo(() => {
     if (activeSegment === 'FULL') {
       return Array.from({ length: daysInMonth }, (_, index) => index + 1);
@@ -252,17 +293,8 @@ export const TimesheetPage: FC = () => {
   const employeeMap = useMemo(() => (
     new Map(employees.map(employee => [employee.id, employee]))
   ), [employees]);
-  const canManageTeam = Boolean(
-    effectiveSelectedDeptId
-    && canEditTimesheet
-    && teamManagementConfigQuery.data?.enabled
-    && teamManagementConfigQuery.data?.can_manage,
-  );
-  const canUseTeamManagement = Boolean(
-    canEditTimesheet
-    && teamManagementConfigQuery.data?.enabled
-    && teamManagementConfigQuery.data?.can_manage,
-  );
+  const canManageTeam = Boolean(effectiveSelectedDeptId && canEditTeamManagement);
+  const canUseTeamManagement = Boolean(canEditTeamManagement);
   const bulkModeEnabled = bulkMode && !isMobile;
   const clearBulkState = useCallback(() => {
     setBulkMode(false);
@@ -315,7 +347,7 @@ export const TimesheetPage: FC = () => {
 
   // Employee click -> side panel
   const handleEmployeeClick = (emp: TimesheetEmployee) => {
-    if (bulkModeEnabled) return;
+    if (bulkModeEnabled && viewMode === 'employees') return;
     setPanelEmployee(emp);
     setPanelOpen(true);
   };
@@ -331,7 +363,7 @@ export const TimesheetPage: FC = () => {
 
   // Day click -> modal
   const handleDayClick = (emp: TimesheetEmployee, day: number, entry: TimesheetEntry | null) => {
-    if (bulkModeEnabled) return;
+    if (bulkModeEnabled && viewMode === 'employees') return;
     const workDate = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
     const dayObjectEntries = objectEntriesByEmployeeDate.get(emp.id)?.get(workDate) || [];
     setModalEmployee(emp);
@@ -397,11 +429,11 @@ export const TimesheetPage: FC = () => {
         });
       }
       closeModal();
-      await queryClient.invalidateQueries({ queryKey: ['timesheet-page', monthStr, effectiveSelectedDeptId ?? 'none'] });
+      await queryClient.invalidateQueries({ queryKey: ['timesheet-page', monthStr, activeSegment, effectiveSelectedDeptId ?? 'none'] });
     } catch (err) {
       console.error('Save correction error:', err);
     }
-  }, [modalEmployee, year, month, modalDay, modalEntry, closeModal, queryClient, monthStr, effectiveSelectedDeptId]);
+  }, [modalEmployee, year, month, modalDay, modalEntry, closeModal, queryClient, monthStr, activeSegment, effectiveSelectedDeptId]);
 
   const handleSaveObjectCorrection = useCallback(async (_status: TimesheetStatus, hours: number | null, notes: string) => {
     if (!modalEmployee || !modalObjectTarget || hours == null) return;
@@ -417,12 +449,12 @@ export const TimesheetPage: FC = () => {
         notes,
       });
       closeModal();
-      await queryClient.invalidateQueries({ queryKey: ['timesheet-page', monthStr, effectiveSelectedDeptId ?? 'none'] });
+      await queryClient.invalidateQueries({ queryKey: ['timesheet-page', monthStr, activeSegment, effectiveSelectedDeptId ?? 'none'] });
     } catch (error) {
       console.error('Save object correction error:', error);
       toast.error(error instanceof Error ? error.message : 'Не удалось сохранить корректировку по объекту');
     }
-  }, [modalEmployee, modalObjectTarget, year, month, modalDay, closeModal, queryClient, monthStr, effectiveSelectedDeptId, toast]);
+  }, [modalEmployee, modalObjectTarget, year, month, modalDay, closeModal, queryClient, monthStr, activeSegment, effectiveSelectedDeptId, toast]);
 
   const handleDeleteObjectCorrection = useCallback(async () => {
     if (!modalEmployee || !modalObjectTarget || !modalObjectEntry?.adjustment_id) return;
@@ -434,12 +466,12 @@ export const TimesheetPage: FC = () => {
         object_key: modalObjectTarget.object_key,
       });
       closeModal();
-      await queryClient.invalidateQueries({ queryKey: ['timesheet-page', monthStr, effectiveSelectedDeptId ?? 'none'] });
+      await queryClient.invalidateQueries({ queryKey: ['timesheet-page', monthStr, activeSegment, effectiveSelectedDeptId ?? 'none'] });
     } catch (error) {
       console.error('Delete object correction error:', error);
       toast.error(error instanceof Error ? error.message : 'Не удалось снять корректировку по объекту');
     }
-  }, [modalEmployee, modalObjectTarget, modalObjectEntry?.adjustment_id, year, month, modalDay, closeModal, queryClient, monthStr, effectiveSelectedDeptId, toast]);
+  }, [modalEmployee, modalObjectTarget, modalObjectEntry?.adjustment_id, year, month, modalDay, closeModal, queryClient, monthStr, activeSegment, effectiveSelectedDeptId, toast]);
 
   // Export
   const handleExport = async () => {
@@ -499,17 +531,21 @@ export const TimesheetPage: FC = () => {
     setTeamPendingEmployeeId(null);
   }, []);
 
-  const handleAddEmployeeToDepartment = useCallback(async (candidate: TimesheetTeamManagementCandidate) => {
+  const handleAddEmployeeToDepartment = useCallback(async (
+    candidate: TimesheetTeamManagementCandidate,
+    effectiveFrom: string,
+  ) => {
     if (!effectiveSelectedDeptId) return;
     setTeamPendingEmployeeId(candidate.id);
     try {
       await timesheetService.addEmployeeToDepartment({
         employee_id: candidate.id,
         department_id: effectiveSelectedDeptId,
+        effective_from: effectiveFrom,
       });
-      toast.success(`Сотрудник ${candidate.full_name} переведён в отдел ${selectedDeptName}`);
+      toast.success(`Сотрудник ${candidate.full_name} переведён в отдел ${selectedDeptName} с ${effectiveFrom}`);
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['timesheet-page', monthStr, effectiveSelectedDeptId] }),
+        queryClient.invalidateQueries({ queryKey: ['timesheet-page', monthStr, activeSegment, effectiveSelectedDeptId ?? 'none'] }),
         queryClient.invalidateQueries({ queryKey: ['timesheet-team-search'] }),
       ]);
       setTeamSearch('');
@@ -519,7 +555,7 @@ export const TimesheetPage: FC = () => {
     } finally {
       setTeamPendingEmployeeId(null);
     }
-  }, [effectiveSelectedDeptId, monthStr, queryClient, selectedDeptName, toast]);
+  }, [activeSegment, effectiveSelectedDeptId, monthStr, queryClient, selectedDeptName, toast]);
 
   const handleExcludeEmployeeFromDepartment = useCallback(async (employee: TimesheetEmployee) => {
     if (!effectiveSelectedDeptId) return;
@@ -540,7 +576,7 @@ export const TimesheetPage: FC = () => {
       }
       toast.success(`Сотрудник ${employee.full_name} исключён из табеля и отправлен во внутренний архив`);
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['timesheet-page', monthStr, effectiveSelectedDeptId] }),
+        queryClient.invalidateQueries({ queryKey: ['timesheet-page', monthStr, activeSegment, effectiveSelectedDeptId ?? 'none'] }),
         queryClient.invalidateQueries({ queryKey: ['timesheet-team-search'] }),
       ]);
     } catch (error) {
@@ -549,14 +585,48 @@ export const TimesheetPage: FC = () => {
     } finally {
       setTeamPendingEmployeeId(null);
     }
-  }, [effectiveSelectedDeptId, monthStr, panelEmployee?.id, queryClient, toast]);
+  }, [activeSegment, effectiveSelectedDeptId, monthStr, panelEmployee?.id, queryClient, toast]);
 
   const modalDefaultHours = useMemo(() => {
+    if (modalMode === 'object') {
+      return modalObjectEntry?.display_hours_worked ?? modalObjectEntry?.hours_worked ?? modalObjectEntry?.base_hours_worked ?? 0;
+    }
+    if (modalEntry?.display_hours_worked != null) return modalEntry.display_hours_worked;
     if (modalEntry?.hours_worked != null) return modalEntry.hours_worked;
     if (!modalEmployee) return 8;
     const sched = getScheduleForTimesheetDay(schedules, dailySchedules, modalEmployee.id, year, month, modalDay);
     return getWorkHoursForDay(sched, year, month, modalDay);
-  }, [modalEntry, modalEmployee, schedules, dailySchedules, year, month, modalDay]);
+  }, [modalMode, modalObjectEntry, modalEntry, modalEmployee, schedules, dailySchedules, year, month, modalDay]);
+
+  const modalMaxHours = useMemo(() => {
+    if (!isDepartmentScope || !modalEmployee) return null;
+    const sched = getScheduleForTimesheetDay(schedules, dailySchedules, modalEmployee.id, year, month, modalDay);
+    const plannedHours = getWorkHoursForDay(sched, year, month, modalDay);
+    if (modalMode !== 'object' || !modalObjectTarget) {
+      return plannedHours;
+    }
+
+    const workDate = `${year}-${String(month).padStart(2, '0')}-${String(modalDay).padStart(2, '0')}`;
+    const dayObjectEntries = objectEntriesByEmployeeDate.get(modalEmployee.id)?.get(workDate) || [];
+    const otherHours = dayObjectEntries.reduce((sum, item) => {
+      if (item.object_key === modalObjectTarget.object_key) {
+        return sum;
+      }
+      return sum + (item.display_hours_worked ?? item.hours_worked ?? 0);
+    }, 0);
+    return Math.max(0, plannedHours - otherHours);
+  }, [
+    isDepartmentScope,
+    modalEmployee,
+    schedules,
+    dailySchedules,
+    year,
+    month,
+    modalDay,
+    modalMode,
+    modalObjectTarget,
+    objectEntriesByEmployeeDate,
+  ]);
 
   const handleBulkModeToggle = useCallback(() => {
     if (bulkModeEnabled) {
@@ -574,18 +644,17 @@ export const TimesheetPage: FC = () => {
   }, []);
 
   const handleBulkBlockedSelectionAttempt = useCallback(() => {
-    toast.info('Ячейки с разбивкой по объектам корректируются только точечно внутри строк объектов');
+    toast.info('Некоторые ячейки нельзя включить в массовую корректировку. Для них используйте точечное редактирование.');
   }, [toast]);
 
   const bulkTargets = useMemo<IBulkCorrectionTarget[]>(() => {
-    if (!bulkModeEnabled) return [];
+    if (!bulkModeEnabled || viewMode !== 'employees') return [];
 
     const targets = new Map<string, IBulkCorrectionTarget>();
     bulkSelectedCellKeys.forEach(cellKey => {
-      const [employeeIdPart, dayPart] = cellKey.split(':');
-      const employeeId = Number.parseInt(employeeIdPart, 10);
-      const day = Number.parseInt(dayPart, 10);
-      if (!Number.isFinite(employeeId) || !Number.isFinite(day)) return;
+      const parsedKey = parseBulkCellKey(cellKey);
+      if (!parsedKey || parsedKey.kind !== 'employee') return;
+      const { employeeId, day } = parsedKey;
 
       const employee = employeeMap.get(employeeId);
       if (!employee) return;
@@ -615,18 +684,134 @@ export const TimesheetPage: FC = () => {
     employeeMap,
     employeeOrder,
     splitDayKeys,
+    viewMode,
+  ]);
+
+  const bulkObjectRowMetaMap = useMemo(() => {
+    const metaMap = new Map<string, {
+      employee: TimesheetEmployee;
+      objectTarget: IObjectModalTarget;
+      isSynthetic: boolean;
+    }>();
+
+    for (const objectEntry of objectEntries) {
+      const employee = employeeMap.get(objectEntry.employee_id);
+      if (!employee) continue;
+
+      metaMap.set(buildObjectBulkMetaKey(employee.id, objectEntry.object_key), {
+        employee,
+        objectTarget: {
+          object_key: objectEntry.object_key,
+          object_id: objectEntry.object_id,
+          object_name: objectEntry.object_name,
+        },
+        isSynthetic: false,
+      });
+    }
+
+    for (const employee of employees) {
+      for (const day of visibleDays) {
+        const workDate = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+        const dayEntry = entryMap.get(`${employee.id}_${workDate}`) || null;
+        const visibleHours = dayEntry?.display_hours_worked ?? dayEntry?.hours_worked ?? 0;
+        if (visibleHours <= 0.001) continue;
+
+        const dayObjectEntries = objectEntriesByEmployeeDate.get(employee.id)?.get(workDate) || [];
+        const allocatedHours = dayObjectEntries.reduce((sum, item) => (
+          sum + (item.display_hours_worked ?? item.hours_worked ?? 0)
+        ), 0);
+        if (visibleHours - allocatedHours <= 0.001) continue;
+
+        metaMap.set(buildObjectBulkMetaKey(employee.id, UNASSIGNED_OBJECT_KEY), {
+          employee,
+          objectTarget: {
+            object_key: UNASSIGNED_OBJECT_KEY,
+            object_id: null,
+            object_name: UNASSIGNED_OBJECT_NAME,
+          },
+          isSynthetic: true,
+        });
+      }
+    }
+
+    return metaMap;
+  }, [
+    objectEntries,
+    employeeMap,
+    employees,
+    visibleDays,
+    year,
+    month,
+    entryMap,
+    objectEntriesByEmployeeDate,
+  ]);
+
+  const bulkObjectTargets = useMemo<IBulkObjectCorrectionTarget[]>(() => {
+    if (!bulkModeEnabled || viewMode !== 'objects') return [];
+
+    const targets = new Map<string, IBulkObjectCorrectionTarget>();
+    bulkSelectedCellKeys.forEach(cellKey => {
+      const parsedKey = parseBulkCellKey(cellKey);
+      if (!parsedKey || parsedKey.kind !== 'object') return;
+
+      const { employeeId, objectKey, day } = parsedKey;
+      const meta = bulkObjectRowMetaMap.get(buildObjectBulkMetaKey(employeeId, objectKey));
+      if (!meta || meta.isSynthetic) return;
+
+      const workDate = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+      const objectEntry = objectEntriesByEmployeeDate
+        .get(employeeId)
+        ?.get(workDate)
+        ?.find(item => item.object_key === objectKey) || null;
+
+      targets.set(cellKey, {
+        employee: meta.employee,
+        day,
+        workDate,
+        objectTarget: meta.objectTarget,
+        objectEntry,
+      });
+    });
+
+    return [...targets.values()].sort((left, right) => {
+      const objectDiff = left.objectTarget.object_name.localeCompare(right.objectTarget.object_name, 'ru');
+      if (objectDiff !== 0) return objectDiff;
+      const employeeDiff = (employeeOrder.get(left.employee.id) ?? 0) - (employeeOrder.get(right.employee.id) ?? 0);
+      return employeeDiff !== 0 ? employeeDiff : left.day - right.day;
+    });
+  }, [
+    bulkModeEnabled,
+    viewMode,
+    bulkSelectedCellKeys,
+    bulkObjectRowMetaMap,
+    year,
+    month,
+    objectEntriesByEmployeeDate,
+    employeeOrder,
   ]);
 
   const bulkInitialStatus = useMemo<TimesheetStatus>(() => {
+    if (viewMode === 'objects') {
+      return 'manual';
+    }
     if (bulkTargets.length === 1 && bulkTargets[0].entry?.status) {
       return bulkTargets[0].entry.status;
     }
     return 'work';
-  }, [bulkTargets]);
+  }, [bulkTargets, viewMode]);
 
   const bulkDefaultHours = useMemo(() => {
+    if (viewMode === 'objects') {
+      if (bulkObjectTargets.length === 0) return 0;
+      const firstTarget = bulkObjectTargets[0];
+      return firstTarget.objectEntry?.display_hours_worked
+        ?? firstTarget.objectEntry?.hours_worked
+        ?? firstTarget.objectEntry?.base_hours_worked
+        ?? 0;
+    }
     if (bulkTargets.length === 0) return 8;
     const firstTarget = bulkTargets[0];
+    if (firstTarget.entry?.display_hours_worked != null) return firstTarget.entry.display_hours_worked;
     if (firstTarget.entry?.hours_worked != null) return firstTarget.entry.hours_worked;
     const sched = getScheduleForTimesheetDay(
       schedules,
@@ -637,17 +822,95 @@ export const TimesheetPage: FC = () => {
       firstTarget.day,
     );
     return getWorkHoursForDay(sched, year, month, firstTarget.day);
-  }, [bulkTargets, schedules, dailySchedules, year, month]);
+  }, [viewMode, bulkObjectTargets, bulkTargets, schedules, dailySchedules, year, month]);
+
+  const bulkMaxHours = useMemo(() => {
+    if (!isDepartmentScope) return null;
+    if (viewMode === 'objects') {
+      if (bulkObjectTargets.length === 0) return null;
+      return bulkObjectTargets.reduce<number | null>((minValue, target) => {
+        const sched = getScheduleForTimesheetDay(
+          schedules,
+          dailySchedules,
+          target.employee.id,
+          year,
+          month,
+          target.day,
+        );
+        const plannedHours = getWorkHoursForDay(sched, year, month, target.day);
+        const dayObjectEntries = objectEntriesByEmployeeDate.get(target.employee.id)?.get(target.workDate) || [];
+        const otherHours = dayObjectEntries.reduce((sum, item) => {
+          if (item.object_key === target.objectTarget.object_key) {
+            return sum;
+          }
+          return sum + (item.display_hours_worked ?? item.hours_worked ?? 0);
+        }, 0);
+        const allowedHours = Math.max(0, plannedHours - otherHours);
+        return minValue == null ? allowedHours : Math.min(minValue, allowedHours);
+      }, null);
+    }
+    if (bulkTargets.length === 0) return null;
+    const firstTarget = bulkTargets[0];
+    const sched = getScheduleForTimesheetDay(
+      schedules,
+      dailySchedules,
+      firstTarget.employee.id,
+      year,
+      month,
+      firstTarget.day,
+    );
+    return getWorkHoursForDay(sched, year, month, firstTarget.day);
+  }, [
+    isDepartmentScope,
+    viewMode,
+    bulkObjectTargets,
+    bulkTargets,
+    schedules,
+    dailySchedules,
+    year,
+    month,
+    objectEntriesByEmployeeDate,
+  ]);
 
   const handleOpenBulkModal = useCallback(() => {
+    if (viewMode === 'objects') {
+      if (bulkObjectTargets.length === 0) {
+        toast.info('Выделите диапазон ячеек по объектам. Строка "Не определён / без объекта" корректируется только точечно.');
+        return;
+      }
+      setBulkModalOpen(true);
+      return;
+    }
     if (bulkTargets.length === 0) {
       toast.info('Зажмите левую кнопку мыши и выделите диапазон ячеек без объектной разбивки');
       return;
     }
     setBulkModalOpen(true);
-  }, [bulkTargets.length, toast]);
+  }, [viewMode, bulkObjectTargets.length, bulkTargets.length, toast]);
 
   const handleSaveBulkCorrection = useCallback(async (status: TimesheetStatus, hours: number | null, notes: string) => {
+    if (viewMode === 'objects') {
+      if (bulkObjectTargets.length === 0) return;
+      try {
+        await Promise.all(bulkObjectTargets.map(target => timesheetService.upsertObjectEntry({
+          employee_id: target.employee.id,
+          work_date: target.workDate,
+          object_key: target.objectTarget.object_key,
+          object_id: target.objectTarget.object_id,
+          object_name: target.objectTarget.object_name,
+          hours_worked: hours ?? 0,
+          notes,
+        })));
+
+        clearBulkState();
+        await queryClient.invalidateQueries({ queryKey: ['timesheet-page', monthStr, activeSegment, effectiveSelectedDeptId ?? 'none'] });
+        toast.success(`Корректировка по объектам применена для ${bulkObjectTargets.length} ячеек`);
+      } catch (error) {
+        console.error('Bulk object save correction error:', error);
+        toast.error(error instanceof Error ? error.message : 'Не удалось применить массовую корректировку по объектам');
+      }
+      return;
+    }
     if (bulkTargets.length === 0) return;
     try {
       const result = await timesheetService.bulkCorrect({
@@ -661,25 +924,70 @@ export const TimesheetPage: FC = () => {
       });
 
       clearBulkState();
-      await queryClient.invalidateQueries({ queryKey: ['timesheet-page', monthStr, effectiveSelectedDeptId ?? 'none'] });
+      await queryClient.invalidateQueries({ queryKey: ['timesheet-page', monthStr, activeSegment, effectiveSelectedDeptId ?? 'none'] });
       toast.success(`Корректировка применена для ${result.processed} ячеек`);
     } catch (error) {
       console.error('Bulk save correction error:', error);
       toast.error(error instanceof Error ? error.message : 'Не удалось применить массовую корректировку');
     }
-  }, [bulkTargets, clearBulkState, queryClient, monthStr, effectiveSelectedDeptId, toast]);
+  }, [
+    viewMode,
+    bulkObjectTargets,
+    bulkTargets,
+    clearBulkState,
+    queryClient,
+    monthStr,
+    activeSegment,
+    effectiveSelectedDeptId,
+    toast,
+  ]);
 
   const bulkSelectedEmployeesCount = useMemo(() => (
-    new Set([...bulkSelectedCellKeys].map(key => Number.parseInt(key.split(':')[0] || '', 10)).filter(Number.isFinite)).size
+    new Set(
+      [...bulkSelectedCellKeys]
+        .map(parseBulkCellKey)
+        .filter((item): item is NonNullable<ReturnType<typeof parseBulkCellKey>> => Boolean(item))
+        .map(item => item.employeeId),
+    ).size
   ), [bulkSelectedCellKeys]);
   const bulkSelectedDaysCount = useMemo(() => (
-    new Set([...bulkSelectedCellKeys].map(key => Number.parseInt(key.split(':')[1] || '', 10)).filter(Number.isFinite)).size
+    new Set(
+      [...bulkSelectedCellKeys]
+        .map(parseBulkCellKey)
+        .filter((item): item is NonNullable<ReturnType<typeof parseBulkCellKey>> => Boolean(item))
+        .map(item => item.day),
+    ).size
   ), [bulkSelectedCellKeys]);
-  const bulkSelectionSummary = [
-    `${bulkSelectedEmployeesCount} сотрудников`,
-    `${bulkSelectedDaysCount} дней`,
-    `${bulkTargets.length} ячеек`,
-  ].filter(Boolean).join(' • ');
+  const bulkSelectedObjectRowsCount = useMemo(() => (
+    new Set(
+      [...bulkSelectedCellKeys]
+        .map(parseBulkCellKey)
+        .filter((item): item is Extract<NonNullable<ReturnType<typeof parseBulkCellKey>>, { kind: 'object' }> => item?.kind === 'object')
+        .map(item => buildObjectBulkMetaKey(item.employeeId, item.objectKey)),
+    ).size
+  ), [bulkSelectedCellKeys]);
+  const bulkSelectionSummary = useMemo(() => {
+    if (viewMode === 'objects') {
+      return [
+        `${bulkSelectedObjectRowsCount} строк объектов`,
+        `${bulkSelectedDaysCount} дней`,
+        `${bulkObjectTargets.length} ячеек`,
+      ].join(' • ');
+    }
+
+    return [
+      `${bulkSelectedEmployeesCount} сотрудников`,
+      `${bulkSelectedDaysCount} дней`,
+      `${bulkTargets.length} ячеек`,
+    ].join(' • ');
+  }, [
+    viewMode,
+    bulkSelectedObjectRowsCount,
+    bulkSelectedDaysCount,
+    bulkObjectTargets.length,
+    bulkSelectedEmployeesCount,
+    bulkTargets.length,
+  ]);
 
   const handleSegmentChange = useCallback((segment: TimesheetDisplaySegment) => {
     clearBulkState();
@@ -690,6 +998,19 @@ export const TimesheetPage: FC = () => {
       return next;
     });
   }, [clearBulkState, monthStr, setSearchParams]);
+
+  const handleViewModeChange = useCallback((nextViewMode: TimesheetViewMode) => {
+    clearBulkState();
+    setSearchParams(current => {
+      const next = new URLSearchParams(current);
+      if (nextViewMode === 'objects') {
+        next.set('view', 'objects');
+      } else {
+        next.delete('view');
+      }
+      return next;
+    });
+  }, [clearBulkState, setSearchParams]);
 
   const monthNavigation = (
     <div className="ts-month-nav">
@@ -771,6 +1092,24 @@ export const TimesheetPage: FC = () => {
       </button>
     </section>
   ) : null;
+  const viewControl = effectiveSelectedDeptId ? (
+    <section className="ts-view-switch">
+      <button
+        type="button"
+        className={`ts-view-chip ${viewMode === 'employees' ? ' ts-view-chip--active' : ''}`}
+        onClick={() => handleViewModeChange('employees')}
+      >
+        По сотрудникам
+      </button>
+      <button
+        type="button"
+        className={`ts-view-chip ${viewMode === 'objects' ? ' ts-view-chip--active' : ''}`}
+        onClick={() => handleViewModeChange('objects')}
+      >
+        По объектам
+      </button>
+    </section>
+  ) : null;
 
   const modalWorkDate = `${year}-${String(month).padStart(2, '0')}-${String(modalDay).padStart(2, '0')}`;
   const splitDayContent = modalMode === 'split-view' ? (
@@ -795,7 +1134,9 @@ export const TimesheetPage: FC = () => {
               }}
             >
               <span className="ts-split-day-item-name">{objectEntry.object_name}</span>
-              <span className="ts-split-day-item-hours">{objectEntry.hours_worked.toFixed(2)} ч</span>
+              <span className="ts-split-day-item-hours">
+                {(objectEntry.display_hours_worked ?? objectEntry.hours_worked).toFixed(2)} ч
+              </span>
             </button>
           ))}
         </div>
@@ -848,6 +1189,7 @@ export const TimesheetPage: FC = () => {
                   departmentId={effectiveSelectedDeptId}
                   month={`${year}-${String(month).padStart(2, '0')}`}
                   compact
+                  allowReview={false}
                 />
               </div>
             )}
@@ -888,6 +1230,7 @@ export const TimesheetPage: FC = () => {
                 <TimesheetApprovalBar
                   departmentId={effectiveSelectedDeptId}
                   month={`${year}-${String(month).padStart(2, '0')}`}
+                  allowReview={false}
                 />
                 <button type="button" className="ts-btn" onClick={handleExport}>
                   <Download size={16} />
@@ -899,34 +1242,77 @@ export const TimesheetPage: FC = () => {
         )}
 
         {segmentControl}
+        {viewControl}
       </div>
 
       {!isMobile && bulkModeEnabled && effectiveSelectedDeptId && (
         <section className="ts-bulk-bar">
-          <div className="ts-bulk-info">
-            <div className="ts-bulk-title">Массовая корректировка</div>
-            <div className="ts-bulk-hint">
-              Зажмите левую кнопку мыши и протяните по таблице нужный диапазон. {bulkSelectionSummary}
-            </div>
-          </div>
-          <div className="ts-bulk-actions">
-            <button
-              type="button"
-              className="ts-btn"
-              onClick={() => setBulkSelectedCellKeys(new Set())}
-              disabled={bulkSelectedCellKeys.size === 0}
-            >
-              Сбросить
-            </button>
-            <button
-              type="button"
-              className="ts-btn ts-btn--primary"
-              onClick={handleOpenBulkModal}
-              disabled={bulkTargets.length === 0}
-            >
-              Внести корректировку
-            </button>
-          </div>
+          {viewMode === 'objects' ? (
+            <>
+              <div className="ts-bulk-info">
+                <div className="ts-bulk-title">Массовая корректировка по объектам</div>
+                <div className="ts-bulk-hint">
+                  Зажмите левую кнопку мыши и протяните по табелю объектов нужный диапазон. Для строк
+                  {' '}
+                  `Не определён / без объекта`
+                  {' '}
+                  оставлена точечная корректировка. {bulkSelectionSummary}
+                </div>
+              </div>
+              <div className="ts-bulk-actions">
+                <button
+                  type="button"
+                  className="ts-btn"
+                  onClick={() => setBulkSelectedCellKeys(new Set())}
+                  disabled={bulkSelectedCellKeys.size === 0}
+                >
+                  Сбросить
+                </button>
+                <button
+                  type="button"
+                  className="ts-btn ts-btn--primary"
+                  onClick={handleOpenBulkModal}
+                  disabled={bulkObjectTargets.length === 0}
+                >
+                  Внести корректировку
+                </button>
+                <button
+                  type="button"
+                  className="ts-btn"
+                  onClick={clearBulkState}
+                >
+                  Выйти из режима
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="ts-bulk-info">
+                <div className="ts-bulk-title">Массовая корректировка</div>
+                <div className="ts-bulk-hint">
+                  Зажмите левую кнопку мыши и протяните по таблице нужный диапазон. Новая протяжка добавит дни к уже выбранным. {bulkSelectionSummary}
+                </div>
+              </div>
+              <div className="ts-bulk-actions">
+                <button
+                  type="button"
+                  className="ts-btn"
+                  onClick={() => setBulkSelectedCellKeys(new Set())}
+                  disabled={bulkSelectedCellKeys.size === 0}
+                >
+                  Сбросить
+                </button>
+                <button
+                  type="button"
+                  className="ts-btn ts-btn--primary"
+                  onClick={handleOpenBulkModal}
+                  disabled={bulkTargets.length === 0}
+                >
+                  Внести корректировку
+                </button>
+              </div>
+            </>
+          )}
         </section>
       )}
 
@@ -946,6 +1332,7 @@ export const TimesheetPage: FC = () => {
           objectEntries={objectEntries}
           year={year}
           month={month}
+          viewMode={viewMode}
           schedules={schedules}
           dailySchedules={dailySchedules}
           calendar={calendar}
@@ -970,6 +1357,7 @@ export const TimesheetPage: FC = () => {
           open={teamManagementOpen}
           onClose={closeTeamManagement}
           departmentName={selectedDeptName}
+          defaultEffectiveFrom={getTodayDateInputValue()}
           searchQuery={teamSearch}
           searchLoading={teamSearchQuery.isFetching}
           searchResults={teamSearchResults}
@@ -1006,7 +1394,7 @@ export const TimesheetPage: FC = () => {
             onSave={modalMode === 'object' ? handleSaveObjectCorrection : handleSaveCorrection}
             onDelete={modalMode === 'object' && modalObjectEntry?.adjustment_id ? handleDeleteObjectCorrection : undefined}
             initialStatus={modalMode === 'object' ? 'manual' : (modalEntry?.status || 'work')}
-            initialHours={modalMode === 'object' ? (modalObjectEntry?.hours_worked ?? modalObjectEntry?.base_hours_worked ?? 0) : modalDefaultHours}
+            initialHours={modalDefaultHours}
             initialNotes={modalMode === 'object' ? (modalObjectEntry?.notes ?? '') : ''}
             dayLabel={`${formatDateRu(modalDay, month)}`}
             title={modalMode === 'object' ? modalObjectTarget?.object_name : undefined}
@@ -1015,12 +1403,14 @@ export const TimesheetPage: FC = () => {
             employeeId={modalEmployee?.id}
             workDate={modalWorkDate}
             hideSkudTab={modalMode !== 'day'}
+            allowAccessPointMap={canViewPage('/skud-settings')}
             hideCorrectionTab={modalMode === 'split-view'}
             allowedStatuses={modalMode === 'object' ? ['manual'] : undefined}
             confirmLabel={modalMode === 'object' ? 'Сохранить по объекту' : undefined}
             deleteLabel={modalMode === 'object' ? 'Снять корректировку' : undefined}
             customContent={splitDayContent}
             timesheetEntry={modalEntry}
+            maxHours={modalMode === 'split-view' ? null : modalMaxHours}
             correctionInfo={modalEntry?.is_correction ? {
               is_correction: true,
               corrected_at: modalEntry.corrected_at,
@@ -1038,10 +1428,12 @@ export const TimesheetPage: FC = () => {
             onSave={handleSaveBulkCorrection}
             initialStatus={bulkInitialStatus}
             initialHours={bulkDefaultHours}
-            title="Массовая корректировка"
+            title={viewMode === 'objects' ? 'Массовая корректировка по объектам' : 'Массовая корректировка'}
             subtitle={bulkSelectionSummary}
-            confirmLabel="Применить"
+            confirmLabel={viewMode === 'objects' ? 'Применить по объектам' : 'Применить'}
             hideSkudTab
+            maxHours={bulkMaxHours}
+            allowedStatuses={viewMode === 'objects' ? ['manual'] : undefined}
           />
         </Suspense>
       )}

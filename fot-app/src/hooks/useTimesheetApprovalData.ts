@@ -16,9 +16,13 @@ export const useTimesheetApprovalStatus = (departmentId: string | null, period: 
   staleTime: 30_000,
 });
 
-export const useTimesheetApprovalReviewList = (status: 'submitted' | 'approved' | 'rejected') => useQuery({
+export const useTimesheetApprovalReviewList = (
+  status: 'submitted' | 'approved' | 'rejected',
+  enabled = true,
+) => useQuery({
   queryKey: getTimesheetApprovalReviewListQueryKey(status),
   queryFn: () => timesheetApprovalService.getByStatus(status),
+  enabled,
   staleTime: 30_000,
   placeholderData: previousData => previousData,
 });

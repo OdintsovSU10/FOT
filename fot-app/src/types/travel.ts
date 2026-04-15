@@ -9,8 +9,36 @@ export interface ITravelObject {
   name: string;
   is_active: boolean;
   access_points: string[];
+  has_map: boolean;
+  mapped_points_count: number;
   created_at: string;
   updated_at: string;
+}
+
+export interface ITravelObjectMapPoint {
+  access_point_name: string;
+  x_ratio: number;
+  y_ratio: number;
+}
+
+export interface ITravelObjectMap {
+  object_id: string;
+  storage_path: string;
+  file_name: string;
+  mime_type: string;
+  file_size: number;
+  uploaded_at: string;
+  image_url: string;
+  points: ITravelObjectMapPoint[];
+}
+
+export interface IAccessPointMapView {
+  object_id: string;
+  object_name: string;
+  access_point_name: string;
+  image_url: string;
+  x_ratio: number;
+  y_ratio: number;
 }
 
 export interface ITravelRoute {

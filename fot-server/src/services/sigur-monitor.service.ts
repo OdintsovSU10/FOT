@@ -766,7 +766,7 @@ async function maybeDetectSilence(now = new Date()): Promise<void> {
 }
 
 async function performDirectProbe(now = new Date()): Promise<void> {
-  const connectionType = sigurService.getBackgroundConnectionType();
+  const connectionType = await sigurService.getBackgroundConnectionType();
   const startedAt = Date.now();
   const result = await sigurService.testConnection(connectionType);
   const responseMs = Date.now() - startedAt;
@@ -1053,7 +1053,7 @@ export async function runSigurMonitorCycleNow(now = new Date()): Promise<void> {
   await ensureRuntimeStateLoaded();
   if (!monitorStorageAvailable) return;
   const settings = await settingsService.getSigurMonitorConfig();
-  if (!settings.enabled || !sigurService.isConfigured()) return;
+  if (!settings.enabled || !(await sigurService.isConfigured())) return;
 
   const pollingSnapshot = await refreshRuntimeStateFromPollingState(now, settings.timezone);
   const lastSignalAge = pollingSnapshot.lastSignalAt
@@ -1116,9 +1116,9 @@ async function runSigurMonitorCycleAsLeader(now = new Date()): Promise<void> {
   }
 }
 
-export function startSigurMonitor(): void {
+export async function startSigurMonitor(): Promise<void> {
   if (monitorTimer || startupTimeout) return;
-  if (!sigurService.isConfigured()) {
+  if (!(await sigurService.isConfigured())) {
     console.log('[sigur-monitor] Sigur not configured, skipping');
     return;
   }

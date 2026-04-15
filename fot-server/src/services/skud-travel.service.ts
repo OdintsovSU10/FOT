@@ -2,11 +2,14 @@ import { supabase } from '../config/database.js';
 import { getInternalAccessPoints } from './skud-shared.service.js';
 import { settingsService } from './settings.service.js';
 import { createCache } from '../utils/cache.js';
+import { SKUD_OBJECT_MAPS_BUCKET, supabaseStorageService } from './supabase-storage.service.js';
 
 const ROUTE_CREDIT_MULTIPLIER = 1;
 const BATCH_SIZE = 500;
 const TRAVEL_SEGMENTS_CACHE_TTL_MS = 60_000;
 const TRAVEL_LIMIT_REQUIRED_MESSAGE = 'Не задан единый лимит передвижения. Сохраните его в настройках СКУД.';
+const MAX_TRAVEL_OBJECT_MAP_FILE_SIZE = 10 * 1024 * 1024;
+const TRAVEL_OBJECT_MAP_ALLOWED_MIME_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp']);
 
 export type TravelSegmentStatus = 'auto_approved' | 'delayed' | 'needs_object' | 'needs_route';
 
@@ -14,6 +17,11 @@ interface ITravelObjectRow {
   id: string;
   name: string;
   is_active: boolean;
+  map_storage_path: string | null;
+  map_file_name: string | null;
+  map_mime_type: string | null;
+  map_file_size: number | null;
+  map_uploaded_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -21,6 +29,15 @@ interface ITravelObjectRow {
 interface ITravelObjectMappingRow {
   object_id: string;
   access_point_name: string;
+}
+
+interface ITravelObjectMapPointRow {
+  object_id: string;
+  access_point_name: string;
+  x_ratio: number;
+  y_ratio: number;
+  created_at: string;
+  updated_at: string;
 }
 
 interface ITravelRouteRow {
@@ -79,8 +96,36 @@ export interface ITravelObject {
   name: string;
   is_active: boolean;
   access_points: string[];
+  has_map: boolean;
+  mapped_points_count: number;
   created_at: string;
   updated_at: string;
+}
+
+export interface ITravelObjectMapPoint {
+  access_point_name: string;
+  x_ratio: number;
+  y_ratio: number;
+}
+
+export interface ITravelObjectMap {
+  object_id: string;
+  storage_path: string;
+  file_name: string;
+  mime_type: string;
+  file_size: number;
+  uploaded_at: string;
+  image_url: string;
+  points: ITravelObjectMapPoint[];
+}
+
+export interface IAccessPointMapView {
+  object_id: string;
+  object_name: string;
+  access_point_name: string;
+  image_url: string;
+  x_ratio: number;
+  y_ratio: number;
 }
 
 export interface ITravelRoute {
@@ -166,24 +211,65 @@ interface ITravelFeatureErrorCandidate {
   hint?: string | null;
 }
 
+const TRAVEL_BASE_SCHEMA_HINT = [
+  'skud_objects',
+  'skud_object_access_points',
+  'skud_object_routes',
+  'skud_travel_segments',
+];
+
+const TRAVEL_OBJECT_MAP_SCHEMA_HINT = [
+  'skud_object_map_points',
+  'map_storage_path',
+  'map_file_name',
+  'map_mime_type',
+  'map_file_size',
+  'map_uploaded_at',
+];
+
 const getTravelFeatureErrorCandidate = (error: unknown): ITravelFeatureErrorCandidate | null => {
   if (!error || typeof error !== 'object') return null;
   return error as ITravelFeatureErrorCandidate;
 };
 
+const buildTravelFeatureErrorText = (candidate: ITravelFeatureErrorCandidate): string => (
+  [candidate.message, candidate.details, candidate.hint]
+    .filter((value): value is string => !!value)
+    .join(' ')
+    .toLowerCase()
+);
+
+const isMissingTravelObjectMapsSchemaError = (error: unknown): boolean => {
+  const candidate = getTravelFeatureErrorCandidate(error);
+  if (!candidate) return false;
+  const errorText = buildTravelFeatureErrorText(candidate);
+
+  return TRAVEL_OBJECT_MAP_SCHEMA_HINT.some(fragment => errorText.includes(fragment));
+};
+
 const isMissingTableError = (error: unknown): boolean => {
   const candidate = getTravelFeatureErrorCandidate(error);
   if (!candidate) return false;
+  if (isMissingTravelObjectMapsSchemaError(error)) return false;
 
-  return candidate.code === '42P01'
+  const errorText = buildTravelFeatureErrorText(candidate);
+
+  return TRAVEL_BASE_SCHEMA_HINT.some(fragment => errorText.includes(fragment))
+    || candidate.code === '42P01'
     || candidate.code === 'PGRST205'
-    || candidate.message?.includes('does not exist')
-    || candidate.message?.includes('schema cache')
-    || candidate.details?.includes('does not exist')
+    || errorText.includes('does not exist')
+    || errorText.includes('schema cache')
     || false;
 };
 
 const formatTravelFeatureError = (error: unknown): Error => {
+  if (isMissingTravelObjectMapsSchemaError(error)) {
+    return new Error(
+      'Карты объектов СКУД не видны через Supabase API. '
+      + 'Примените миграцию 026_skud_object_maps.sql в текущую базу. '
+      + 'Если миграция уже применена, обновите schema cache Supabase или перезапустите API.',
+    );
+  }
   if (isMissingTableError(error)) {
     return new Error(
       'Таблицы передвижений не видны через Supabase API. '
@@ -232,6 +318,42 @@ const normalizeAccessPoint = (value: string | null | undefined): string | null =
   if (!value) return null;
   const normalized = value.trim();
   return normalized || null;
+};
+
+const normalizeTravelObjectMapPath = (value: string | null | undefined): string | null => {
+  if (!value) return null;
+  const normalized = value.trim().replace(/^\/+/, '');
+  return normalized || null;
+};
+
+const normalizeRatio = (value: number): number => (
+  Math.min(1, Math.max(0, Math.round(value * 1_000_000) / 1_000_000))
+);
+
+const sortTravelObjectMapPoints = (points: ITravelObjectMapPoint[]): ITravelObjectMapPoint[] => (
+  [...points].sort((left, right) => left.access_point_name.localeCompare(right.access_point_name, 'ru'))
+);
+
+const ensureTravelObjectMapFileMeta = ({
+  fileName,
+  contentType,
+  fileSize,
+}: {
+  fileName: string;
+  contentType: string;
+  fileSize: number;
+}): void => {
+  if (!fileName.trim()) {
+    throw new Error('Укажите имя файла карты');
+  }
+
+  if (!TRAVEL_OBJECT_MAP_ALLOWED_MIME_TYPES.has(contentType)) {
+    throw new Error('Допустимы только PNG, JPG/JPEG и WEBP изображения');
+  }
+
+  if (!Number.isFinite(fileSize) || fileSize <= 0 || fileSize > MAX_TRAVEL_OBJECT_MAP_FILE_SIZE) {
+    throw new Error(`Размер изображения должен быть от 1 байта до ${MAX_TRAVEL_OBJECT_MAP_FILE_SIZE} байт`);
+  }
 };
 
 const dayKey = (employeeId: number, workDate: string): string => `${employeeId}_${workDate}`;
@@ -298,11 +420,22 @@ export const invalidateTravelSegmentsCache = (): void => {
 const fetchTravelObjectsRaw = async (): Promise<ITravelObjectRow[]> => {
   const { data, error } = await supabase
     .from('skud_objects')
-    .select('id, name, is_active, created_at, updated_at')
+    .select([
+      'id',
+      'name',
+      'is_active',
+      'map_storage_path',
+      'map_file_name',
+      'map_mime_type',
+      'map_file_size',
+      'map_uploaded_at',
+      'created_at',
+      'updated_at',
+    ].join(', '))
     .order('name');
 
   if (error) throw formatTravelFeatureError(error);
-  return (data || []) as ITravelObjectRow[];
+  return (data || []) as unknown as ITravelObjectRow[];
 };
 
 const fetchTravelMappingsRaw = async (): Promise<ITravelObjectMappingRow[]> => {
@@ -312,6 +445,48 @@ const fetchTravelMappingsRaw = async (): Promise<ITravelObjectMappingRow[]> => {
 
   if (error) throw formatTravelFeatureError(error);
   return (data || []) as ITravelObjectMappingRow[];
+};
+
+const fetchTravelObjectByIdRaw = async (objectId: string): Promise<ITravelObjectRow | null> => {
+  const { data, error } = await supabase
+    .from('skud_objects')
+    .select([
+      'id',
+      'name',
+      'is_active',
+      'map_storage_path',
+      'map_file_name',
+      'map_mime_type',
+      'map_file_size',
+      'map_uploaded_at',
+      'created_at',
+      'updated_at',
+    ].join(', '))
+    .eq('id', objectId)
+    .single();
+
+  if (error) {
+    const message = error.message.toLowerCase();
+    if (message.includes('0 rows') || message.includes('no rows')) return null;
+    throw formatTravelFeatureError(error);
+  }
+
+  return data as unknown as ITravelObjectRow;
+};
+
+const fetchTravelObjectMapPointsRaw = async (objectId?: string): Promise<ITravelObjectMapPointRow[]> => {
+  let query = supabase
+    .from('skud_object_map_points')
+    .select('object_id, access_point_name, x_ratio, y_ratio, created_at, updated_at');
+
+  if (objectId) {
+    query = query.eq('object_id', objectId);
+  }
+
+  const { data, error } = await query;
+
+  if (error) throw formatTravelFeatureError(error);
+  return (data || []) as ITravelObjectMapPointRow[];
 };
 
 const fetchTravelRoutesRaw = async (): Promise<ITravelRouteRow[]> => {
@@ -664,9 +839,10 @@ export const calculateAndSyncTravelSegments = async ({
 };
 
 export const listTravelObjects = async (): Promise<ITravelObject[]> => {
-  const [objects, mappings] = await Promise.all([
+  const [objects, mappings, mapPoints] = await Promise.all([
     fetchTravelObjectsRaw(),
     fetchTravelMappingsRaw(),
+    fetchTravelObjectMapPointsRaw(),
   ]);
 
   const byObjectId = new Map<string, string[]>();
@@ -677,9 +853,16 @@ export const listTravelObjects = async (): Promise<ITravelObject[]> => {
     byObjectId.get(mapping.object_id)!.push(normalized);
   }
 
+  const mapPointCountByObjectId = new Map<string, number>();
+  for (const point of mapPoints) {
+    mapPointCountByObjectId.set(point.object_id, (mapPointCountByObjectId.get(point.object_id) || 0) + 1);
+  }
+
   return objects.map(object => ({
     ...object,
     access_points: (byObjectId.get(object.id) || []).sort((left, right) => left.localeCompare(right, 'ru')),
+    has_map: !!normalizeTravelObjectMapPath(object.map_storage_path),
+    mapped_points_count: mapPointCountByObjectId.get(object.id) || 0,
   }));
 };
 
@@ -701,6 +884,8 @@ export const createTravelObject = async (name: string): Promise<ITravelObject> =
   return {
     ...object,
     access_points: [],
+    has_map: false,
+    mapped_points_count: 0,
   };
 };
 
@@ -713,6 +898,7 @@ export const updateTravelObject = async ({
   name: string;
   accessPoints: string[];
 }): Promise<ITravelObject> => {
+  const currentMappings = await fetchTravelMappingsRaw();
   const normalizedName = name.trim();
   const normalizedAccessPoints = dedupeAccessPoints(accessPoints);
   const updatedAt = new Date().toISOString();
@@ -735,7 +921,21 @@ export const updateTravelObject = async ({
       .neq('object_id', objectId);
 
     if (clearCrossBindingsError) throw formatTravelFeatureError(clearCrossBindingsError);
+
+    const { error: clearCrossPointMappingsError } = await supabase
+      .from('skud_object_map_points')
+      .delete()
+      .in('access_point_name', normalizedAccessPoints)
+      .neq('object_id', objectId);
+
+    if (clearCrossPointMappingsError) throw formatTravelFeatureError(clearCrossPointMappingsError);
   }
+
+  const currentOwnAccessPoints = currentMappings
+    .filter(mapping => mapping.object_id === objectId)
+    .map(mapping => normalizeAccessPoint(mapping.access_point_name))
+    .filter((value): value is string => !!value);
+  const removedAccessPoints = currentOwnAccessPoints.filter(accessPoint => !normalizedAccessPoints.includes(accessPoint));
 
   const { error: deleteOwnMappingsError } = await supabase
     .from('skud_object_access_points')
@@ -755,6 +955,16 @@ export const updateTravelObject = async ({
     if (insertMappingsError) throw formatTravelFeatureError(insertMappingsError);
   }
 
+  if (removedAccessPoints.length > 0) {
+    const { error: deleteRemovedPointMappingsError } = await supabase
+      .from('skud_object_map_points')
+      .delete()
+      .eq('object_id', objectId)
+      .in('access_point_name', removedAccessPoints);
+
+    if (deleteRemovedPointMappingsError) throw formatTravelFeatureError(deleteRemovedPointMappingsError);
+  }
+
   const objects = await listTravelObjects();
   const updated = objects.find(object => object.id === objectId);
   if (!updated) throw new Error('Объект не найден после сохранения');
@@ -763,6 +973,12 @@ export const updateTravelObject = async ({
 };
 
 export const deleteTravelObject = async (objectId: string): Promise<void> => {
+  const currentObject = await fetchTravelObjectByIdRaw(objectId);
+  const currentStoragePath = normalizeTravelObjectMapPath(currentObject?.map_storage_path);
+  if (currentStoragePath) {
+    await supabaseStorageService.removeObject(SKUD_OBJECT_MAPS_BUCKET, currentStoragePath);
+  }
+
   const { error } = await supabase
     .from('skud_objects')
     .delete()
@@ -770,6 +986,297 @@ export const deleteTravelObject = async (objectId: string): Promise<void> => {
 
   if (error) throw formatTravelFeatureError(error);
   invalidateTravelSegmentsCache();
+};
+
+const toTravelObjectMapPoints = (rows: ITravelObjectMapPointRow[]): ITravelObjectMapPoint[] => sortTravelObjectMapPoints(
+  rows
+    .map(row => ({
+      access_point_name: row.access_point_name.trim(),
+      x_ratio: Number(row.x_ratio),
+      y_ratio: Number(row.y_ratio),
+    }))
+    .filter(point => !!point.access_point_name),
+);
+
+export const getTravelObjectMap = async (objectId: string): Promise<ITravelObjectMap | null> => {
+  const object = await fetchTravelObjectByIdRaw(objectId);
+  if (!object) {
+    throw new Error('Объект не найден');
+  }
+
+  const storagePath = normalizeTravelObjectMapPath(object.map_storage_path);
+  if (!storagePath || !object.map_file_name || !object.map_mime_type || object.map_file_size == null || !object.map_uploaded_at) {
+    return null;
+  }
+
+  const [points, imageUrl] = await Promise.all([
+    fetchTravelObjectMapPointsRaw(objectId),
+    supabaseStorageService.createSignedDownloadUrl(SKUD_OBJECT_MAPS_BUCKET, storagePath),
+  ]);
+
+  return {
+    object_id: object.id,
+    storage_path: storagePath,
+    file_name: object.map_file_name,
+    mime_type: object.map_mime_type,
+    file_size: object.map_file_size,
+    uploaded_at: object.map_uploaded_at,
+    image_url: imageUrl,
+    points: toTravelObjectMapPoints(points),
+  };
+};
+
+export const createTravelObjectMapUploadUrl = async ({
+  objectId,
+  fileName,
+  contentType,
+  fileSize,
+}: {
+  objectId: string;
+  fileName: string;
+  contentType: string;
+  fileSize: number;
+}): Promise<{ upload_url: string; storage_path: string }> => {
+  ensureTravelObjectMapFileMeta({ fileName, contentType, fileSize });
+
+  const object = await fetchTravelObjectByIdRaw(objectId);
+  if (!object) {
+    throw new Error('Объект не найден');
+  }
+
+  const storagePath = supabaseStorageService.buildObjectMapPath(objectId, fileName);
+  const { signedUrl } = await supabaseStorageService.createSignedUploadUrl(SKUD_OBJECT_MAPS_BUCKET, storagePath);
+
+  return {
+    upload_url: signedUrl,
+    storage_path: storagePath,
+  };
+};
+
+export const confirmTravelObjectMapUpload = async ({
+  objectId,
+  storagePath,
+  fileName,
+  contentType,
+  fileSize,
+}: {
+  objectId: string;
+  storagePath: string;
+  fileName: string;
+  contentType: string;
+  fileSize: number;
+}): Promise<ITravelObjectMap> => {
+  ensureTravelObjectMapFileMeta({ fileName, contentType, fileSize });
+
+  const object = await fetchTravelObjectByIdRaw(objectId);
+  if (!object) {
+    throw new Error('Объект не найден');
+  }
+
+  const normalizedStoragePath = normalizeTravelObjectMapPath(storagePath);
+  if (!normalizedStoragePath || !normalizedStoragePath.startsWith(`travel-objects/${objectId}/`)) {
+    throw new Error('Некорректный путь файла карты');
+  }
+
+  await supabaseStorageService.ensureObjectExists(SKUD_OBJECT_MAPS_BUCKET, normalizedStoragePath);
+
+  const previousStoragePath = normalizeTravelObjectMapPath(object.map_storage_path);
+  const uploadedAt = new Date().toISOString();
+
+  const { error: updateError } = await supabase
+    .from('skud_objects')
+    .update({
+      map_storage_path: normalizedStoragePath,
+      map_file_name: fileName.trim(),
+      map_mime_type: contentType,
+      map_file_size: fileSize,
+      map_uploaded_at: uploadedAt,
+      updated_at: uploadedAt,
+    })
+    .eq('id', objectId);
+
+  if (updateError) throw formatTravelFeatureError(updateError);
+
+  const { error: clearPointsError } = await supabase
+    .from('skud_object_map_points')
+    .delete()
+    .eq('object_id', objectId);
+
+  if (clearPointsError) throw formatTravelFeatureError(clearPointsError);
+
+  if (previousStoragePath && previousStoragePath !== normalizedStoragePath) {
+    await supabaseStorageService.removeObject(SKUD_OBJECT_MAPS_BUCKET, previousStoragePath);
+  }
+
+  const map = await getTravelObjectMap(objectId);
+  if (!map) {
+    throw new Error('Не удалось сохранить карту объекта');
+  }
+
+  return map;
+};
+
+export const saveTravelObjectMapPoints = async ({
+  objectId,
+  points,
+}: {
+  objectId: string;
+  points: ITravelObjectMapPoint[];
+}): Promise<ITravelObjectMap> => {
+  const object = await fetchTravelObjectByIdRaw(objectId);
+  if (!object) {
+    throw new Error('Объект не найден');
+  }
+
+  const storagePath = normalizeTravelObjectMapPath(object.map_storage_path);
+  if (!storagePath) {
+    throw new Error('Сначала загрузите карту объекта');
+  }
+
+  const objectMappings = await fetchTravelMappingsRaw();
+  const allowedAccessPoints = new Set(
+    objectMappings
+      .filter(mapping => mapping.object_id === objectId)
+      .map(mapping => normalizeAccessPoint(mapping.access_point_name))
+      .filter((value): value is string => !!value),
+  );
+
+  const normalizedPoints = sortTravelObjectMapPoints(points.map(point => {
+    const normalizedAccessPointName = normalizeAccessPoint(point.access_point_name);
+    if (!normalizedAccessPointName) {
+      throw new Error('Укажите точку доступа для маркера');
+    }
+    if (!allowedAccessPoints.has(normalizedAccessPointName)) {
+      throw new Error(`Точка доступа "${normalizedAccessPointName}" не привязана к выбранному объекту`);
+    }
+
+    return {
+      access_point_name: normalizedAccessPointName,
+      x_ratio: normalizeRatio(point.x_ratio),
+      y_ratio: normalizeRatio(point.y_ratio),
+    };
+  }));
+
+  const uniquePointNames = new Set<string>();
+  for (const point of normalizedPoints) {
+    if (uniquePointNames.has(point.access_point_name)) {
+      throw new Error(`Точка доступа "${point.access_point_name}" размечена несколько раз`);
+    }
+    uniquePointNames.add(point.access_point_name);
+  }
+
+  if (normalizedPoints.length > 0) {
+    const { error: clearCrossObjectPointsError } = await supabase
+      .from('skud_object_map_points')
+      .delete()
+      .in('access_point_name', normalizedPoints.map(point => point.access_point_name))
+      .neq('object_id', objectId);
+
+    if (clearCrossObjectPointsError) throw formatTravelFeatureError(clearCrossObjectPointsError);
+  }
+
+  const { error: deleteOwnPointsError } = await supabase
+    .from('skud_object_map_points')
+    .delete()
+    .eq('object_id', objectId);
+
+  if (deleteOwnPointsError) throw formatTravelFeatureError(deleteOwnPointsError);
+
+  if (normalizedPoints.length > 0) {
+    const { error: insertPointsError } = await supabase
+      .from('skud_object_map_points')
+      .insert(normalizedPoints.map(point => ({
+        object_id: objectId,
+        access_point_name: point.access_point_name,
+        x_ratio: point.x_ratio,
+        y_ratio: point.y_ratio,
+      })));
+
+    if (insertPointsError) throw formatTravelFeatureError(insertPointsError);
+  }
+
+  const map = await getTravelObjectMap(objectId);
+  if (!map) {
+    throw new Error('Не удалось сохранить маркеры карты');
+  }
+
+  return map;
+};
+
+export const deleteTravelObjectMap = async (objectId: string): Promise<void> => {
+  const object = await fetchTravelObjectByIdRaw(objectId);
+  if (!object) {
+    throw new Error('Объект не найден');
+  }
+
+  const storagePath = normalizeTravelObjectMapPath(object.map_storage_path);
+  if (storagePath) {
+    await supabaseStorageService.removeObject(SKUD_OBJECT_MAPS_BUCKET, storagePath);
+  }
+
+  const { error: clearPointsError } = await supabase
+    .from('skud_object_map_points')
+    .delete()
+    .eq('object_id', objectId);
+
+  if (clearPointsError) throw formatTravelFeatureError(clearPointsError);
+
+  const { error: updateError } = await supabase
+    .from('skud_objects')
+    .update({
+      map_storage_path: null,
+      map_file_name: null,
+      map_mime_type: null,
+      map_file_size: null,
+      map_uploaded_at: null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', objectId);
+
+  if (updateError) throw formatTravelFeatureError(updateError);
+};
+
+export const getAccessPointMapView = async (accessPointName: string): Promise<IAccessPointMapView | null> => {
+  const normalizedAccessPointName = normalizeAccessPoint(accessPointName);
+  if (!normalizedAccessPointName) {
+    throw new Error('Не указана точка доступа');
+  }
+
+  const { data, error } = await supabase
+    .from('skud_object_map_points')
+    .select('object_id, access_point_name, x_ratio, y_ratio')
+    .eq('access_point_name', normalizedAccessPointName)
+    .single();
+
+  if (error) {
+    const message = error.message.toLowerCase();
+    if (message.includes('0 rows') || message.includes('no rows')) {
+      return null;
+    }
+    throw formatTravelFeatureError(error);
+  }
+
+  const point = data as Pick<ITravelObjectMapPointRow, 'object_id' | 'access_point_name' | 'x_ratio' | 'y_ratio'>;
+  const object = await fetchTravelObjectByIdRaw(point.object_id);
+  if (!object) {
+    return null;
+  }
+
+  const storagePath = normalizeTravelObjectMapPath(object.map_storage_path);
+  if (!storagePath) {
+    return null;
+  }
+
+  const imageUrl = await supabaseStorageService.createSignedDownloadUrl(SKUD_OBJECT_MAPS_BUCKET, storagePath);
+
+  return {
+    object_id: object.id,
+    object_name: object.name,
+    access_point_name: point.access_point_name.trim(),
+    image_url: imageUrl,
+    x_ratio: Number(point.x_ratio),
+    y_ratio: Number(point.y_ratio),
+  };
 };
 
 export const listTravelRoutes = async (): Promise<ITravelRoute[]> => {

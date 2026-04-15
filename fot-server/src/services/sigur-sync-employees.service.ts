@@ -52,7 +52,7 @@ export async function syncPositionsFromSigurLogic(
   connection?: 'external' | 'internal',
   context?: ISyncContext,
 ): Promise<ISyncPositionsFromSigurResult> {
-  if (!sigurService.isConfigured()) throw new Error('Sigur не настроен');
+  if (!(await sigurService.isConfigured())) throw new Error('Sigur не настроен');
 
   const sigurPositions = await getPositionsRaw(connection, context);
   if (!sigurPositions || sigurPositions.length === 0) {
@@ -173,7 +173,7 @@ export async function syncEmployeesLogic(
   context?: ISyncContext,
   autoInsert = true,
 ): Promise<ISyncEmployeesResult> {
-  if (!sigurService.isConfigured()) throw new Error('Sigur не настроен');
+  if (!(await sigurService.isConfigured())) throw new Error('Sigur не настроен');
 
   const send = onProgress || (() => {});
   send({ type: 'employees_progress', phase: 'loading', current: 0, total: 0, percent: 0 });
@@ -226,7 +226,6 @@ export async function syncEmployeesLogic(
 
   const sigurIdToDbId = new Map<number, number>();
   const firedSigurIds = new Set<number>();
-  const lockedDeptSigurIds = new Set<number>();
   const dbEmpById = new Map<number, {
     org_department_id: string | null;
     position_id: string | null;
@@ -234,6 +233,7 @@ export async function syncEmployeesLogic(
     last_name: string | null;
     first_name: string | null;
     middle_name: string | null;
+    department_locked: boolean;
   }>();
   for (const e of existingEmps || []) {
     if (e.sigur_employee_id != null) {
@@ -247,9 +247,9 @@ export async function syncEmployeesLogic(
         last_name: e.last_name,
         first_name: e.first_name,
         middle_name: e.middle_name,
+        department_locked: e.department_locked,
       });
       if (e.employment_status === 'fired') firedSigurIds.add(e.sigur_employee_id);
-      if (e.department_locked) lockedDeptSigurIds.add(e.sigur_employee_id);
     }
   }
 
@@ -364,9 +364,11 @@ export async function syncEmployeesLogic(
       const updateFields: Record<string, unknown> = {};
       const prev = dbEmpById.get(dbId);
 
-      // Не обновляем отдел если заблокирован вручную
-      if (orgDepartmentId && !(sigurEmpId && lockedDeptSigurIds.has(sigurEmpId))) {
+      if (orgDepartmentId) {
         updateFields.org_department_id = orgDepartmentId;
+      }
+      if (positionId) {
+        updateFields.position_id = positionId;
       }
       const normalizedFullName = fullName.trim();
       const fio = parseFIO(normalizedFullName);
@@ -384,7 +386,9 @@ export async function syncEmployeesLogic(
         updateFields.first_name = fio.firstName || null;
         updateFields.middle_name = fio.middleName || null;
       }
-      // Должности из Sigur не обновляем — приоритет у портала ФОТ
+      if (prev?.department_locked) {
+        updateFields.department_locked = false;
+      }
 
       if (Object.keys(updateFields).length > 0) {
         updates.push({ id: dbId, fields: updateFields, name: fullName });
@@ -439,10 +443,16 @@ export async function syncEmployeesLogic(
           if (u.fields.org_department_id && prev && u.fields.org_department_id !== prev.org_department_id) {
             await employeeChangesService.changeDepartment(u.id, u.fields.org_department_id as string, {
               reason: 'Синхронизация Sigur',
+              lockDepartment: false,
             });
             delete u.fields.org_department_id;
           }
-          // Должность из Sigur — прямой update без истории (история ведётся вручную)
+          if (u.fields.position_id && prev && u.fields.position_id !== prev.position_id) {
+            await employeeChangesService.changePosition(u.id, u.fields.position_id as string, {
+              reason: 'Синхронизация Sigur',
+            });
+            delete u.fields.position_id;
+          }
           // Остальные поля — прямой update
           if (Object.keys(u.fields).length > 0) {
             const { error } = await supabase.from('employees').update(u.fields).eq('id', u.id);

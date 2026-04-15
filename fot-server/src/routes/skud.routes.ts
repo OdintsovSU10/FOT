@@ -142,11 +142,53 @@ router.put(
   skudController.updateTravelObject
 );
 
+// GET /api/skud/travel-objects/:id/map - карта объекта (header+)
+router.get(
+  '/travel-objects/:id/map',
+  requirePageAccess('/skud-settings', 'view'),
+  skudController.getTravelObjectMap
+);
+
+// POST /api/skud/travel-objects/:id/map/upload-url - получить signed upload URL карты (admin+)
+router.post(
+  '/travel-objects/:id/map/upload-url',
+  requirePageAccess('/skud-settings', 'edit'),
+  skudController.getTravelObjectMapUploadUrl
+);
+
+// POST /api/skud/travel-objects/:id/map/confirm - подтвердить загрузку карты (admin+)
+router.post(
+  '/travel-objects/:id/map/confirm',
+  requirePageAccess('/skud-settings', 'edit'),
+  skudController.confirmTravelObjectMapUpload
+);
+
+// PUT /api/skud/travel-objects/:id/map-points - сохранить маркеры карты (admin+)
+router.put(
+  '/travel-objects/:id/map-points',
+  requirePageAccess('/skud-settings', 'edit'),
+  skudController.saveTravelObjectMapPoints
+);
+
+// DELETE /api/skud/travel-objects/:id/map - удалить карту объекта (admin+)
+router.delete(
+  '/travel-objects/:id/map',
+  requirePageAccess('/skud-settings', 'edit'),
+  skudController.deleteTravelObjectMap
+);
+
 // DELETE /api/skud/travel-objects/:id - удалить объект (admin+)
 router.delete(
   '/travel-objects/:id',
   requirePageAccess('/skud-settings', 'edit'),
   skudController.deleteTravelObject
+);
+
+// GET /api/skud/access-point-map - карта конкретной точки доступа (HR/Admin)
+router.get(
+  '/access-point-map',
+  requirePageAccess('/skud-settings', 'view'),
+  skudController.getAccessPointMap
 );
 
 // GET /api/skud/travel-routes - маршруты между объектами (header+)

@@ -3,11 +3,12 @@ import { Pencil, Plus, Save, Trash2 } from 'lucide-react';
 import { skudService } from '../../services/skudService';
 import { travelTimeService } from '../../services/travelTimeService';
 import type { AccessPointOption, ITravelObject } from '../../types';
+import { TravelObjectMapSection } from './TravelObjectMapSection';
 import '../../styles/TravelSettings.css';
 
 interface ITravelObjectsTabProps {
   canEdit: boolean;
-  selectedConnection: 'internal' | 'external';
+  selectedConnection: 'external';
   setError: (error: string) => void;
 }
 
@@ -89,6 +90,23 @@ export const TravelObjectsTab: FC<ITravelObjectsTabProps> = ({ canEdit, selected
     }
     return map;
   }, [accessPoints]);
+
+  const accessPointLabelsByName = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const point of accessPoints) {
+      const normalizedName = normalizePoint(point.name);
+      if (!normalizedName || map.has(normalizedName)) continue;
+      map.set(normalizedName, point.id == null ? normalizedName : `${normalizedName} (${point.id})`);
+    }
+
+    for (const accessPoint of draftAccessPoints) {
+      const normalizedName = normalizePoint(accessPoint);
+      if (!normalizedName || map.has(normalizedName)) continue;
+      map.set(normalizedName, normalizedName);
+    }
+
+    return map;
+  }, [accessPoints, draftAccessPoints]);
 
   const availableAccessPoints = useMemo(() => {
     if (!selectedObject) return [];
@@ -359,10 +377,20 @@ export const TravelObjectsTab: FC<ITravelObjectsTabProps> = ({ canEdit, selected
                     <div className="travel-config-empty">
                       {search.trim()
                         ? 'Нет точек доступа по текущему фильтру'
-                        : 'Нет нераспределённых точек доступа'}
+                      : 'Нет нераспределённых точек доступа'}
                     </div>
                   )}
                 </div>
+
+                <TravelObjectMapSection
+                  object={selectedObject}
+                  canEdit={canEdit}
+                  busy={saving}
+                  accessPointsDirty={selectedObjectAccessPointsChanged}
+                  accessPointLabels={accessPointLabelsByName}
+                  setError={setError}
+                  reloadObjects={loadData}
+                />
               </>
             )}
           </div>

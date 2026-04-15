@@ -1,8 +1,11 @@
 import { type FC, type ReactNode, useState, useEffect, useCallback } from 'react';
 import { X, LogIn, LogOut, Timer } from 'lucide-react';
 import type { TimesheetEntry, TimesheetStatus, SkudEvent } from '../../types';
+import { useAuth } from '../../contexts/AuthContext';
+import { useAccessPointMapViewer } from '../../hooks/useAccessPointMapViewer';
 import { skudService } from '../../services/skudService';
 import { formatTimesheetEmployeeName } from '../../utils/timesheetDisplay';
+import { AccessPointTrigger } from '../skud/AccessPointTrigger';
 
 interface ICorrectionModalProps {
   open: boolean;
@@ -22,10 +25,12 @@ interface ICorrectionModalProps {
   workDate?: string;
   hideCorrectionTab?: boolean;
   hideSkudTab?: boolean;
+  allowAccessPointMap?: boolean;
   allowedStatuses?: TimesheetStatus[];
   customContent?: ReactNode;
   customContentFooterLabel?: string;
-  timesheetEntry?: Pick<TimesheetEntry, 'first_entry' | 'last_exit' | 'hours_worked'> | null;
+  timesheetEntry?: Pick<TimesheetEntry, 'first_entry' | 'last_exit' | 'hours_worked' | 'display_hours_worked'> | null;
+  maxHours?: number | null;
   correctionInfo?: {
     is_correction: boolean;
     corrected_at?: string | null;
@@ -83,8 +88,15 @@ const TYPE_OPTIONS: ITypeOption[] = [
 const EventsTab: FC<{
   employeeId: number;
   workDate: string;
-  timesheetEntry?: Pick<TimesheetEntry, 'first_entry' | 'last_exit' | 'hours_worked'> | null;
-}> = ({ employeeId, workDate, timesheetEntry }) => {
+  allowAccessPointMap?: boolean;
+  timesheetEntry?: Pick<TimesheetEntry, 'first_entry' | 'last_exit' | 'hours_worked' | 'display_hours_worked'> | null;
+}> = ({ employeeId, workDate, allowAccessPointMap = false, timesheetEntry }) => {
+  const { canViewPage } = useAuth();
+  const {
+    canOpenAccessPointMap,
+    openAccessPointMap,
+    accessPointMapModal,
+  } = useAccessPointMapViewer(allowAccessPointMap && canViewPage('/skud-settings'));
   const [events, setEvents] = useState<SkudEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -139,8 +151,9 @@ const EventsTab: FC<{
   const fallbackTotalSec = calcPairs(summaryEvents);
   const fallbackFirstEntry = summaryEvents.find(e => e.direction === 'entry');
   const fallbackLastExit = [...summaryEvents].reverse().find(e => e.direction === 'exit');
-  const totalSec = timesheetEntry?.hours_worked != null
-    ? Math.max(0, Math.round(timesheetEntry.hours_worked * 3600))
+  const visibleHours = timesheetEntry?.display_hours_worked ?? timesheetEntry?.hours_worked ?? null;
+  const totalSec = visibleHours != null
+    ? Math.max(0, Math.round(visibleHours * 3600))
     : fallbackTotalSec;
   const firstEntry = timesheetEntry?.first_entry || fallbackFirstEntry?.event_time || null;
   const lastExit = timesheetEntry?.last_exit || fallbackLastExit?.event_time || null;
@@ -166,7 +179,16 @@ const EventsTab: FC<{
               <span className="ts-modal-event-dir">
                 {ev.direction === 'entry' ? 'Вход' : 'Выход'}
               </span>
-              <span className="ts-modal-event-point">{ev.access_point || '—'}</span>
+              {ev.access_point ? (
+                <AccessPointTrigger
+                  accessPointName={ev.access_point}
+                  className="ts-modal-event-point"
+                  canOpen={canOpenAccessPointMap}
+                  onOpen={openAccessPointMap}
+                />
+              ) : (
+                <span className="ts-modal-event-point">—</span>
+              )}
             </div>
           );
         })}
@@ -188,6 +210,7 @@ const EventsTab: FC<{
           </span>
         )}
       </div>
+      {accessPointMapModal}
     </div>
   );
 };
@@ -202,6 +225,7 @@ const CorrectionTab: FC<{
   confirmLabel?: string;
   deleteLabel?: string;
   allowedStatuses?: TimesheetStatus[];
+  maxHours?: number | null;
 }> = ({
   onClose,
   onSave,
@@ -212,6 +236,7 @@ const CorrectionTab: FC<{
   confirmLabel,
   deleteLabel,
   allowedStatuses,
+  maxHours,
 }) => {
   const [selectedStatus, setSelectedStatus] = useState<TimesheetStatus>(initialStatus);
   const [hours, setHours] = useState<number>(initialHours);
@@ -221,7 +246,10 @@ const CorrectionTab: FC<{
 
   const handleSave = () => {
     const needsHours = HOURS_EDITABLE_STATUSES.has(selectedStatus);
-    onSave(selectedStatus, needsHours ? hours : null, notes);
+    const normalizedHours = needsHours && maxHours != null
+      ? Math.max(0, Math.min(hours, maxHours))
+      : hours;
+    onSave(selectedStatus, needsHours ? normalizedHours : null, notes);
   };
 
   return (
@@ -257,12 +285,18 @@ const CorrectionTab: FC<{
               type="number"
               className="ts-form-input"
               value={hours}
-              onChange={e => setHours(parseFloat(e.target.value) || 0)}
+              onChange={e => {
+                const nextValue = parseFloat(e.target.value) || 0;
+                setHours(maxHours != null ? Math.max(0, Math.min(nextValue, maxHours)) : nextValue);
+              }}
               min={0}
-              max={24}
+              max={maxHours ?? 24}
               step={0.5}
             />
-            <span className="ts-hours-hint">{formatHM(hours)}</span>
+            <span className="ts-hours-hint">
+              {formatHM(hours)}
+              {maxHours != null ? ` • максимум по графику ${formatHM(maxHours)}` : ''}
+            </span>
           </div>
         )}
 
@@ -307,6 +341,7 @@ const ModalContent: FC<Omit<ICorrectionModalProps, 'open'>> = ({
   workDate,
   hideCorrectionTab,
   hideSkudTab,
+  allowAccessPointMap = false,
   allowedStatuses,
   customContent,
   customContentFooterLabel,
@@ -315,6 +350,7 @@ const ModalContent: FC<Omit<ICorrectionModalProps, 'open'>> = ({
   onDelete,
   initialNotes,
   deleteLabel,
+  maxHours,
 }) => {
   const showEventsTab = !hideSkudTab;
   const showCorrectionTab = !hideCorrectionTab;
@@ -392,7 +428,12 @@ const ModalContent: FC<Omit<ICorrectionModalProps, 'open'>> = ({
 
       {tab === 'events' && showEventsTab && employeeId && workDate ? (
         <div className="ts-modal-body">
-          <EventsTab employeeId={employeeId} workDate={workDate} timesheetEntry={timesheetEntry} />
+          <EventsTab
+            employeeId={employeeId}
+            workDate={workDate}
+            allowAccessPointMap={allowAccessPointMap}
+            timesheetEntry={timesheetEntry}
+          />
         </div>
       ) : tab === 'events' && showEventsTab ? (
         <div className="ts-modal-body">
@@ -409,6 +450,7 @@ const ModalContent: FC<Omit<ICorrectionModalProps, 'open'>> = ({
           confirmLabel={confirmLabel}
           deleteLabel={deleteLabel}
           allowedStatuses={allowedStatuses}
+          maxHours={maxHours}
         />
       ) : null}
     </div>

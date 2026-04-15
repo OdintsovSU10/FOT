@@ -13,6 +13,7 @@ import { auditService, AUDIT_ACTIONS } from '../services/audit.service.js';
 import { parseTimesheetApprovalPeriod, formatTimesheetHalfLabel } from '../services/timesheet-period.service.js';
 import { timesheetResponsiblesService } from '../services/timesheet-responsibles.service.js';
 import { timesheetApprovalHistoryService } from '../services/timesheet-approval-history.service.js';
+import { listTimesheetWorkflowRecipientIds } from '../services/timesheet-workflow-recipients.service.js';
 
 type ReviewStatus = 'approved' | 'rejected' | 'returned';
 
@@ -76,7 +77,7 @@ async function logApprovalAudit(
 }
 
 async function notifyHrAboutSubmittedApproval(departmentId: string, period: string): Promise<void> {
-  const recipients = await timesheetResponsiblesService.getHrRecipientsForDepartment(departmentId);
+  const recipients = await listTimesheetWorkflowRecipientIds(departmentId, ['review', 'monitor']);
   if (recipients.length === 0) return;
 
   const parsed = parseTimesheetApprovalPeriod(period);
@@ -109,11 +110,10 @@ async function notifyDepartmentAboutReview(
   submittedBy: string | null,
   comment: string | null,
 ): Promise<void> {
-  const reminderRecipients = await timesheetResponsiblesService.getReminderRecipientsByDepartment(departmentId);
   const recipients = new Set<string>();
+  const submitRecipients = await listTimesheetWorkflowRecipientIds(departmentId, ['submit']);
 
-  for (const userId of reminderRecipients.primary) recipients.add(userId);
-  for (const userId of reminderRecipients.backup) recipients.add(userId);
+  for (const userId of submitRecipients) recipients.add(userId);
   if (submittedBy) recipients.add(submittedBy);
 
   if (recipients.size === 0) return;

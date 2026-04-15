@@ -403,6 +403,7 @@ export const EmployeeTimesheetPage: FC = () => {
           corrected_at: modalEntry.corrected_at,
           corrected_by_name: modalEntry.corrected_by_name,
         } : null}
+        allowAccessPointMap={false}
         hideCorrectionTab
       />
     </div>

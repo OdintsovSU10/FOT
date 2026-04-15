@@ -43,7 +43,12 @@ export interface PageAccessEntry {
 
 export const EMPLOYEE_VARIANT_PREFIX = 'portal.employee.variant.';
 export const DATA_SCOPE_PREFIX = 'data.scope.';
+export const TIMESHEET_WORKFLOW_PREFIX = 'timesheet.workflow.';
 export const CRITICAL_ADMIN_PAGE_KEYS = ['/admin/roles', '/admin/users'] as const;
+
+export const TIMESHEET_WORKFLOW_SUBMIT_PERMISSION = 'timesheet.workflow.submit';
+export const TIMESHEET_WORKFLOW_REVIEW_PERMISSION = 'timesheet.workflow.review';
+export const TIMESHEET_WORKFLOW_MONITOR_PERMISSION = 'timesheet.workflow.monitor';
 
 export const DEFAULT_PERMISSION_GROUPS: PermissionGroup[] = [
   {
@@ -90,6 +95,33 @@ export const DEFAULT_PERMISSION_GROUPS: PermissionGroup[] = [
         code: 'data.scope.all',
         label: 'Все данные',
         description: 'Пользователь видит данные всей организации.',
+        sort_order: 30,
+      },
+    ],
+  },
+  {
+    code: 'timesheet.workflow',
+    label: 'Табели',
+    description: 'Определяет участие роли в подаче, проверке и контроле табелей.',
+    exclusive: false,
+    sort_order: 30,
+    options: [
+      {
+        code: TIMESHEET_WORKFLOW_SUBMIT_PERMISSION,
+        label: 'Подача',
+        description: 'Роль может подать или переподать табель своего охвата.',
+        sort_order: 10,
+      },
+      {
+        code: TIMESHEET_WORKFLOW_REVIEW_PERMISSION,
+        label: 'Проверка',
+        description: 'Роль может утверждать, отклонять и возвращать табели.',
+        sort_order: 20,
+      },
+      {
+        code: TIMESHEET_WORKFLOW_MONITOR_PERMISSION,
+        label: 'Мониторинг',
+        description: 'Роль видит очередь табелей и историю без права менять статус.',
         sort_order: 30,
       },
     ],
@@ -461,6 +493,19 @@ export const DEFAULT_ACCESS_PAGE_CATALOG: PageCatalogItem[] = [
     is_active: true,
     is_system: true,
   },
+  {
+    key: '/timesheet/team-management',
+    label: 'Управление составом табеля',
+    group_code: 'technical',
+    group_label: 'Технические доступы',
+    surface: 'technical',
+    supports_edit: true,
+    requires_data_scope: true,
+    requires_employee_variant: false,
+    sort_order: 285,
+    is_active: true,
+    is_system: true,
+  },
 ];
 
 export function normalizePermissions(permissions: string[] | null | undefined): string[] {
@@ -497,6 +542,18 @@ function countByPrefix(permissions: string[], prefix: string): number {
   return permissions.filter((permission) => permission.startsWith(prefix)).length;
 }
 
+function resolvePageAccessMode(
+  pageAccess: Record<string, AccessMode | { can_view?: boolean; can_edit?: boolean } | null | undefined>,
+  pagePath: string,
+): AccessMode {
+  const value = pageAccess[pagePath];
+  if (value === 'none' || value === 'view' || value === 'edit') {
+    return value;
+  }
+
+  return accessModeFromFlags(value);
+}
+
 export function resolveEmployeeVariantFromPermissions(
   permissions: string[] | null | undefined,
 ): EmployeePortalVariant | null {
@@ -525,6 +582,49 @@ export function validatePermissionSelections(roleCode: string, permissions: stri
 
   if (dataScopeCount > 1) {
     return `Роль ${roleCode}: можно выбрать только одну область данных`;
+  }
+
+  return null;
+}
+
+export function validateTimesheetWorkflowPermissions(
+  roleCode: string,
+  permissions: string[] | null | undefined,
+  pageAccess: Record<string, AccessMode | { can_view?: boolean; can_edit?: boolean } | null | undefined>,
+): string | null {
+  const normalized = normalizePermissions(permissions);
+  const dataScope = resolveDataScopeFromPermissions(normalized);
+  const timesheetMode = resolvePageAccessMode(pageAccess, '/timesheet');
+  const timesheetHrMode = resolvePageAccessMode(pageAccess, '/timesheet-hr');
+
+  if (normalized.includes(TIMESHEET_WORKFLOW_SUBMIT_PERMISSION)) {
+    if (timesheetMode !== 'edit') {
+      return `Роль ${roleCode}: capability "Подача" требует доступ edit к странице /timesheet`;
+    }
+
+    if (dataScope == null || dataScope === 'self') {
+      return `Роль ${roleCode}: capability "Подача" требует область данных department или all`;
+    }
+  }
+
+  if (normalized.includes(TIMESHEET_WORKFLOW_REVIEW_PERMISSION)) {
+    if (timesheetHrMode !== 'edit') {
+      return `Роль ${roleCode}: capability "Проверка" требует доступ edit к странице /timesheet-hr`;
+    }
+
+    if (dataScope == null || dataScope === 'self') {
+      return `Роль ${roleCode}: capability "Проверка" требует область данных department или all`;
+    }
+  }
+
+  if (normalized.includes(TIMESHEET_WORKFLOW_MONITOR_PERMISSION)) {
+    if (timesheetHrMode === 'none') {
+      return `Роль ${roleCode}: capability "Мониторинг" требует доступ view или edit к странице /timesheet-hr`;
+    }
+
+    if (dataScope == null || dataScope === 'self') {
+      return `Роль ${roleCode}: capability "Мониторинг" требует область данных department или all`;
+    }
   }
 
   return null;
