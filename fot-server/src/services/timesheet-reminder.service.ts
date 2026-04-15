@@ -5,12 +5,14 @@ import { settingsService } from './settings.service.js';
 import {
   formatTimesheetHalfLabel,
   getTimesheetReminderEventsForDate,
+  type ITimesheetReminderEvent,
   parseTimesheetApprovalPeriod,
 } from './timesheet-period.service.js';
 import { listTimesheetWorkflowRecipientIds } from './timesheet-workflow-recipients.service.js';
 
 const REMINDER_INTERVAL_MS = 15 * 60_000;
 const STARTUP_DELAY_MS = 45_000;
+const REMINDER_EXCLUDED_ROLE_CODES = ['admin', 'super_admin'] as const;
 
 let reminderTimer: ReturnType<typeof setInterval> | null = null;
 let startupTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -20,12 +22,6 @@ function getTimesheetPath(period: string, stage: string): string {
   const parsed = parseTimesheetApprovalPeriod(period);
   if (!parsed) return '/timesheet';
   return `/timesheet?month=${parsed.year}-${String(parsed.month).padStart(2, '0')}&half=${parsed.half}&stage=${stage}`;
-}
-
-function getReviewPath(period: string, stage: string): string {
-  const parsed = parseTimesheetApprovalPeriod(period);
-  if (!parsed) return '/timesheet-hr';
-  return `/timesheet-hr?month=${parsed.year}-${String(parsed.month).padStart(2, '0')}&half=${parsed.half}&stage=${stage}`;
 }
 
 function buildDepartmentReminderMessage(period: string, departmentName: string, stage: string): { title: string; body: string } {
@@ -155,7 +151,32 @@ async function persistReminderLog(items: Array<{
   }
 }
 
-async function processReminderEvent(event: { period: string; stage: string }): Promise<void> {
+export async function listTimesheetReminderRecipientIds(
+  departmentId: string,
+  stage: ITimesheetReminderEvent['stage'],
+): Promise<string[]> {
+  if (stage === 'overdue') {
+    return listTimesheetWorkflowRecipientIds(
+      departmentId,
+      ['submit'],
+      {
+        excludeRoleCodes: [...REMINDER_EXCLUDED_ROLE_CODES],
+        includeDataScopes: ['department'],
+      },
+    );
+  }
+
+  return listTimesheetWorkflowRecipientIds(
+    departmentId,
+    ['submit'],
+    {
+      excludeRoleCodes: [...REMINDER_EXCLUDED_ROLE_CODES],
+      includeDataScopes: ['department'],
+    },
+  );
+}
+
+async function processReminderEvent(event: ITimesheetReminderEvent): Promise<void> {
   const departmentIds = await loadActiveDepartmentIds();
   if (departmentIds.length === 0) return;
 
@@ -178,13 +199,12 @@ async function processReminderEvent(event: { period: string; stage: string }): P
     let type = 'timesheet_reminder';
 
     if (event.stage === 'overdue') {
-      recipientIds = await listTimesheetWorkflowRecipientIds(departmentId, ['review', 'monitor']);
+      recipientIds = await listTimesheetReminderRecipientIds(departmentId, 'overdue');
       ({ title, body } = buildHrReminderMessage(event.period, departmentName));
-      path = getReviewPath(event.period, event.stage);
       type = 'timesheet_overdue';
     } else {
       ({ title, body } = buildDepartmentReminderMessage(event.period, departmentName, event.stage));
-      recipientIds = await listTimesheetWorkflowRecipientIds(departmentId, ['submit']);
+      recipientIds = await listTimesheetReminderRecipientIds(departmentId, event.stage);
     }
 
     if (recipientIds.length === 0) continue;
@@ -276,5 +296,4 @@ export const __private__ = {
   buildDepartmentReminderMessage,
   buildHrReminderMessage,
   getTimesheetPath,
-  getReviewPath,
 };

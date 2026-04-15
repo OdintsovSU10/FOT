@@ -7,6 +7,7 @@ import {
   type DataScope,
 } from '../config/access-control.js';
 import { getEffectiveAccess } from './access-control.service.js';
+import { getRoleByCode, getRoleById } from './roles-cache.service.js';
 
 type WorkflowRecipientKind = 'submit' | 'review' | 'monitor';
 
@@ -18,6 +19,7 @@ interface IUserProfileLite {
 }
 
 interface IRoleWorkflowAccess {
+  roleCode: string;
   permissions: string[];
   page_access: Record<string, { can_view: boolean; can_edit: boolean }>;
   dataScope: DataScope | null;
@@ -84,9 +86,11 @@ async function loadRoleWorkflowAccess(roleRefs: string[]): Promise<Map<string, I
   const uniqueRoleRefs = [...new Set(roleRefs.filter(Boolean))];
   const entries = await Promise.all(uniqueRoleRefs.map(async (roleRef) => {
     const effectiveAccess = await getEffectiveAccess(roleRef);
+    const resolvedRole = (await getRoleById(roleRef)) ?? (await getRoleByCode(roleRef));
     return [
       roleRef,
       {
+        roleCode: resolvedRole?.code || roleRef,
         permissions: effectiveAccess.permissions,
         page_access: effectiveAccess.page_access,
         dataScope: resolveDataScopeFromPermissions(effectiveAccess.permissions),
@@ -100,10 +104,23 @@ async function loadRoleWorkflowAccess(roleRefs: string[]): Promise<Map<string, I
 export async function listTimesheetWorkflowRecipientIds(
   departmentId: string,
   kinds: WorkflowRecipientKind[],
+  options?: {
+    excludeRoleCodes?: string[];
+    includeDataScopes?: DataScope[];
+  },
 ): Promise<string[]> {
   if (!departmentId || kinds.length === 0) {
     return [];
   }
+
+  const excludedRoleCodes = new Set(
+    (options?.excludeRoleCodes || [])
+      .map(code => code.trim())
+      .filter(Boolean),
+  );
+  const includedDataScopes = options?.includeDataScopes?.length
+    ? new Set(options.includeDataScopes)
+    : null;
 
   const { data, error } = await supabase
     .from('user_profiles')
@@ -140,6 +157,14 @@ export async function listTimesheetWorkflowRecipientIds(
 
     const roleAccess = roleAccessByRef.get(roleRef);
     if (!roleAccess) {
+      continue;
+    }
+
+    if (excludedRoleCodes.has(roleAccess.roleCode)) {
+      continue;
+    }
+
+    if (includedDataScopes && (!roleAccess.dataScope || !includedDataScopes.has(roleAccess.dataScope))) {
       continue;
     }
 
