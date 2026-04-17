@@ -1,3 +1,4 @@
+import { useCallback } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { skudService } from '../services/skudService';
 import type { IDashboardStats, DashboardPeriod } from '../types';
@@ -7,6 +8,7 @@ interface IUseDashboardStatsReturn {
   stats: IDashboardStats | null;
   loading: boolean;
   error: string | null;
+  refresh: () => void;
 }
 
 export const useDashboardStats = (
@@ -15,15 +17,9 @@ export const useDashboardStats = (
   month?: string,
 ): IUseDashboardStatsReturn => {
   const isVisible = useDocumentVisibility();
-  const refetchInterval = !isVisible
-    ? false
-    : period === 'today'
-      ? 120_000
-      : period === 'week'
-        ? 180_000
-        : 600_000;
+  const refetchInterval = isVisible ? 120_000 : false;
 
-  const { data, isLoading, error } = useQuery({
+  const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['dashboard-stats', departmentId, period, month],
     queryFn: ({ signal }) => skudService.getDashboardStats(departmentId!, period, signal, month),
     enabled: !!departmentId,
@@ -32,10 +28,14 @@ export const useDashboardStats = (
     refetchIntervalInBackground: false,
     staleTime: 60_000,
   });
+  const refresh = useCallback(() => {
+    void refetch();
+  }, [refetch]);
 
   return {
     stats: data ?? null,
     loading: isLoading,
     error: error ? 'Ошибка загрузки аналитики' : null,
+    refresh,
   };
 };

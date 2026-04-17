@@ -4,6 +4,7 @@ import { supabase } from '../config/database.js';
 import { auditService } from '../services/audit.service.js';
 import { loadStructureCache, decryptEmployee, decryptEmployeeList } from '../services/employee-mapper.service.js';
 import { employeeCache } from '../services/employee-cache.service.js';
+import { getKnownArchiveDepartment, reconcileFiredEmployeesArchiveDepartment } from '../services/employee-archive-department.service.js';
 import { parseFIO } from '../utils/fio.utils.js';
 import { employeeChangesService } from '../services/employee-changes.service.js';
 import {
@@ -12,7 +13,13 @@ import {
 } from '../services/sigur-linked-employees.service.js';
 import { sigurService } from '../services/sigur.service.js';
 import type { AuthenticatedRequest, EmployeeEncrypted } from '../types/index.js';
-import { canAccessEmployeeInScope, resolveRequestDataScope, resolveScopedDepartmentId } from '../services/data-scope.service.js';
+import {
+  canAccessEmployeeInScope,
+  resolveManagedDepartmentIds,
+  resolveRequestDataScope,
+  resolveScopedDepartmentId,
+} from '../services/data-scope.service.js';
+import { collectDeptIds } from '../services/skud-shared.service.js';
 
 // Полный список колонок employees для getById / lifecycle-хэндлеров
 const EMPLOYEE_FULL_COLUMNS = 'id, full_name, last_name, first_name, middle_name, current_salary, salary_actual, salary_calculated, staff_units, birth_date, hire_date, country, pension_number, patent_issue_date, patent_expiry_date, email, org_department_id, position_id, sigur_employee_id, tab_number, current_status, permit_expiry_date, registration_cat1, registration_cat4, doc_receipt_date, work_object, employment_status, department_locked, is_archived, archived_at, created_at, updated_at, work_category';
@@ -23,28 +30,43 @@ const countsCache = new Map<string, { data: ICountsPayload; expiresAt: number }>
 const COUNTS_TTL_MS = 60_000;
 
 // Импорт методов из подконтроллеров
-import { archive, restore, fire, rehire, moveDepartment, getHistory, updateHistoryEvent, deleteHistoryEvent } from './employee-lifecycle.controller.js';
+import { archive, restore, fire, rehire, moveDepartment, batchMoveEmployees, getHistory, updateHistoryEvent, deleteHistoryEvent } from './employee-lifecycle.controller.js';
 import { deleteAll } from './employee-import.controller.js';
+
+const ISO_DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
 
 // Схемы валидации
 const createEmployeeSchema = z.object({
   full_name: z.string().min(2).max(255).trim(),
-  hire_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  birth_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+  hire_date: z.string().regex(ISO_DATE_REGEX),
+  birth_date: z.string().regex(ISO_DATE_REGEX).nullable().optional(),
   current_salary: z.number().min(0).max(999999999).nullable().optional(),
   salary_actual: z.number().min(0).max(999999999).nullable().optional(),
   salary_calculated: z.number().min(0).max(999999999).nullable().optional(),
   staff_units: z.number().min(0).max(1).nullable().optional(),
   country: z.string().max(100).nullable().optional(),
   pension_number: z.string().max(50).nullable().optional(),
-  patent_issue_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
-  patent_expiry_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+  patent_issue_date: z.string().regex(ISO_DATE_REGEX).nullable().optional(),
+  patent_expiry_date: z.string().regex(ISO_DATE_REGEX).nullable().optional(),
   email: z.string().email().nullable().optional(),
+  tab_number: z.string().max(100).nullable().optional(),
+  current_status: z.string().max(255).nullable().optional(),
+  permit_expiry_date: z.string().regex(ISO_DATE_REGEX).nullable().optional(),
+  registration_cat1: z.string().max(255).nullable().optional(),
+  registration_cat4: z.string().max(255).nullable().optional(),
+  doc_receipt_date: z.string().regex(ISO_DATE_REGEX).nullable().optional(),
+  work_object: z.string().max(255).nullable().optional(),
   org_department_id: z.string().uuid().nullable().optional(),
   position_id: z.string().uuid().nullable().optional(),
 });
 
 const updateEmployeeSchema = createEmployeeSchema.partial();
+
+async function resolveDepartmentFilterIds(departmentId: string | undefined | null): Promise<string[] | null> {
+  if (!departmentId) return null;
+  const ids = await collectDeptIds(departmentId);
+  return ids.length > 0 ? ids : [departmentId];
+}
 
 export const employeesController = {
   /**
@@ -62,10 +84,14 @@ export const employeesController = {
         return;
       }
       const showArchived = req.query.archived === 'true';
-      const departmentId = await resolveScopedDepartmentId(
-        req,
-        typeof req.query.department_id === 'string' ? req.query.department_id : null,
-      );
+      const requestedDepartmentId = typeof req.query.department_id === 'string' ? req.query.department_id : null;
+      const departmentId = await resolveScopedDepartmentId(req, requestedDepartmentId);
+      const managedDepartmentIds = scope === 'department' && !requestedDepartmentId
+        ? await resolveManagedDepartmentIds(req)
+        : [];
+      const departmentFilterIds = requestedDepartmentId
+        ? await resolveDepartmentFilterIds(departmentId)
+        : (managedDepartmentIds.length > 0 ? managedDepartmentIds : await resolveDepartmentFilterIds(departmentId));
       const isListView = req.query.view === 'list';
       const listColumns = 'id, full_name, position_id, email, org_department_id, employment_status, department_locked, is_archived, archived_at, created_at, updated_at, work_category';
       const staffColumns = listColumns + ', salary_actual, salary_calculated, current_salary';
@@ -78,6 +104,12 @@ export const employeesController = {
         const search = (req.query.search as string || '').trim();
         const status = req.query.status as string | undefined; // 'active' | 'fired'
         const offset = (page - 1) * pageSize;
+        if (status === 'fired' && departmentId) {
+          const archiveDepartment = await getKnownArchiveDepartment();
+          if (archiveDepartment?.id === departmentId) {
+            await reconcileFiredEmployeesArchiveDepartment(req.user.id);
+          }
+        }
 
         // Main query with exact count
         const selectCols = req.query.view === 'staff' ? staffColumns : listColumns;
@@ -98,8 +130,10 @@ export const employeesController = {
             return;
           }
           q = q.eq('id', req.user.employee_id);
-        } else if (departmentId) {
-          q = q.eq('org_department_id', departmentId);
+        } else if (departmentFilterIds?.length) {
+          q = departmentFilterIds.length === 1
+            ? q.eq('org_department_id', departmentFilterIds[0])
+            : q.in('org_department_id', departmentFilterIds);
         }
         if (search) q = q.ilike('full_name', `%${search}%`);
         if (status === 'fired') q = q.eq('employment_status', 'fired');
@@ -151,8 +185,10 @@ export const employeesController = {
             break;
           }
           q = q.eq('id', req.user.employee_id);
-        } else if (departmentId) {
-          q = q.eq('org_department_id', departmentId);
+        } else if (departmentFilterIds?.length) {
+          q = departmentFilterIds.length === 1
+            ? q.eq('org_department_id', departmentFilterIds[0])
+            : q.in('org_department_id', departmentFilterIds);
         }
 
         const { data, error } = await q;
@@ -196,7 +232,7 @@ export const employeesController = {
         return;
       }
       const showArchived = req.query.archived === 'true';
-      const cacheKey = `counts:${showArchived ? 'archived' : 'active'}`;
+      const cacheKey = `counts:${scope}:${req.user.id}:${showArchived ? 'archived' : 'active'}`;
       const cached = countsCache.get(cacheKey);
       if (cached && cached.expiresAt > Date.now()) {
         res.setHeader('Cache-Control', 'private, max-age=30');
@@ -204,7 +240,9 @@ export const employeesController = {
         return;
       }
 
-      const scopedDepartmentId = await resolveScopedDepartmentId(req, null);
+      const scopedDepartmentFilterIds = scope === 'department'
+        ? await resolveManagedDepartmentIds(req)
+        : await resolveDepartmentFilterIds(await resolveScopedDepartmentId(req, null));
       let rowsQuery = supabase
         .from('employees')
         .select('id, org_department_id, employment_status')
@@ -217,8 +255,10 @@ export const employeesController = {
           return;
         }
         rowsQuery = rowsQuery.eq('id', req.user.employee_id);
-      } else if (scopedDepartmentId) {
-        rowsQuery = rowsQuery.eq('org_department_id', scopedDepartmentId);
+      } else if (scopedDepartmentFilterIds?.length) {
+        rowsQuery = scopedDepartmentFilterIds.length === 1
+          ? rowsQuery.eq('org_department_id', scopedDepartmentFilterIds[0])
+          : rowsQuery.in('org_department_id', scopedDepartmentFilterIds);
       }
 
       const { data: rows } = await rowsQuery;
@@ -312,12 +352,13 @@ export const employeesController = {
         res.status(403).json({ success: false, error: 'Недостаточно прав для создания сотрудника' });
         return;
       }
-      if (scope === 'department' && req.user.department_id) {
-        if (validated.org_department_id && validated.org_department_id !== req.user.department_id) {
-          res.status(403).json({ success: false, error: 'Можно создавать сотрудников только в своём отделе' });
+      if (scope === 'department') {
+        const scopedDepartmentId = await resolveScopedDepartmentId(req, validated.org_department_id ?? null);
+        if (!scopedDepartmentId) {
+          res.status(403).json({ success: false, error: 'Можно создавать сотрудников только в назначенных бригадах' });
           return;
         }
-        validated.org_department_id = req.user.department_id;
+        validated.org_department_id = scopedDepartmentId;
       }
 
       const fio = parseFIO(validated.full_name);
@@ -338,6 +379,13 @@ export const employeesController = {
         patent_issue_date: validated.patent_issue_date || null,
         patent_expiry_date: validated.patent_expiry_date || null,
         email: validated.email || null,
+        tab_number: validated.tab_number || null,
+        current_status: validated.current_status || null,
+        permit_expiry_date: validated.permit_expiry_date || null,
+        registration_cat1: validated.registration_cat1 || null,
+        registration_cat4: validated.registration_cat4 || null,
+        doc_receipt_date: validated.doc_receipt_date || null,
+        work_object: validated.work_object || null,
         org_department_id: validated.org_department_id || null,
         position_id: validated.position_id || null,
       };
@@ -385,9 +433,12 @@ export const employeesController = {
         return;
       }
       const scope = await resolveRequestDataScope(req);
-      if (scope === 'department' && req.user.department_id && validated.org_department_id && validated.org_department_id !== req.user.department_id) {
-        res.status(403).json({ success: false, error: 'Нельзя перевести сотрудника в другой отдел при department scope' });
-        return;
+      if (scope === 'department' && validated.org_department_id) {
+        const scopedDepartmentId = await resolveScopedDepartmentId(req, validated.org_department_id);
+        if (!scopedDepartmentId) {
+          res.status(403).json({ success: false, error: 'Нельзя перевести сотрудника в неназначенную бригаду при department scope' });
+          return;
+        }
       }
 
       const { data: existing } = await supabase
@@ -402,23 +453,104 @@ export const employeesController = {
       }
 
       if (existing.sigur_employee_id) {
-        const allowedKeys = new Set(['full_name']);
+        const linkedSigurManagedKeys = new Set(['full_name', 'tab_number']);
+        const linkedLocalAllowedKeys = new Set([
+          'birth_date',
+          'hire_date',
+          'staff_units',
+          'country',
+          'pension_number',
+          'patent_issue_date',
+          'patent_expiry_date',
+          'email',
+          'current_status',
+          'permit_expiry_date',
+          'registration_cat1',
+          'registration_cat4',
+          'doc_receipt_date',
+          'work_object',
+        ]);
+        const allowedKeys = new Set([...linkedSigurManagedKeys, ...linkedLocalAllowedKeys]);
         const providedKeys = Object.keys(validated).filter((key) => validated[key as keyof typeof validated] !== undefined);
         const forbiddenKeys = providedKeys.filter(key => !allowedKeys.has(key));
 
         if (forbiddenKeys.length > 0) {
           res.status(400).json({
             success: false,
-            error: 'Для сотрудников, связанных с Sigur, через эту форму можно менять только ФИО',
+            error: 'Для сотрудников, связанных с Sigur, через эту форму нельзя менять отдел, должность и оклады',
           });
           return;
         }
 
+        const sigurPayload: Record<string, unknown> = {};
         if (validated.full_name !== undefined) {
-          const normalizedFullName = validated.full_name.trim();
-          await sigurService.updateEmployee(existing.sigur_employee_id, {
-            name: normalizedFullName,
-          });
+          sigurPayload.name = validated.full_name.trim();
+        }
+        if (validated.tab_number !== undefined) {
+          sigurPayload.tabId = validated.tab_number?.trim() || null;
+        }
+
+        if (Object.keys(sigurPayload).length > 0) {
+          await sigurService.updateEmployee(existing.sigur_employee_id, sigurPayload);
+        }
+
+        const localUpdateData: Record<string, unknown> = {
+          updated_at: new Date().toISOString(),
+        };
+
+        if (validated.birth_date !== undefined) {
+          localUpdateData.birth_date = validated.birth_date || null;
+        }
+        if (validated.hire_date !== undefined) {
+          localUpdateData.hire_date = validated.hire_date;
+        }
+        if (validated.staff_units !== undefined) {
+          localUpdateData.staff_units = validated.staff_units ?? null;
+        }
+        if (validated.country !== undefined) {
+          localUpdateData.country = validated.country || null;
+        }
+        if (validated.pension_number !== undefined) {
+          localUpdateData.pension_number = validated.pension_number || null;
+        }
+        if (validated.patent_issue_date !== undefined) {
+          localUpdateData.patent_issue_date = validated.patent_issue_date || null;
+        }
+        if (validated.patent_expiry_date !== undefined) {
+          localUpdateData.patent_expiry_date = validated.patent_expiry_date || null;
+        }
+        if (validated.email !== undefined) {
+          localUpdateData.email = validated.email || null;
+        }
+        if (validated.current_status !== undefined) {
+          localUpdateData.current_status = validated.current_status || null;
+        }
+        if (validated.permit_expiry_date !== undefined) {
+          localUpdateData.permit_expiry_date = validated.permit_expiry_date || null;
+        }
+        if (validated.registration_cat1 !== undefined) {
+          localUpdateData.registration_cat1 = validated.registration_cat1 || null;
+        }
+        if (validated.registration_cat4 !== undefined) {
+          localUpdateData.registration_cat4 = validated.registration_cat4 || null;
+        }
+        if (validated.doc_receipt_date !== undefined) {
+          localUpdateData.doc_receipt_date = validated.doc_receipt_date || null;
+        }
+        if (validated.work_object !== undefined) {
+          localUpdateData.work_object = validated.work_object || null;
+        }
+
+        if (Object.keys(localUpdateData).length > 1) {
+          const { error: localUpdateError } = await supabase
+            .from('employees')
+            .update(localUpdateData)
+            .eq('id', id);
+
+          if (localUpdateError) {
+            res.status(500).json({ success: false, error: 'Failed to update employee' });
+            return;
+          }
         }
 
         await syncLinkedEmployeeFromSigur(employeeId);
@@ -485,7 +617,28 @@ export const employeesController = {
         updateData.patent_expiry_date = validated.patent_expiry_date || null;
       }
       if (validated.email !== undefined) {
-        updateData.email = validated.email;
+        updateData.email = validated.email || null;
+      }
+      if (validated.tab_number !== undefined) {
+        updateData.tab_number = validated.tab_number || null;
+      }
+      if (validated.current_status !== undefined) {
+        updateData.current_status = validated.current_status || null;
+      }
+      if (validated.permit_expiry_date !== undefined) {
+        updateData.permit_expiry_date = validated.permit_expiry_date || null;
+      }
+      if (validated.registration_cat1 !== undefined) {
+        updateData.registration_cat1 = validated.registration_cat1 || null;
+      }
+      if (validated.registration_cat4 !== undefined) {
+        updateData.registration_cat4 = validated.registration_cat4 || null;
+      }
+      if (validated.doc_receipt_date !== undefined) {
+        updateData.doc_receipt_date = validated.doc_receipt_date || null;
+      }
+      if (validated.work_object !== undefined) {
+        updateData.work_object = validated.work_object || null;
       }
       if (validated.org_department_id !== undefined) {
         updateData.org_department_id = validated.org_department_id;
@@ -750,6 +903,7 @@ export const employeesController = {
   fire,
   rehire,
   moveDepartment,
+  batchMoveEmployees,
   getHistory,
   updateHistoryEvent,
   deleteHistoryEvent,

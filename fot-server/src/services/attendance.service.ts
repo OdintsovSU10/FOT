@@ -1,7 +1,7 @@
 import { supabase } from '../config/database.js';
 import type { IProductionCalendarMonth, IResolvedSchedule, TimeStatus } from '../types/index.js';
 import { getTravelHoursSummaryForRange } from './skud-travel.service.js';
-import { getScheduleForDate, isWorkingDay, needsSkudCheck } from './schedule.service.js';
+import { getScheduleForDate, isWorkingDay, needsSkudCheck, resolveObjectSchedulesForPeriod } from './schedule.service.js';
 import { formatDateToISO } from '../utils/date.utils.js';
 import {
   buildObjectAttendanceData,
@@ -91,30 +91,13 @@ function clampToScheduleHours(value: number, plannedHours: number): number {
   return roundHours(Math.max(0, Math.min(value, plannedHours)));
 }
 
-function distributeDisplayHours(values: number[], total: number): number[] {
-  if (values.length === 0) return [];
-  if (total <= 0) return values.map(() => 0);
-
-  const totalActual = values.reduce((sum, value) => sum + value, 0);
-  if (totalActual <= 0 || total >= totalActual) {
-    return values.map(value => roundHours(value));
-  }
-
-  const rawShares = values.map(value => (value / totalActual) * total);
-  const flooredShares = rawShares.map(value => Math.floor(value * 100) / 100);
-  let remainder = Math.round((total - flooredShares.reduce((sum, value) => sum + value, 0)) * 100);
-
-  const byFraction = rawShares
-    .map((value, index) => ({ index, fraction: value - flooredShares[index] }))
-    .sort((left, right) => right.fraction - left.fraction);
-
-  for (const item of byFraction) {
-    if (remainder <= 0) break;
-    flooredShares[item.index] = roundHours(flooredShares[item.index] + 0.01);
-    remainder -= 1;
-  }
-
-  return flooredShares.map(value => roundHours(value));
+function getPlannedHoursForScheduleOnDate(
+  schedule: IResolvedSchedule | null | undefined,
+  workDate: string,
+): number | null {
+  if (!schedule) return null;
+  const [yearPart, monthPart, dayPart] = workDate.split('-').map(Number);
+  return getScheduleForDate(schedule, new Date(yearPart, monthPart - 1, dayPart)).work_hours;
 }
 
 function getSummaryHours(summary: ISummaryRow): number {
@@ -251,6 +234,15 @@ export async function buildAttendanceEntries(params: {
     todayStr,
     adjustments,
   });
+  const objectSchedulesByDate = displayMode === 'capped_to_schedule'
+    ? await resolveObjectSchedulesForPeriod(
+        objectAttendanceData.objectEntries
+          .map(entry => entry.object_id)
+          .filter((objectId): objectId is string => Boolean(objectId)),
+        startDate,
+        endDate,
+      )
+    : new Map<string, Map<string, IResolvedSchedule>>();
   const dailyAdjustments = adjustments.filter(adjustment => adjustment.source_type !== OBJECT_ADJUSTMENT_SOURCE_TYPE);
   const { userNames, legacyEmployeeNames } = await loadAdjustmentNames(dailyAdjustments);
   const entries: IAttendanceEntry[] = [];
@@ -482,29 +474,32 @@ export async function buildAttendanceEntries(params: {
 
   if (displayMode === 'capped_to_schedule') {
     for (const entry of entries) {
-      const schedule = dailySchedulesMap.get(entry.employee_id)?.get(entry.work_date);
-      if (entry.hours_worked == null || !schedule) {
-        entry.display_hours_worked = entry.hours_worked;
-        continue;
-      }
-
-      const [yearPart, monthPart, dayPart] = entry.work_date.split('-').map(Number);
-      const plannedHours = getScheduleForDate(schedule, new Date(yearPart, monthPart - 1, dayPart)).work_hours;
-      entry.display_hours_worked = clampToScheduleHours(entry.hours_worked, plannedHours);
-
       const dayObjectEntries = objectAttendanceData.objectEntriesByEmployeeDate
         .get(entry.employee_id)
         ?.get(entry.work_date) || [];
-      if (dayObjectEntries.length === 0) continue;
+      if (dayObjectEntries.length > 0) {
+        let totalDisplayHours = 0;
+        for (const item of dayObjectEntries) {
+          const objectSchedule = item.object_id
+            ? objectSchedulesByDate.get(item.object_id)?.get(item.work_date)
+            : null;
+          const employeeSchedule = dailySchedulesMap.get(item.employee_id)?.get(item.work_date);
+          const effectiveSchedule = objectSchedule || employeeSchedule || null;
+          const plannedHours = getPlannedHoursForScheduleOnDate(effectiveSchedule, item.work_date);
+          item.display_hours_worked = plannedHours == null
+            ? item.hours_worked
+            : clampToScheduleHours(item.hours_worked, plannedHours);
+          totalDisplayHours += item.display_hours_worked;
+        }
+        entry.display_hours_worked = roundHours(totalDisplayHours);
+        continue;
+      }
 
-      const distributed = distributeDisplayHours(
-        dayObjectEntries.map(item => item.hours_worked),
-        entry.display_hours_worked ?? 0,
-      );
-
-      dayObjectEntries.forEach((item, index) => {
-        item.display_hours_worked = distributed[index] ?? 0;
-      });
+      const schedule = dailySchedulesMap.get(entry.employee_id)?.get(entry.work_date);
+      const plannedHours = getPlannedHoursForScheduleOnDate(schedule, entry.work_date);
+      entry.display_hours_worked = entry.hours_worked == null || plannedHours == null
+        ? entry.hours_worked
+        : clampToScheduleHours(entry.hours_worked, plannedHours);
     }
   }
 

@@ -1,6 +1,7 @@
 import { Response } from 'express';
 import { supabase } from '../config/database.js';
 import { auditService } from '../services/audit.service.js';
+import { getKnownArchiveDepartment, isProtectedArchiveDepartment } from '../services/employee-archive-department.service.js';
 import { invalidateDeptTreeCache } from '../services/skud-shared.service.js';
 import type {
   AuthenticatedRequest,
@@ -9,9 +10,16 @@ import type {
   OrgDepartmentNode,
 } from '../types/index.js';
 
-/**
- * Расшифровка отдела
- */
+interface IHttpError extends Error {
+  status?: number;
+}
+
+function createHttpError(status: number, message: string): IHttpError {
+  const error = new Error(message) as IHttpError;
+  error.status = status;
+  return error;
+}
+
 function decryptDepartment(encrypted: OrgDepartmentEncrypted): OrgDepartment {
   return {
     id: encrypted.id,
@@ -26,44 +34,149 @@ function decryptDepartment(encrypted: OrgDepartmentEncrypted): OrgDepartment {
   };
 }
 
-/**
- * Рекурсивное построение дерева отделов
- */
 function buildDepartmentTree(
   allDepts: OrgDepartment[],
   parentId: string | null,
 ): OrgDepartmentNode[] {
   return allDepts
-    .filter(d => d.parent_id === parentId)
-    .sort((a, b) => a.sort_order - b.sort_order)
-    .map(dept => ({
-      ...dept,
-      children: buildDepartmentTree(allDepts, dept.id),
+    .filter(department => department.parent_id === parentId)
+    .sort((left, right) => left.sort_order - right.sort_order)
+    .map(department => ({
+      ...department,
+      children: buildDepartmentTree(allDepts, department.id),
     }));
 }
 
+async function loadAllActiveDepartments(): Promise<OrgDepartment[]> {
+  const { data, error } = await supabase
+    .from('org_departments')
+    .select('*')
+    .eq('is_active', true)
+    .order('sort_order');
+
+  if (error) {
+    throw error;
+  }
+
+  return ((data || []) as OrgDepartmentEncrypted[]).map(decryptDepartment);
+}
+
+function buildDepartmentMap(departments: OrgDepartment[]): Map<string, OrgDepartment> {
+  return new Map(departments.map(department => [department.id, department]));
+}
+
+function collectDescendantIds(
+  rootId: string,
+  childrenByParent: Map<string | null, OrgDepartment[]>,
+): Set<string> {
+  const ids = new Set<string>();
+  const stack = [rootId];
+
+  while (stack.length > 0) {
+    const current = stack.pop()!;
+    if (ids.has(current)) continue;
+    ids.add(current);
+
+    for (const child of childrenByParent.get(current) || []) {
+      stack.push(child.id);
+    }
+  }
+
+  return ids;
+}
+
+function buildChildrenMap(departments: OrgDepartment[]): Map<string | null, OrgDepartment[]> {
+  const map = new Map<string | null, OrgDepartment[]>();
+  for (const department of departments) {
+    const bucket = map.get(department.parent_id) || [];
+    bucket.push(department);
+    map.set(department.parent_id, bucket);
+  }
+  return map;
+}
+
+function collapseSelectedDepartments(
+  selectedIds: string[],
+  departmentMap: Map<string, OrgDepartment>,
+): string[] {
+  const selected = new Set(selectedIds);
+  return selectedIds.filter(departmentId => {
+    let currentParent = departmentMap.get(departmentId)?.parent_id || null;
+    while (currentParent) {
+      if (selected.has(currentParent)) {
+        return false;
+      }
+      currentParent = departmentMap.get(currentParent)?.parent_id || null;
+    }
+    return true;
+  });
+}
+
+async function ensureDepartmentIsMutable(departmentId: string): Promise<void> {
+  if (await isProtectedArchiveDepartment(departmentId)) {
+    throw createHttpError(409, 'Системную папку "Уволенные" нельзя изменять или удалять');
+  }
+}
+
+async function ensureParentIsAllowed(parentId: string | null): Promise<void> {
+  if (!parentId) return;
+  if (await isProtectedArchiveDepartment(parentId)) {
+    throw createHttpError(409, 'Нельзя вкладывать отделы в системную папку "Уволенные"');
+  }
+}
+
+async function ensureDepartmentIsEmpty(departmentId: string, allDepartments: OrgDepartment[]): Promise<void> {
+  if (allDepartments.some(department => department.parent_id === departmentId)) {
+    throw createHttpError(409, 'Отдел содержит вложенные отделы. Используйте рекурсивное удаление.');
+  }
+
+  const { count, error } = await supabase
+    .from('employees')
+    .select('id', { count: 'exact', head: true })
+    .eq('org_department_id', departmentId);
+
+  if (error) {
+    throw error;
+  }
+
+  if ((count || 0) > 0) {
+    throw createHttpError(409, 'Отдел не пуст. Сначала переместите сотрудников или используйте рекурсивное удаление.');
+  }
+}
+
+function validateParentMove(
+  departmentId: string,
+  parentId: string | null,
+  childrenByParent: Map<string | null, OrgDepartment[]>,
+): void {
+  if (!parentId) return;
+  if (parentId === departmentId) {
+    throw createHttpError(400, 'Нельзя сделать отдел родителем самого себя');
+  }
+
+  const descendants = collectDescendantIds(departmentId, childrenByParent);
+  if (descendants.has(parentId)) {
+    throw createHttpError(400, 'Нельзя переместить отдел в самого себя или своего потомка');
+  }
+}
+
+function getStatus(error: unknown): number | null {
+  if (!error || typeof error !== 'object') return null;
+  const value = 'status' in error ? Number(error.status) : Number.NaN;
+  return Number.isFinite(value) ? value : null;
+}
+
+function getMessage(error: unknown, fallback: string): string {
+  return error instanceof Error && error.message ? error.message : fallback;
+}
+
 export const structureController = {
-  /**
-   * GET /api/structure
-   * Получение полного дерева структуры организации
-   */
   async getTree(_req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
-      const { data: departmentsData, error } = await supabase
-        .from('org_departments')
-        .select('*')
-        .eq('is_active', true)
-        .order('sort_order');
-
-      if (error) {
-        console.error('Get structure error:', error);
-        res.status(500).json({ success: false, error: 'Ошибка получения структуры' });
-        return;
-      }
-
-      const departments = ((departmentsData || []) as OrgDepartmentEncrypted[]).map(decryptDepartment);
-
-      // Строим рекурсивное дерево (корневые — parent_id = null)
+      const [departments, archiveDepartment] = await Promise.all([
+        loadAllActiveDepartments(),
+        getKnownArchiveDepartment(),
+      ]);
       const departmentTree = buildDepartmentTree(departments, null);
 
       res.setHeader('Cache-Control', 'private, max-age=120');
@@ -73,6 +186,7 @@ export const structureController = {
           departments: departmentTree,
           stats: {
             departments: departments.length,
+            archive_department_id: archiveDepartment?.id || null,
           },
         },
       });
@@ -82,30 +196,46 @@ export const structureController = {
     }
   },
 
-  /**
-   * POST /api/structure/departments
-   * Создание отдела
-   */
   async createDepartment(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
-      const { name, description, parent_id } = req.body;
+      const name = typeof req.body.name === 'string' ? req.body.name.trim() : '';
+      const description = typeof req.body.description === 'string' ? req.body.description.trim() : null;
+      const parentId = typeof req.body.parent_id === 'string' && req.body.parent_id.trim()
+        ? req.body.parent_id.trim()
+        : null;
 
-      if (!name || name.trim().length < 1) {
+      if (!name) {
         res.status(400).json({ success: false, error: 'Название обязательно' });
         return;
       }
 
+      if (parentId) {
+        const parent = await supabase
+          .from('org_departments')
+          .select('id')
+          .eq('id', parentId)
+          .eq('is_active', true)
+          .maybeSingle();
+
+        if (!parent.data) {
+          res.status(400).json({ success: false, error: 'Родительский отдел не найден' });
+          return;
+        }
+      }
+
+      await ensureParentIsAllowed(parentId);
+
       const { data, error } = await supabase
         .from('org_departments')
         .insert({
-          parent_id: parent_id || null,
-          name: name.trim(),
-          description: description ? description.trim() : null,
+          parent_id: parentId,
+          name,
+          description,
         })
         .select()
         .single();
 
-      if (error) {
+      if (error || !data) {
         console.error('Create department error:', error);
         res.status(500).json({ success: false, error: 'Ошибка создания отдела' });
         return;
@@ -119,17 +249,208 @@ export const structureController = {
 
       res.status(201).json({ success: true, data: decryptDepartment(data as OrgDepartmentEncrypted) });
     } catch (error) {
+      const status = getStatus(error);
+      if (status) {
+        res.status(status).json({ success: false, error: getMessage(error, 'Ошибка создания отдела') });
+        return;
+      }
+
       console.error('Create department error:', error);
       res.status(500).json({ success: false, error: 'Ошибка создания отдела' });
     }
   },
 
-  /**
-   * DELETE /api/structure/departments/:id
-   */
+  async updateDepartment(req: AuthenticatedRequest, res: Response): Promise<void> {
+    try {
+      const { id } = req.params;
+      const hasName = Object.prototype.hasOwnProperty.call(req.body, 'name');
+      const hasParent = Object.prototype.hasOwnProperty.call(req.body, 'parent_id');
+
+      if (!hasName && !hasParent) {
+        res.status(400).json({ success: false, error: 'Нет данных для обновления отдела' });
+        return;
+      }
+
+      const departments = await loadAllActiveDepartments();
+      const departmentMap = buildDepartmentMap(departments);
+      const childrenByParent = buildChildrenMap(departments);
+      const current = departmentMap.get(id);
+
+      if (!current) {
+        res.status(404).json({ success: false, error: 'Отдел не найден' });
+        return;
+      }
+
+      await ensureDepartmentIsMutable(id);
+
+      const name = hasName ? String(req.body.name || '').trim() : current.name;
+      const parentId = hasParent
+        ? (typeof req.body.parent_id === 'string' && req.body.parent_id.trim() ? req.body.parent_id.trim() : null)
+        : current.parent_id;
+
+      if (!name) {
+        res.status(400).json({ success: false, error: 'Название обязательно' });
+        return;
+      }
+
+      if (parentId && !departmentMap.has(parentId)) {
+        res.status(400).json({ success: false, error: 'Родительский отдел не найден' });
+        return;
+      }
+
+      await ensureParentIsAllowed(parentId);
+      validateParentMove(id, parentId, childrenByParent);
+
+      const updateData: Record<string, unknown> = {};
+      if (name !== current.name) updateData.name = name;
+      if (parentId !== current.parent_id) updateData.parent_id = parentId;
+
+      if (Object.keys(updateData).length === 0) {
+        res.json({ success: true, data: current });
+        return;
+      }
+
+      const { data, error } = await supabase
+        .from('org_departments')
+        .update(updateData)
+        .eq('id', id)
+        .select()
+        .single();
+
+      if (error || !data) {
+        console.error('Update department error:', error);
+        res.status(500).json({ success: false, error: 'Ошибка обновления отдела' });
+        return;
+      }
+
+      invalidateDeptTreeCache();
+      await auditService.logFromRequest(req, req.user.id, 'UPDATE_ORG_DEPARTMENT', {
+        entityType: 'org_department',
+        entityId: id,
+        details: updateData,
+      });
+
+      res.json({ success: true, data: decryptDepartment(data as OrgDepartmentEncrypted) });
+    } catch (error) {
+      const status = getStatus(error);
+      if (status) {
+        res.status(status).json({ success: false, error: getMessage(error, 'Ошибка обновления отдела') });
+        return;
+      }
+
+      console.error('Update department error:', error);
+      res.status(500).json({ success: false, error: 'Ошибка обновления отдела' });
+    }
+  },
+
+  async batchMoveDepartments(req: AuthenticatedRequest, res: Response): Promise<void> {
+    try {
+      const parentId = typeof req.body.parent_id === 'string' && req.body.parent_id.trim()
+        ? req.body.parent_id.trim()
+        : null;
+      const rawDepartmentIds = Array.isArray(req.body.department_ids) ? req.body.department_ids : [];
+      const selectedIds: string[] = Array.from(
+        new Set(
+          rawDepartmentIds.filter(
+            (value: unknown): value is string => typeof value === 'string' && value.trim().length > 0,
+          ),
+        ),
+      );
+
+      if (selectedIds.length === 0) {
+        res.status(400).json({ success: false, error: 'department_ids required' });
+        return;
+      }
+
+      const departments = await loadAllActiveDepartments();
+      const departmentMap = buildDepartmentMap(departments);
+      const childrenByParent = buildChildrenMap(departments);
+
+      if (parentId && !departmentMap.has(parentId)) {
+        res.status(400).json({ success: false, error: 'Родительский отдел не найден' });
+        return;
+      }
+
+      await ensureParentIsAllowed(parentId);
+
+      const normalizedIds = selectedIds.filter(id => departmentMap.has(id));
+      if (normalizedIds.length === 0) {
+        res.status(404).json({ success: false, error: 'Отделы не найдены' });
+        return;
+      }
+
+      const topLevelIds = collapseSelectedDepartments(normalizedIds, departmentMap);
+      for (const departmentId of topLevelIds) {
+        await ensureDepartmentIsMutable(departmentId);
+        validateParentMove(departmentId, parentId, childrenByParent);
+      }
+
+      const movedIds: string[] = [];
+      const skippedIds: string[] = [];
+
+      for (const departmentId of topLevelIds) {
+        const current = departmentMap.get(departmentId)!;
+        if (current.parent_id === parentId) {
+          skippedIds.push(departmentId);
+          continue;
+        }
+
+        const { error } = await supabase
+          .from('org_departments')
+          .update({ parent_id: parentId })
+          .eq('id', departmentId);
+
+        if (error) {
+          throw error;
+        }
+
+        movedIds.push(departmentId);
+      }
+
+      invalidateDeptTreeCache();
+      await auditService.logFromRequest(req, req.user.id, 'MOVE_ORG_DEPARTMENT_BATCH', {
+        details: {
+          parent_id: parentId,
+          moved_ids: movedIds,
+          skipped_ids: skippedIds,
+        },
+      });
+
+      res.json({
+        success: true,
+        data: {
+          parent_id: parentId,
+          moved_count: movedIds.length,
+          skipped_count: skippedIds.length,
+          moved_ids: movedIds,
+          skipped_ids: skippedIds,
+        },
+      });
+    } catch (error) {
+      const status = getStatus(error);
+      if (status) {
+        res.status(status).json({ success: false, error: getMessage(error, 'Ошибка перемещения отделов') });
+        return;
+      }
+
+      console.error('Batch move departments error:', error);
+      res.status(500).json({ success: false, error: 'Ошибка перемещения отделов' });
+    }
+  },
+
   async deleteDepartment(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
       const { id } = req.params;
+      const departments = await loadAllActiveDepartments();
+      const current = departments.find(department => department.id === id) || null;
+
+      if (!current) {
+        res.status(404).json({ success: false, error: 'Отдел не найден' });
+        return;
+      }
+
+      await ensureDepartmentIsMutable(id);
+      await ensureDepartmentIsEmpty(id, departments);
 
       const { error } = await supabase
         .from('org_departments')
@@ -150,18 +471,121 @@ export const structureController = {
 
       res.json({ success: true, message: 'Отдел удалён' });
     } catch (error) {
+      const status = getStatus(error);
+      if (status) {
+        res.status(status).json({ success: false, error: getMessage(error, 'Ошибка удаления отдела') });
+        return;
+      }
+
       console.error('Delete department error:', error);
       res.status(500).json({ success: false, error: 'Ошибка удаления отдела' });
     }
   },
 
-  /**
-   * DELETE /api/structure/clear
-   * Очистка всей структуры: удаление сотрудников и отделов организации
-   */
+  async deleteDepartmentRecursive(req: AuthenticatedRequest, res: Response): Promise<void> {
+    try {
+      const { id } = req.params;
+      const departments = await loadAllActiveDepartments();
+      const departmentMap = buildDepartmentMap(departments);
+      const childrenByParent = buildChildrenMap(departments);
+      const root = departmentMap.get(id);
+
+      if (!root) {
+        res.status(404).json({ success: false, error: 'Отдел не найден' });
+        return;
+      }
+
+      await ensureDepartmentIsMutable(id);
+
+      const subtreeIds = collectDescendantIds(id, childrenByParent);
+      for (const departmentId of subtreeIds) {
+        if (departmentId !== id && (await isProtectedArchiveDepartment(departmentId))) {
+          throw createHttpError(409, 'Нельзя удалить ветку, содержащую системную папку "Уволенные"');
+        }
+      }
+
+      const subtreeList = [...subtreeIds];
+      const targetParentId = root.parent_id;
+      const timestamp = new Date().toISOString();
+
+      const { error: employeesError } = await supabase
+        .from('employees')
+        .update({
+          org_department_id: targetParentId,
+          updated_at: timestamp,
+        })
+        .in('org_department_id', subtreeList);
+
+      if (employeesError) {
+        throw employeesError;
+      }
+
+      const { error: assignmentsError } = await supabase
+        .from('employee_assignments')
+        .update({
+          org_department_id: targetParentId,
+          updated_at: timestamp,
+        })
+        .in('org_department_id', subtreeList);
+
+      if (assignmentsError) {
+        throw assignmentsError;
+      }
+
+      const depthOf = (departmentId: string): number => {
+        let depth = 0;
+        let current = departmentMap.get(departmentId) || null;
+        while (current?.parent_id) {
+          depth += 1;
+          current = departmentMap.get(current.parent_id) || null;
+        }
+        return depth;
+      };
+
+      const orderedIds = subtreeList.sort((left, right) => depthOf(right) - depthOf(left));
+      for (const departmentId of orderedIds) {
+        const { error } = await supabase
+          .from('org_departments')
+          .delete()
+          .eq('id', departmentId);
+
+        if (error) {
+          throw error;
+        }
+      }
+
+      invalidateDeptTreeCache();
+      await auditService.logFromRequest(req, req.user.id, 'DELETE_ORG_DEPARTMENT_RECURSIVE', {
+        entityType: 'org_department',
+        entityId: id,
+        details: {
+          target_parent_id: targetParentId,
+          deleted_department_ids: orderedIds,
+        },
+      });
+
+      res.json({
+        success: true,
+        data: {
+          deleted_count: orderedIds.length,
+          deleted_department_ids: orderedIds,
+          target_parent_id: targetParentId,
+        },
+      });
+    } catch (error) {
+      const status = getStatus(error);
+      if (status) {
+        res.status(status).json({ success: false, error: getMessage(error, 'Ошибка рекурсивного удаления отдела') });
+        return;
+      }
+
+      console.error('Delete department recursive error:', error);
+      res.status(500).json({ success: false, error: 'Ошибка рекурсивного удаления отдела' });
+    }
+  },
+
   async clearStructure(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
-      // 1. Удаляем всех сотрудников
       const { count: employeesDeleted, error: empError } = await supabase
         .from('employees')
         .delete({ count: 'exact' })
@@ -173,7 +597,6 @@ export const structureController = {
         return;
       }
 
-      // 2. Удаляем все отделы
       const { count: departmentsDeleted, error: deptError } = await supabase
         .from('org_departments')
         .delete({ count: 'exact' })
@@ -203,13 +626,7 @@ export const structureController = {
     }
   },
 
-  /**
-   * Внутренний метод: найти или создать отдел по имени
-   */
-  async findOrCreateDepartment(
-    name: string,
-    parentId: string | null
-  ): Promise<string | null> {
+  async findOrCreateDepartment(name: string, parentId: string | null): Promise<string | null> {
     if (!name || !name.trim()) return null;
 
     const trimmedName = name.trim();
@@ -226,10 +643,9 @@ export const structureController = {
     }
 
     const { data: existing } = await query;
-
-    const found = (existing || []).find((d: { name: string }) => {
-      return (d.name || '').toLowerCase() === trimmedName.toLowerCase();
-    });
+    const found = (existing || []).find((department: { name: string }) => (
+      (department.name || '').toLowerCase() === trimmedName.toLowerCase()
+    ));
 
     if (found) {
       return found.id;
@@ -264,6 +680,7 @@ export const structureController = {
         res.status(500).json({ success: false, error: 'Failed to fetch positions' });
         return;
       }
+
       res.json({ success: true, data: data || [] });
     } catch (error) {
       console.error('Get positions error:', error);

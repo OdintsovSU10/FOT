@@ -15,9 +15,11 @@ export interface IUserFromApi {
   full_name: string | null;
   department_id: string | null;
   department_name: string | null;
+  additional_department_ids: string[];
+  managed_department_ids: string[];
   position_type: EmployeePositionType;
   imported_position: string | null;
-  employee_id: string | null;
+  employee_id: number | null;
   supervisor_id: string | null;
   chat_inbound_mode: ChatInboundMode;
   is_approved: boolean;
@@ -46,6 +48,17 @@ interface IAllUsersTabProps {
   onReload: () => Promise<void>;
 }
 
+const normalizeAdditionalDepartmentIds = (departmentIds: string[], primaryDepartmentId: string | null): string[] => (
+  [...new Set(departmentIds.filter(Boolean))].filter(departmentId => departmentId !== primaryDepartmentId)
+);
+
+const areDepartmentSelectionsEqual = (left: string[], right: string[]): boolean => {
+  if (left.length !== right.length) return false;
+  const normalizedLeft = [...left].sort();
+  const normalizedRight = [...right].sort();
+  return normalizedLeft.every((value, index) => value === normalizedRight[index]);
+};
+
 export const AllUsersTab: FC<IAllUsersTabProps> = ({ allUsers, onReload }) => {
   const toast = useToast();
   const { roles, getRoleLabel, profile, refreshProfile } = useAuth();
@@ -54,6 +67,9 @@ export const AllUsersTab: FC<IAllUsersTabProps> = ({ allUsers, onReload }) => {
   const [expandedUserId, setExpandedUserId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState<{ userId: string; value: string } | null>(null);
   const [empSearch, setEmpSearch] = useState<IEmpSearch | null>(null);
+  const [departmentAccessDrafts, setDepartmentAccessDrafts] = useState<Record<string, string[]>>({});
+  const [departmentAccessQuery, setDepartmentAccessQuery] = useState<Record<string, string>>({});
+  const [savingDepartmentAccessUserId, setSavingDepartmentAccessUserId] = useState<string | null>(null);
   const [twoFactorModal, setTwoFactorModal] = useState<ITwoFactorModal>({
     visible: false,
     userId: '',
@@ -64,6 +80,10 @@ export const AllUsersTab: FC<IAllUsersTabProps> = ({ allUsers, onReload }) => {
   const flatDepts = useMemo(
     () => getSortedFlatDepartments(structureQuery.data?.departments || []),
     [structureQuery.data?.departments],
+  );
+  const departmentMap = useMemo(
+    () => new Map(flatDepts.map(department => [department.id, department])),
+    [flatDepts],
   );
 
   const roleOptions = useMemo(() => {
@@ -186,6 +206,57 @@ export const AllUsersTab: FC<IAllUsersTabProps> = ({ allUsers, onReload }) => {
     }
   };
 
+  const getAdditionalDepartmentIds = (user: IUserFromApi): string[] => (
+    normalizeAdditionalDepartmentIds(
+      departmentAccessDrafts[user.id] ?? user.additional_department_ids ?? [],
+      user.department_id,
+    )
+  );
+
+  const handleDepartmentAccessToggle = (user: IUserFromApi, departmentId: string) => {
+    const currentDepartmentIds = getAdditionalDepartmentIds(user);
+    const nextDepartmentIds = currentDepartmentIds.includes(departmentId)
+      ? currentDepartmentIds.filter(id => id !== departmentId)
+      : [...currentDepartmentIds, departmentId];
+
+    setDepartmentAccessDrafts(prev => ({
+      ...prev,
+      [user.id]: normalizeAdditionalDepartmentIds(nextDepartmentIds, user.department_id),
+    }));
+  };
+
+  const handleDepartmentAccessReset = (user: IUserFromApi) => {
+    setDepartmentAccessDrafts(prev => ({
+      ...prev,
+      [user.id]: normalizeAdditionalDepartmentIds(user.additional_department_ids ?? [], user.department_id),
+    }));
+    setDepartmentAccessQuery(prev => ({
+      ...prev,
+      [user.id]: '',
+    }));
+  };
+
+  const handleDepartmentAccessSave = async (user: IUserFromApi) => {
+    const additionalDepartmentIds = getAdditionalDepartmentIds(user);
+    setSavingDepartmentAccessUserId(user.id);
+    try {
+      const response = await adminService.updateUserDepartmentAccess(user.id, additionalDepartmentIds);
+      setDepartmentAccessDrafts(prev => ({
+        ...prev,
+        [user.id]: normalizeAdditionalDepartmentIds(response.additional_department_ids, user.department_id),
+      }));
+      toast.success('Дополнительные доступы сохранены');
+      await onReload();
+      if (profile?.id === user.id) {
+        await refreshProfile();
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Ошибка сохранения доступов');
+    } finally {
+      setSavingDepartmentAccessUserId(null);
+    }
+  };
+
   const handleDeleteUser = async (userId: string) => {
     if (!confirm('Удалить пользователя из системы? Это действие необратимо.')) return;
     try {
@@ -266,6 +337,20 @@ export const AllUsersTab: FC<IAllUsersTabProps> = ({ allUsers, onReload }) => {
 
         {filteredUsers.map(user => {
           const isExpanded = expandedUserId === user.id;
+          const additionalDepartmentIds = getAdditionalDepartmentIds(user);
+          const initialDepartmentIds = normalizeAdditionalDepartmentIds(user.additional_department_ids ?? [], user.department_id);
+          const hasDepartmentAccessChanges = !areDepartmentSelectionsEqual(additionalDepartmentIds, initialDepartmentIds);
+          const availableAdditionalDepartments = flatDepts.filter(department => department.id !== user.department_id);
+          const departmentSearchQuery = (departmentAccessQuery[user.id] || '').trim().toLowerCase();
+          const filteredAdditionalDepartments = availableAdditionalDepartments.filter(department => (
+            !departmentSearchQuery || department.name.toLowerCase().includes(departmentSearchQuery)
+          ));
+          const selectedDepartments = additionalDepartmentIds
+            .map(departmentId => departmentMap.get(departmentId) || {
+              id: departmentId,
+              name: `Не найденный отдел (${departmentId.slice(0, 8)})`,
+              level: 0,
+            });
           const assignableRoles = roles
             .filter(role => role.is_active || role.code === user.position_type);
 
@@ -451,6 +536,100 @@ export const AllUsersTab: FC<IAllUsersTabProps> = ({ allUsers, onReload }) => {
                           ))}
                         </div>
                       )}
+                    </div>
+
+                    <div className={styles.departmentAccessSection}>
+                      <div className={styles.departmentAccessHeader}>
+                        <div>
+                          <div className={styles.departmentAccessTitle}>Дополнительный доступ к отделам и бригадам</div>
+                          <div className={styles.departmentAccessHint}>
+                            Основной отдел назначается отдельно. Здесь можно вручную добавить ещё подразделения,
+                            которые руководитель будет видеть в табелях и связанных разделах.
+                          </div>
+                        </div>
+                        <div className={styles.departmentAccessCount}>
+                          {additionalDepartmentIds.length} выбрано
+                        </div>
+                      </div>
+
+                      <div className={styles.departmentAccessPrimary}>
+                        Основной отдел: <strong>{getDeptName(user)}</strong>
+                      </div>
+
+                      <input
+                        type="text"
+                        placeholder="Поиск отдела или бригады..."
+                        value={departmentAccessQuery[user.id] || ''}
+                        onChange={(e) => setDepartmentAccessQuery(prev => ({
+                          ...prev,
+                          [user.id]: e.target.value,
+                        }))}
+                        className={`${styles.nameInput} ${styles.departmentAccessSearch}`}
+                      />
+
+                      {selectedDepartments.length > 0 && (
+                        <div className={styles.departmentAccessTags}>
+                          {selectedDepartments.map(department => (
+                            <button
+                              key={department.id}
+                              type="button"
+                              className={styles.departmentAccessTag}
+                              onClick={() => handleDepartmentAccessToggle(user, department.id)}
+                            >
+                              {department.name}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+
+                      <div className={styles.departmentAccessList}>
+                        {filteredAdditionalDepartments.length > 0 ? (
+                          filteredAdditionalDepartments.map(department => {
+                            const checked = additionalDepartmentIds.includes(department.id);
+                            return (
+                              <label
+                                key={department.id}
+                                className={`${styles.departmentAccessItem} ${checked ? styles.departmentAccessItemChecked : ''}`}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  onChange={() => handleDepartmentAccessToggle(user, department.id)}
+                                />
+                                <span
+                                  className={styles.departmentAccessItemLabel}
+                                  style={{ paddingLeft: `${department.level * 14}px` }}
+                                >
+                                  {department.name}
+                                </span>
+                              </label>
+                            );
+                          })
+                        ) : (
+                          <div className={styles.departmentAccessEmpty}>
+                            {departmentSearchQuery ? 'По запросу ничего не найдено' : 'Нет доступных подразделений'}
+                          </div>
+                        )}
+                      </div>
+
+                      <div className={styles.departmentAccessActions}>
+                        <button
+                          type="button"
+                          className={styles.cancelBtn}
+                          onClick={() => handleDepartmentAccessReset(user)}
+                          disabled={!hasDepartmentAccessChanges || savingDepartmentAccessUserId === user.id}
+                        >
+                          Сбросить
+                        </button>
+                        <button
+                          type="button"
+                          className={styles.saveBtn}
+                          onClick={() => handleDepartmentAccessSave(user)}
+                          disabled={!hasDepartmentAccessChanges || savingDepartmentAccessUserId === user.id}
+                        >
+                          {savingDepartmentAccessUserId === user.id ? 'Сохраняю...' : 'Сохранить доступы'}
+                        </button>
+                      </div>
                     </div>
                   </>
 

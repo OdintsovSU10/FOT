@@ -1,5 +1,6 @@
 import { apiClient, buildApiUrl, buildAuthHeaders } from '../api/client';
 import type {
+  ManagedDepartmentTimesheetSummary,
   TimesheetEntry,
   TimesheetObjectEntry,
   TimesheetResponse,
@@ -43,6 +44,18 @@ export const timesheetService = {
     if (filters.half) params.append('half', filters.half);
     const res = await apiClient.get<ApiResponse<TimesheetResponse>>(`/timesheet?${params.toString()}`);
     if (!res.data) throw new Error(res.error || 'Ошибка загрузки табеля');
+    return res.data;
+  },
+
+  async getOverview(filters: {
+    month: string;
+    half?: TimesheetExportHalf;
+  }): Promise<ManagedDepartmentTimesheetSummary[]> {
+    const params = new URLSearchParams();
+    params.append('month', filters.month);
+    if (filters.half) params.append('half', filters.half);
+    const res = await apiClient.get<ApiResponse<ManagedDepartmentTimesheetSummary[]>>(`/timesheet/overview?${params.toString()}`);
+    if (!res.data) throw new Error(res.error || 'Ошибка загрузки обзора табелей');
     return res.data;
   },
 

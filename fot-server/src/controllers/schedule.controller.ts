@@ -5,7 +5,7 @@ import { Response } from 'express';
 import { z } from 'zod';
 import { supabase } from '../config/database.js';
 import { resolveSchedule, resolveSchedulesBulk } from '../services/schedule.service.js';
-import { resolveRequestDataScope } from '../services/data-scope.service.js';
+import { resolveRequestDataScope, resolveScopedDepartmentIds } from '../services/data-scope.service.js';
 import type { AuthenticatedRequest } from '../types/index.js';
 
 const scheduleTypeEnum = z.enum(['office', 'remote', 'hybrid', 'shift']);
@@ -48,7 +48,9 @@ const assignCategorySchema = z.object({
   effective_to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
 });
 const employeeIdParamSchema = z.coerce.number().int().positive();
+const objectIdParamSchema = z.string().uuid();
 const assignEmployeeSchema = assignCategorySchema;
+const assignObjectSchema = assignCategorySchema;
 const effectiveDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const bulkBrigadeScheduleSchema = z.object({
   department_ids: z.array(z.string().uuid()).min(1),
@@ -74,6 +76,13 @@ const bulkBrigadeScheduleSchema = z.object({
 });
 
 type EmployeeScheduleRow = {
+  id: string;
+  schedule_id: string;
+  effective_from: string;
+  effective_to: string | null;
+};
+
+type ObjectScheduleRow = {
   id: string;
   schedule_id: string;
   effective_from: string;
@@ -122,6 +131,17 @@ const loadEmployeeScheduleRows = async (employeeId: number): Promise<EmployeeSch
 
   if (error) throw error;
   return (data || []) as EmployeeScheduleRow[];
+};
+
+const loadObjectScheduleRows = async (objectId: string): Promise<ObjectScheduleRow[]> => {
+  const { data, error } = await supabase
+    .from('object_schedule_assignments')
+    .select('id, schedule_id, effective_from, effective_to')
+    .eq('object_id', objectId)
+    .order('effective_from', { ascending: true });
+
+  if (error) throw error;
+  return (data || []) as ObjectScheduleRow[];
 };
 
 const assignEmployeeSchedule = async (
@@ -209,6 +229,91 @@ const removeEmployeeSchedule = async (
   return true;
 };
 
+const assignObjectSchedule = async (
+  objectId: string,
+  scheduleId: string,
+  effectiveFrom: string,
+  createdBy: number | null,
+  effectiveTo?: string | null,
+): Promise<unknown> => {
+  const rows = await loadObjectScheduleRows(objectId);
+  const nowIso = new Date().toISOString();
+  const activeAtDate = rows.find(row => row.effective_from <= effectiveFrom && (row.effective_to === null || row.effective_to >= effectiveFrom)) || null;
+  const nextAssignment = rows.find(row => row.effective_from > effectiveFrom) || null;
+
+  if (activeAtDate?.effective_from === effectiveFrom) {
+    const nextEffectiveTo = effectiveTo ?? (nextAssignment ? previousIsoDate(nextAssignment.effective_from) : activeAtDate.effective_to ?? null);
+    const { data, error } = await supabase
+      .from('object_schedule_assignments')
+      .update({
+        schedule_id: scheduleId,
+        effective_to: nextEffectiveTo,
+        updated_at: nowIso,
+      })
+      .eq('id', activeAtDate.id)
+      .select('*, work_schedules(*)')
+      .single();
+
+    if (error) throw error;
+    return data;
+  }
+
+  if (activeAtDate && activeAtDate.effective_from < effectiveFrom) {
+    const { error } = await supabase
+      .from('object_schedule_assignments')
+      .update({ effective_to: previousIsoDate(effectiveFrom), updated_at: nowIso })
+      .eq('id', activeAtDate.id);
+    if (error) throw error;
+  }
+
+  const nextEffectiveTo = effectiveTo ?? (nextAssignment ? previousIsoDate(nextAssignment.effective_from) : null);
+  const { data, error } = await supabase
+    .from('object_schedule_assignments')
+    .insert({
+      object_id: objectId,
+      schedule_id: scheduleId,
+      effective_from: effectiveFrom,
+      effective_to: nextEffectiveTo,
+      created_by: createdBy,
+    })
+    .select('*, work_schedules(*)')
+    .single();
+
+  if (error) throw error;
+  return data;
+};
+
+const removeObjectSchedule = async (
+  objectId: string,
+  effectiveDate: string,
+): Promise<boolean> => {
+  const rows = await loadObjectScheduleRows(objectId);
+  const nowIso = new Date().toISOString();
+  const exactRow = rows.find(row => row.effective_from === effectiveDate) || null;
+  if (exactRow) {
+    const { error } = await supabase
+      .from('object_schedule_assignments')
+      .delete()
+      .eq('id', exactRow.id);
+
+    if (error) throw error;
+    return true;
+  }
+
+  const activeAtDate = rows.find(row => row.effective_from < effectiveDate && (row.effective_to === null || row.effective_to >= effectiveDate)) || null;
+  if (!activeAtDate) {
+    return false;
+  }
+
+  const { error } = await supabase
+    .from('object_schedule_assignments')
+    .update({ effective_to: previousIsoDate(effectiveDate), updated_at: nowIso })
+    .eq('id', activeAtDate.id);
+
+  if (error) throw error;
+  return true;
+};
+
 export const scheduleController = {
   /** GET /api/schedules — шаблоны */
   async list(_req: AuthenticatedRequest, res: Response) {
@@ -287,13 +392,17 @@ export const scheduleController = {
     try {
       const { id } = req.params;
 
-      const [{ count: catCount }, { count: empCount }] = await Promise.all([
+      const [{ count: catCount }, { count: empCount }, { count: objectCount }] = await Promise.all([
         supabase
           .from('category_schedules')
           .select('id', { count: 'exact', head: true })
           .eq('schedule_id', id),
         supabase
           .from('employee_schedule_assignments')
+          .select('id', { count: 'exact', head: true })
+          .eq('schedule_id', id),
+        supabase
+          .from('object_schedule_assignments')
           .select('id', { count: 'exact', head: true })
           .eq('schedule_id', id),
       ]);
@@ -303,6 +412,9 @@ export const scheduleController = {
       }
       if ((empCount || 0) > 0) {
         return res.status(409).json({ success: false, error: 'График назначен сотрудникам, удалить нельзя' });
+      }
+      if ((objectCount || 0) > 0) {
+        return res.status(409).json({ success: false, error: 'График назначен объектам, удалить нельзя' });
       }
 
       const { error } = await supabase
@@ -426,6 +538,23 @@ export const scheduleController = {
     }
   },
 
+  /** GET /api/schedules/objects — список привязок object → schedule */
+  async listObjectAssignments(_req: AuthenticatedRequest, res: Response) {
+    try {
+      const { data, error } = await supabase
+        .from('object_schedule_assignments')
+        .select('*, work_schedules(*)')
+        .order('object_id')
+        .order('effective_from', { ascending: false });
+
+      if (error) throw error;
+      res.json({ success: true, data: data || [] });
+    } catch (err) {
+      console.error('[schedules] listObjectAssignments error:', err);
+      res.status(500).json({ success: false, error: 'Ошибка загрузки графиков объектов' });
+    }
+  },
+
   /** PUT /api/schedules/category/:category — назначить график категории */
   async assignCategory(req: AuthenticatedRequest, res: Response) {
     try {
@@ -508,6 +637,32 @@ export const scheduleController = {
     }
   },
 
+  /** PUT /api/schedules/object/:objectId — назначить график объекту */
+  async assignObject(req: AuthenticatedRequest, res: Response) {
+    try {
+      const parsedObjectId = objectIdParamSchema.safeParse(req.params.objectId);
+      if (!parsedObjectId.success) {
+        return res.status(400).json({ success: false, error: 'Неверный objectId' });
+      }
+
+      const parsed = assignObjectSchema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ success: false, error: parsed.error.issues });
+
+      const data = await assignObjectSchedule(
+        parsedObjectId.data,
+        parsed.data.schedule_id,
+        parsed.data.effective_from,
+        req.user.employee_id,
+        parsed.data.effective_to,
+      );
+
+      res.json({ success: true, data });
+    } catch (err) {
+      console.error('[schedules] assignObject error:', err);
+      res.status(500).json({ success: false, error: 'Ошибка назначения графика объекту' });
+    }
+  },
+
   /** POST /api/schedules/brigades/bulk — массово назначить график сотрудникам выбранных бригад */
   async bulkApplyToBrigades(req: AuthenticatedRequest, res: Response) {
     try {
@@ -521,7 +676,8 @@ export const scheduleController = {
 
       const { department_ids: departmentIds, action, schedule_id: scheduleId, effective_date: effectiveDate } = parsed.data;
       if (scope === 'department') {
-        if (!req.user.department_id || departmentIds.some(id => id !== req.user.department_id)) {
+        const scopedDepartmentIds = await resolveScopedDepartmentIds(req, departmentIds);
+        if (scopedDepartmentIds.length !== departmentIds.length) {
           return res.status(403).json({ success: false, error: 'Можно назначать график только по своей бригаде' });
         }
       }
@@ -604,6 +760,32 @@ export const scheduleController = {
     } catch (err) {
       console.error('[schedules] removeEmployeeAssignment error:', err);
       res.status(500).json({ success: false, error: 'Ошибка снятия персонального графика сотрудника' });
+    }
+  },
+
+  /** DELETE /api/schedules/object/:objectId — снять активный график объекта */
+  async removeObjectAssignment(req: AuthenticatedRequest, res: Response) {
+    try {
+      const parsedObjectId = objectIdParamSchema.safeParse(req.params.objectId);
+      if (!parsedObjectId.success) {
+        return res.status(400).json({ success: false, error: 'Неверный objectId' });
+      }
+
+      const parsedEffectiveTo = req.query.effective_to
+        ? effectiveDateSchema.safeParse(req.query.effective_to)
+        : { success: true as const, data: new Date().toISOString().slice(0, 10) };
+      if (!parsedEffectiveTo.success) {
+        return res.status(400).json({ success: false, error: 'Некорректная дата effective_to' });
+      }
+
+      const updated = await removeObjectSchedule(parsedObjectId.data, parsedEffectiveTo.data);
+      if (!updated) {
+        return res.json({ success: true });
+      }
+      res.json({ success: true });
+    } catch (err) {
+      console.error('[schedules] removeObjectAssignment error:', err);
+      res.status(500).json({ success: false, error: 'Ошибка снятия графика объекта' });
     }
   },
 };

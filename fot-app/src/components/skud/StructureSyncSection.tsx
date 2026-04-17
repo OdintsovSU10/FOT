@@ -45,6 +45,7 @@ export const StructureSyncSection: FC<IStructureSyncSectionProps> = ({
   const [syncAllDone, setSyncAllDone] = useState(false);
   const [syncAllSummary, setSyncAllSummary] = useState<ISyncAllSummary | null>(null);
   const [employeesProgress, setEmployeesProgress] = useState<IEmployeesProgressState | null>(null);
+  const [syncAllWaitingMessage, setSyncAllWaitingMessage] = useState<string | null>(null);
 
   const [unmatchedEmployees, setUnmatchedEmployees] = useState<IUnmatchedSigurEmployee[]>([]);
   const [showMatchModal, setShowMatchModal] = useState(false);
@@ -79,6 +80,7 @@ export const StructureSyncSection: FC<IStructureSyncSectionProps> = ({
     setSyncAllDone(false);
     setSyncAllSummary(null);
     setEmployeesProgress(null);
+    setSyncAllWaitingMessage(null);
     setError('');
     setSyncAllSteps(buildStepState(selectedSyncAllSteps));
 
@@ -93,7 +95,13 @@ export const StructureSyncSection: FC<IStructureSyncSectionProps> = ({
         body: JSON.stringify({ steps: selectedSyncAllSteps }),
       });
       await readSseResponse(response, data => {
+        if (data.type === 'waiting') {
+          setSyncAllWaitingMessage(String(data.message || 'Ожидаем освобождения фоновой синхронизации...'));
+          return;
+        }
+
         if (data.type === 'step' && typeof data.step === 'number') {
+          setSyncAllWaitingMessage(null);
           setSyncAllSteps(prev => prev.map(step =>
             step.id === data.step
               ? {
@@ -112,6 +120,7 @@ export const StructureSyncSection: FC<IStructureSyncSectionProps> = ({
         }
 
         if (data.type === 'employees_progress') {
+          setSyncAllWaitingMessage(null);
           setEmployeesProgress({
             percent: Number(data.percent || 0),
             current: Number(data.current || 0),
@@ -122,6 +131,7 @@ export const StructureSyncSection: FC<IStructureSyncSectionProps> = ({
         }
 
         if (data.type === 'done') {
+          setSyncAllWaitingMessage(null);
           const failedSteps = Array.isArray(data.failedSteps)
             ? data.failedSteps.filter((step): step is SyncStepName =>
                 typeof step === 'string' && STRUCTURE_SYNC_STEPS.some(candidate => candidate.name === step),
@@ -150,6 +160,7 @@ export const StructureSyncSection: FC<IStructureSyncSectionProps> = ({
         }
 
         if (data.type === 'error') {
+          setSyncAllWaitingMessage(null);
           setError(String(data.message || 'Ошибка синхронизации'));
         }
       });
@@ -158,6 +169,7 @@ export const StructureSyncSection: FC<IStructureSyncSectionProps> = ({
     } finally {
       setSyncAllRunning(false);
       setEmployeesProgress(null);
+      setSyncAllWaitingMessage(null);
     }
   }, [selectedSyncAllSteps, setError]);
 
@@ -197,7 +209,7 @@ export const StructureSyncSection: FC<IStructureSyncSectionProps> = ({
         </button>
       </div>
       <div className="sigur-sync-summary-note" style={{ marginBottom: '0.75rem' }}>
-        Этот блок синхронизирует только структуру: отделы, должности и сотрудников. События загружаются отдельно ниже.
+        Этот блок синхронизирует в портал только рабочую структуру: отделы, должности и сотрудников. Live-вкладка «Сотрудники» выше показывает весь Sigur независимо от этого фильтра.
       </div>
       <div className="sigur-sync-steps-selector">
         {STRUCTURE_SYNC_STEPS.map(step => (
@@ -219,7 +231,9 @@ export const StructureSyncSection: FC<IStructureSyncSectionProps> = ({
           disabled={busy || !connected || selectedSyncAllSteps.length === 0}
         >
           <RefreshCw size={14} className={syncAllRunning ? 'sigur-spin' : ''} />
-          {syncAllRunning ? 'Синхронизация...' : 'Запустить выбранные шаги'}
+          {syncAllRunning
+            ? (syncAllWaitingMessage ? 'Ожидание...' : 'Синхронизация...')
+            : 'Запустить выбранные шаги'}
         </button>
         {canEdit && (
           <button
@@ -255,6 +269,12 @@ export const StructureSyncSection: FC<IStructureSyncSectionProps> = ({
               </span>
             )}
           </div>
+        </div>
+      )}
+
+      {syncAllRunning && syncAllWaitingMessage && (
+        <div className="sigur-sync-result">
+          <div className="sigur-step-status">{syncAllWaitingMessage}</div>
         </div>
       )}
 

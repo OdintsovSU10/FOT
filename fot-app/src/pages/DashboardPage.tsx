@@ -1,8 +1,9 @@
-import React, { lazy, Suspense, useEffect, useMemo, useRef, useState, memo } from 'react';
+import React, { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, memo } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { ChevronDown, ChevronLeft, ChevronRight, Search, Building2, LogOut, Users, Clock, ArrowDownRight, ArrowUpRight, X } from 'lucide-react';
 import { usePresence } from '../hooks/usePresence';
 import { useDashboardStats } from '../hooks/useDashboardStats';
+import { usePresenceRealtime } from '../hooks/usePresenceRealtime';
 import { useStructureTree } from '../hooks/useStructure';
 import { useAuth } from '../contexts/AuthContext';
 import type { DashboardPeriod } from '../types';
@@ -153,12 +154,38 @@ export const DashboardPage: React.FC = () => {
   }, [effectiveSelectedDeptId, period, selectedMonth]);
 
   // Data
-  const { employees, loading } = usePresence(effectiveSelectedDeptId);
-  const { stats, loading: statsLoading } = useDashboardStats(
+  const { employees, loading, refresh: refreshPresence } = usePresence(effectiveSelectedDeptId);
+  const { stats, loading: statsLoading, refresh: refreshStats } = useDashboardStats(
     effectiveSelectedDeptId,
     period,
     period === 'month' ? selectedMonth : undefined,
   );
+  const lastStatsRealtimeRef = useRef(0);
+
+  const handlePresenceRealtime = useCallback(() => {
+    refreshPresence();
+
+    const now = Date.now();
+    if ((now - lastStatsRealtimeRef.current) < 60_000) {
+      return;
+    }
+
+    lastStatsRealtimeRef.current = now;
+    refreshStats();
+  }, [refreshPresence, refreshStats]);
+
+  const handleDashboardVisible = useCallback(() => {
+    lastStatsRealtimeRef.current = Date.now();
+    refreshPresence();
+    refreshStats();
+  }, [refreshPresence, refreshStats]);
+
+  usePresenceRealtime({
+    enabled: !!effectiveSelectedDeptId,
+    owner: 'dashboard-presence',
+    onPresenceUpdate: handlePresenceRealtime,
+    onVisible: handleDashboardVisible,
+  });
 
   const onlineCount = useMemo(
     () => employees.filter(e => e.status === 'online').length,

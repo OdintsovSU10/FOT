@@ -1,5 +1,6 @@
 import { supabase } from '../config/database.js';
 import { getRolePageAccess, resolveRoleDataScope } from './access-control.service.js';
+import { loadManagedDepartmentMap } from './department-access.service.js';
 
 export type TimesheetResponsibleRole = 'primary' | 'backup';
 
@@ -141,31 +142,51 @@ export const timesheetResponsiblesService = {
   },
 
   async getCandidateUsersByDepartment(departmentId: string): Promise<ITimesheetResponsibleCandidate[]> {
-    const { data: employees, error: employeesError } = await supabase
-      .from('employees')
-      .select('id')
-      .eq('org_department_id', departmentId)
-      .eq('employment_status', 'active')
-      .eq('is_archived', false);
-
-    if (employeesError) {
-      throw employeesError;
-    }
-
-    const employeeIds = (employees || []).map(item => item.id as number);
-    if (employeeIds.length === 0) return [];
-
     const { data: profiles, error: profilesError } = await supabase
       .from('user_profiles')
       .select('id, full_name, position_type, employee_id')
-      .eq('is_approved', true)
-      .in('employee_id', employeeIds);
+      .eq('is_approved', true);
 
     if (profilesError) {
       throw profilesError;
     }
 
-    return (profiles || [])
+    const typedProfiles = (profiles || []) as IUserProfileLite[];
+    const employeeIds = typedProfiles
+      .map(profile => profile.employee_id)
+      .filter((employeeId): employeeId is number => Number.isInteger(employeeId));
+
+    const departmentByEmployeeId = new Map<number, string | null>();
+    if (employeeIds.length > 0) {
+      const { data: employees, error: employeesError } = await supabase
+        .from('employees')
+        .select('id, org_department_id, employment_status, is_archived')
+        .in('id', employeeIds);
+
+      if (employeesError) {
+        throw employeesError;
+      }
+
+      for (const employee of employees || []) {
+        if (employee.is_archived || employee.employment_status !== 'active') {
+          continue;
+        }
+        departmentByEmployeeId.set(employee.id as number, (employee.org_department_id as string | null) ?? null);
+      }
+    }
+
+    const managedDepartmentMap = await loadManagedDepartmentMap(
+      typedProfiles.map(profile => ({
+        user_id: profile.id,
+        employee_id: profile.employee_id,
+        primary_department_id: profile.employee_id != null
+          ? (departmentByEmployeeId.get(profile.employee_id) ?? null)
+          : null,
+      })),
+    );
+
+    return typedProfiles
+      .filter(profile => (managedDepartmentMap.get(profile.id)?.managed_department_ids || []).includes(departmentId))
       .map(profile => ({
         user_id: profile.id as string,
         full_name: (profile.full_name as string | null) ?? null,
@@ -217,6 +238,16 @@ export const timesheetResponsiblesService = {
       }
     }
 
+    const managedDepartmentMap = await loadManagedDepartmentMap(
+      typedProfiles.map(profile => ({
+        user_id: profile.id,
+        employee_id: profile.employee_id,
+        primary_department_id: profile.employee_id != null
+          ? (departmentByEmployeeId.get(profile.employee_id) ?? null)
+          : null,
+      })),
+    );
+
     const checks = await Promise.all(typedProfiles.map(async (profile) => {
       const roleRef = profile.system_role_id || profile.position_type;
       if (!roleRef) return null;
@@ -234,11 +265,9 @@ export const timesheetResponsiblesService = {
         return profile.id;
       }
 
-      if (dataScope === 'department' && profile.employee_id != null) {
-        const employeeDepartmentId = departmentByEmployeeId.get(profile.employee_id) ?? null;
-        if (employeeDepartmentId === departmentId) {
-          return profile.id;
-        }
+      if (dataScope === 'department') {
+        const managedDepartmentIds = managedDepartmentMap.get(profile.id)?.managed_department_ids || [];
+        if (managedDepartmentIds.includes(departmentId)) return profile.id;
       }
 
       return null;

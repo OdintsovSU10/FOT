@@ -150,7 +150,10 @@ export const TimesheetApprovalBar: FC<IProps> = ({ departmentId, month, compact 
     setLoadingHalf(half);
     try {
       await action();
-      await queryClient.invalidateQueries({ queryKey: ['timesheet-approval'] });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['timesheet-approval'] }),
+        queryClient.invalidateQueries({ queryKey: ['timesheet-overview'] }),
+      ]);
     } finally {
       setLoadingHalf(null);
     }

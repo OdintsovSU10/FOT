@@ -246,10 +246,44 @@ async function hasStructureSyncLease(): Promise<boolean> {
   return !!state?.lease_owner && isActiveRuntimeLease(state.lease_expires_at);
 }
 
-async function waitForStructureSyncLeaseRelease(): Promise<void> {
+function createWaitReporter(
+  kind: IManualSyncWaitUpdate['kind'],
+  message: string,
+  onWait?: (update: IManualSyncWaitUpdate) => void,
+): (waitedMs: number) => void {
+  let lastReportedBucket = -1;
+
+  return (waitedMs: number) => {
+    if (!onWait) return;
+
+    const bucket = Math.floor(waitedMs / 5000);
+    if (bucket === lastReportedBucket) {
+      return;
+    }
+
+    lastReportedBucket = bucket;
+    onWait({
+      kind,
+      waitedMs,
+      message,
+    });
+  };
+}
+
+async function waitForStructureSyncLeaseRelease(
+  onWait?: (update: IManualSyncWaitUpdate) => void,
+): Promise<void> {
   const deadlineAt = Date.now() + STRUCTURE_SYNC_WAIT_TIMEOUT_MS;
+  const waitStartedAt = Date.now();
+  const reportWait = createWaitReporter(
+    'structure_sync',
+    'Ожидаем завершения фоновой синхронизации структуры Sigur...',
+    onWait,
+  );
 
   while (await hasStructureSyncLease()) {
+    reportWait(Date.now() - waitStartedAt);
+
     if (Date.now() >= deadlineAt) {
       throw new ManualSyncInProgressError(
         'Фоновая синхронизация структуры не завершилась вовремя. Попробуйте повторить через пару минут.',
@@ -258,6 +292,16 @@ async function waitForStructureSyncLeaseRelease(): Promise<void> {
 
     await wait(EXCLUSIVE_SYNC_ACQUIRE_RETRY_MS);
   }
+}
+
+interface IManualSyncWaitUpdate {
+  kind: 'structure_sync' | 'presence_polling';
+  waitedMs: number;
+  message: string;
+}
+
+interface IAcquirePresencePollingLockOptions {
+  onWait?: (update: IManualSyncWaitUpdate) => void;
 }
 
 function wait(ms: number): Promise<void> {
@@ -657,7 +701,9 @@ export function stopPresencePolling(): void {
   }
 }
 
-export async function acquirePresencePollingLock(): Promise<void> {
+export async function acquirePresencePollingLock(
+  options: IAcquirePresencePollingLockOptions = {},
+): Promise<void> {
   if (manualSyncLocks > 0) {
     throw new ManualSyncInProgressError();
   }
@@ -699,9 +745,15 @@ export async function acquirePresencePollingLock(): Promise<void> {
     if (pollInFlight) {
       await pollInFlight;
     }
-    await waitForStructureSyncLeaseRelease();
+    await waitForStructureSyncLeaseRelease(options.onWait);
 
     const deadlineAt = Date.now() + EXCLUSIVE_SYNC_ACQUIRE_TIMEOUT_MS;
+    const pollingWaitStartedAt = Date.now();
+    const reportPollingWait = createWaitReporter(
+      'presence_polling',
+      'Ожидаем завершения фонового polling Sigur...',
+      options.onWait,
+    );
     let pollingLeaseAcquired = false;
     while (!pollingLeaseAcquired) {
       const lease = await tryAcquireSigurRuntimeLease({
@@ -719,6 +771,8 @@ export async function acquirePresencePollingLock(): Promise<void> {
         pollingLeaseAcquired = true;
         break;
       }
+
+      reportPollingWait(Date.now() - pollingWaitStartedAt);
 
       if (Date.now() >= deadlineAt) {
         throw new ManualSyncInProgressError(

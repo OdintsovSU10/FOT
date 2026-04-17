@@ -42,6 +42,9 @@ export interface IAccessPointSetting {
 export interface AccessPointOption {
   name: string;
   id: number | null;
+  objectId?: string | null;
+  objectName?: string | null;
+  hasMapPreview?: boolean;
 }
 
 export type SigurConnectionScope = 'internal' | 'external';
@@ -71,6 +74,46 @@ export interface SigurArchiveDepartmentInfo {
 export interface SigurEmployeeAccessPointBinding {
   accessPointId: number;
   accessPointName: string | null;
+  objectId?: string | null;
+  objectName?: string | null;
+  hasMapPreview?: boolean;
+}
+
+export interface SigurEmployeeCardSummary {
+  cardId: number;
+  cardNumber: string | null;
+  status: string | null;
+  expirationDate: string | null;
+}
+
+export interface SigurEmployeeAccessRuleSummary {
+  accessRuleId: number;
+  accessRuleName: string | null;
+}
+
+export interface SigurEmployeeAccessRulesSaveResult {
+  addedIds: number[];
+  removedIds: number[];
+  bindings: SigurEmployeeAccessRuleSummary[];
+}
+
+export interface SigurEmployeeProfileState {
+  linked: boolean;
+  employeeId: number;
+  sigurEmployeeId: number | null;
+  profile: {
+    fullName: string;
+    departmentId: number | null;
+    departmentName: string | null;
+    positionId: number | null;
+    positionName: string | null;
+    tabNumber: string | null;
+    description: string | null;
+    blocked: boolean | null;
+  };
+  cards: SigurEmployeeCardSummary[];
+  accessRules: SigurEmployeeAccessRuleSummary[];
+  accessPoints: SigurEmployeeAccessPointBinding[];
 }
 
 export interface SigurEmployeeAccessPointsState {
@@ -83,4 +126,63 @@ export interface SigurEmployeeAccessPointsSaveResult {
   addedIds: number[];
   removedIds: number[];
   bindings: SigurEmployeeAccessPointBinding[];
+}
+
+export interface SigurDepartmentNode {
+  id: number;
+  parentId: number | null;
+  name: string;
+  hasChildren: boolean;
+  employeeCount: number;
+  employeeCountLoaded?: boolean;
+  children?: SigurDepartmentNode[];
+}
+
+export interface SigurPositionSummary {
+  id: number;
+  name: string;
+}
+
+export interface SigurEmployeeSummary {
+  id: number;
+  name: string;
+  departmentId: number | null;
+  departmentName: string | null;
+  positionId: number | null;
+  positionName: string | null;
+  tabId: string | null;
+  blocked: boolean | null;
+}
+
+export type SigurEmployeeCardAccessState =
+  | 'active'
+  | 'expired'
+  | 'no_card'
+  | 'no_expiration'
+  | 'unknown';
+
+export interface SigurEmployeeCardAccessStatus {
+  employeeId: number;
+  state: SigurEmployeeCardAccessState;
+  expirationDate: string | null;
+  hasCard: boolean;
+}
+
+export interface SigurLiveEmployeeProfile {
+  sigurEmployeeId: number;
+  profile: {
+    fullName: string;
+    departmentId: number | null;
+    departmentName: string | null;
+    positionId: number | null;
+    positionName: string | null;
+    tabNumber: string | null;
+    description: string | null;
+    blocked: boolean | null;
+  };
+  cards: SigurEmployeeCardSummary[];
+  accessRules: SigurEmployeeAccessRuleSummary[];
+  accessRuleOptions: SigurEmployeeAccessRuleSummary[];
+  accessPoints: SigurEmployeeAccessPointBinding[];
+  accessPointOptions: AccessPointOption[];
 }

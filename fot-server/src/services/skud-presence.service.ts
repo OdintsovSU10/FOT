@@ -7,7 +7,7 @@ import type { IPresenceParams, IPresenceItem } from '../types/skud.types.js';
 import { getAllDepartmentsTree, getInternalAccessPoints } from './skud-shared.service.js';
 
 // In-memory кэш по ключу departmentId (TTL 30с). Снижает нагрузку при множественных
-// пользователях, смотрящих один отдел одновременно (polling 60с у фронта).
+// пользователях, смотрящих один отдел одновременно между socket-refetch и fallback polling.
 const presenceCache = new Map<string, { data: IPresenceItem[]; expiresAt: number }>();
 const PRESENCE_TTL_MS = 30_000;
 

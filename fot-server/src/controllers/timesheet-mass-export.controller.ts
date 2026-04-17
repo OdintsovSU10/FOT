@@ -2,6 +2,7 @@ import { Response } from 'express';
 import ExcelJS from 'exceljs';
 import archiver from 'archiver';
 import type { AuthenticatedRequest } from '../types/index.js';
+import { resolveRequestDataScope, resolveScopedDepartmentIds } from '../services/data-scope.service.js';
 import {
   fetchTimesheetDataForDepartment,
   type TimesheetExportGrouping,
@@ -47,6 +48,22 @@ export async function exportTimesheetMass(req: AuthenticatedRequest, res: Respon
     if (!Array.isArray(department_ids) || department_ids.length === 0) {
       return res.status(400).json({ success: false, error: 'Нужно выбрать хотя бы один отдел' });
     }
+    const scope = await resolveRequestDataScope(req);
+    if (!scope || scope === 'self') {
+      return res.status(403).json({ success: false, error: 'Недостаточно прав для массового экспорта табелей' });
+    }
+    const requestedDepartmentIds = [...new Set(
+      department_ids
+        .map((value: unknown) => typeof value === 'string' ? value : null)
+        .filter((value): value is string => Boolean(value)),
+    )];
+    const scopedDepartmentIds = await resolveScopedDepartmentIds(req, requestedDepartmentIds);
+    if (scope === 'department' && scopedDepartmentIds.length !== requestedDepartmentIds.length) {
+      return res.status(403).json({ success: false, error: 'В массовый экспорт можно включать только назначенные бригады' });
+    }
+    if (scopedDepartmentIds.length === 0) {
+      return res.status(400).json({ success: false, error: 'Нужно выбрать хотя бы один отдел' });
+    }
 
     const [yearStr, monthStr] = month.split('-');
     const year = parseInt(yearStr);
@@ -80,8 +97,8 @@ export async function exportTimesheetMass(req: AuthenticatedRequest, res: Respon
     const CONCURRENCY = 5;
     const usedNames = new Set<string>();
 
-    for (let i = 0; i < department_ids.length; i += CONCURRENCY) {
-      const batch = department_ids.slice(i, i + CONCURRENCY);
+    for (let i = 0; i < scopedDepartmentIds.length; i += CONCURRENCY) {
+      const batch = scopedDepartmentIds.slice(i, i + CONCURRENCY);
       const results = await Promise.all(
         batch.map((deptId: string) => fetchTimesheetDataForDepartment(month, deptId, exportHalf, displayMode))
       );

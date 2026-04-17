@@ -1,7 +1,7 @@
 import { createServer } from 'http';
 import { Server } from 'socket.io';
 import app from './app.js';
-import { env } from './config/env.js';
+import { corsAllowedOrigins, env } from './config/env.js';
 import { startPresencePolling } from './services/presence-polling.service.js';
 import { startSigurMonitor } from './services/sigur-monitor.service.js';
 import { startStructureSyncScheduler } from './services/sigur-structure-scheduler.service.js';
@@ -15,7 +15,7 @@ const httpServer = createServer(app);
 
 const io = new Server(httpServer, {
   cors: {
-    origin: env.CORS_ORIGIN,
+    origin: corsAllowedOrigins,
     credentials: true,
   },
 });
@@ -26,7 +26,7 @@ setupChatSocket(io);
 httpServer.listen(PORT, () => {
   console.log(`FOT Server running on port ${PORT}`);
   console.log(`Environment: ${env.NODE_ENV}`);
-  console.log(`CORS Origin: ${env.CORS_ORIGIN}`);
+  console.log(`CORS Origin: ${corsAllowedOrigins.join(', ')}`);
   console.log('Socket.IO enabled');
   void startPresencePolling();
   void startSigurMonitor();

@@ -1,8 +1,9 @@
-import { useMemo } from 'react';
+import { useCallback, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '../contexts/AuthContext';
 import { skudService } from '../services/skudService';
 import { useDocumentVisibility } from './useDocumentVisibility';
+import { usePresenceRealtime } from './usePresenceRealtime';
 
 type PresenceStatus = 'online' | 'offline' | 'unknown';
 
@@ -25,15 +26,26 @@ export const useMyPresence = (): { status: PresenceStatus; loading: boolean } =>
     staleTime: 10 * 60_000,
   });
 
-  // События сотрудника за сегодня — обновляются раз в 60с
+  // События сотрудника за сегодня — socket-triggered + fallback polling раз в 120с
   const today = toLocalISO(new Date());
   const eventsQuery = useQuery({
     queryKey: ['skud-employee-events', empId, today, today],
     queryFn: () => (empId ? skudService.getEmployeeEvents(empId, today, today) : Promise.resolve([])),
     enabled: !!empId,
     staleTime: 30_000,
-    refetchInterval: isVisible ? 60_000 : false,
+    refetchInterval: isVisible ? 120_000 : false,
     refetchIntervalInBackground: false,
+  });
+  const refreshEvents = useCallback(() => {
+    if (!empId) return;
+    void eventsQuery.refetch();
+  }, [empId, eventsQuery]);
+
+  usePresenceRealtime({
+    enabled: !!empId,
+    owner: 'employee-personal-presence',
+    onPresenceUpdate: refreshEvents,
+    onVisible: refreshEvents,
   });
 
   const status: PresenceStatus = useMemo(() => {

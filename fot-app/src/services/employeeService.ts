@@ -33,6 +33,16 @@ export interface PaginatedResponse {
   meta: PaginatedMeta;
 }
 
+export interface BatchMoveEmployeesResult {
+  target_department_id: string;
+  moved_count: number;
+  skipped_count: number;
+  failed_count: number;
+  moved_ids: number[];
+  skipped_ids: number[];
+  failures: Array<{ employee_id: number; error: string }>;
+}
+
 export const employeeService = {
   async getAll(params?: { departmentId?: string; archived?: boolean; view?: 'list' }): Promise<Employee[]> {
     const qs = new URLSearchParams();
@@ -166,6 +176,14 @@ export const employeeService = {
 
   async moveDepartment(id: number, orgDepartmentId: string): Promise<Employee> {
     const response = await apiClient.post<ApiResponse<Employee>>(`/employees/${id}/move-department`, {
+      org_department_id: orgDepartmentId,
+    });
+    return response.data;
+  },
+
+  async batchMove(employeeIds: number[], orgDepartmentId: string): Promise<BatchMoveEmployeesResult> {
+    const response = await apiClient.post<ApiResponse<BatchMoveEmployeesResult>>('/employees/batch-move', {
+      employee_ids: employeeIds,
       org_department_id: orgDepartmentId,
     });
     return response.data;

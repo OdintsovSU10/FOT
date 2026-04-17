@@ -274,6 +274,8 @@ export const sigurSyncController = {
 
   async syncAll(req: AuthenticatedRequest, res: Response): Promise<void> {
     let lockAcquired = false;
+    let keepAliveTimer: ReturnType<typeof setInterval> | null = null;
+    let sendProgress: ReturnType<typeof createSseSender> | null = null;
 
     try {
       if (!(await sigurService.isConfigured())) {
@@ -287,20 +289,35 @@ export const sigurSyncController = {
         return;
       }
 
-      await acquirePresencePollingLock();
-      lockAcquired = true;
-
       res.setHeader('Content-Type', 'text/event-stream');
       res.setHeader('Cache-Control', 'no-cache');
       res.setHeader('Connection', 'keep-alive');
       res.flushHeaders();
 
-      const keepAliveTimer = setInterval(() => {
+      keepAliveTimer = setInterval(() => {
         res.write(': keepalive\n\n');
       }, 15_000);
-      res.on('close', () => clearInterval(keepAliveTimer));
+      res.on('close', () => {
+        if (keepAliveTimer) {
+          clearInterval(keepAliveTimer);
+        }
+      });
 
-      const sendProgress = createSseSender(res);
+      sendProgress = createSseSender(res);
+
+      await acquirePresencePollingLock({
+        onWait: update => {
+          sendProgress?.({
+            type: 'waiting',
+            reason: update.kind,
+            waitedMs: update.waitedMs,
+            message: update.message,
+          });
+        },
+      });
+      lockAcquired = true;
+
+      const progressSender = sendProgress || undefined;
       const connection = (req.body.connection as ConnectionType) || undefined;
       const context: ISyncContext = {};
 
@@ -330,7 +347,7 @@ export const sigurSyncController = {
           id: 3,
           name: 'employees' as SyncAllStepName,
           label: 'Импорт сотрудников',
-          fn: async () => syncEmployeesLogic(connection, sendProgress, context, false) as unknown as Record<string, unknown>,
+          fn: async () => syncEmployeesLogic(connection, progressSender, context, true) as unknown as Record<string, unknown>,
         },
       ].filter(step => steps.includes(step.name));
 
@@ -383,11 +400,27 @@ export const sigurSyncController = {
         failedSteps,
         completedSteps: stepDefinitions.length - failedSteps.length,
       });
-      clearInterval(keepAliveTimer);
+      if (keepAliveTimer) {
+        clearInterval(keepAliveTimer);
+        keepAliveTimer = null;
+      }
       res.end();
     } catch (error) {
       if (isManualSyncConflict(error)) {
-        sendManualSyncConflict(res, error);
+        if (res.headersSent && sendProgress) {
+          try {
+            sendProgress({
+              type: 'error',
+              code: 'SYNC_IN_PROGRESS',
+              message: error.message,
+            });
+            res.end();
+          } catch {
+            // Ignore SSE write failures after disconnect
+          }
+        } else {
+          sendManualSyncConflict(res, error);
+        }
         return;
       }
 
@@ -403,6 +436,9 @@ export const sigurSyncController = {
         res.status(500).json({ success: false, error: 'Ошибка полной синхронизации' });
       }
     } finally {
+      if (keepAliveTimer) {
+        clearInterval(keepAliveTimer);
+      }
       if (lockAcquired) {
         await safeReleasePresencePollingLock('sigur.syncAll');
       }

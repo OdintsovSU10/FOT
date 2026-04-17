@@ -1,14 +1,60 @@
 import { SigurServiceBase, ConnectionType } from './sigur-base.service.js';
 
 export class SigurDataService extends SigurServiceBase {
-  private employeeCache: { data: Record<string, unknown>[]; fetchedAt: number } | null = null;
+  private employeeCache: { data: Record<string, unknown>[]; fetchedAt: number; complete: boolean } | null = null;
   private employeeFetchPromise: Promise<Record<string, unknown>[]> | null = null;
+  private employeeCountCache: { map: Map<number, number>; fetchedAt: number } | null = null;
+  private departmentListCache: { data: Record<string, unknown>[]; fetchedAt: number } | null = null;
+  private departmentFetchPromise: Promise<Record<string, unknown>[]> | null = null;
   private departmentCache: { map: Map<number, string>; fetchedAt: number } | null = null;
   private accessPointCache: { map: Map<number, string>; fetchedAt: number } | null = null;
+  private accessRuleCache: { map: Map<number, string>; fetchedAt: number } | null = null;
+  private positionCache: { data: Array<{ id: number; name: string }>; fetchedAt: number } | null = null;
   private readonly CACHE_TTL = 5 * 60 * 1000;
   private readonly EVENT_CHUNK_MS = 2 * 60 * 60 * 1000;
   private readonly EVENT_CHUNK_OVERLAP_MS = 60 * 1000;
   private static readonly SIGUR_TIMEZONE_OFFSET_MS = 3 * 60 * 60 * 1000;
+
+  invalidateEmployeeCache(): void {
+    this.employeeCache = null;
+    this.employeeFetchPromise = null;
+    this.employeeCountCache = null;
+  }
+
+  private setEmployeeCache(data: Record<string, unknown>[], complete: boolean): void {
+    this.employeeCache = {
+      data: [...data],
+      fetchedAt: Date.now(),
+      complete,
+    };
+  }
+
+  invalidateDepartmentCache(): void {
+    this.departmentListCache = null;
+    this.departmentFetchPromise = null;
+    this.departmentCache = null;
+    this.employeeCountCache = null;
+  }
+
+  invalidateAccessPointCache(): void {
+    this.accessPointCache = null;
+  }
+
+  invalidateAccessRuleCache(): void {
+    this.accessRuleCache = null;
+  }
+
+  invalidatePositionCache(): void {
+    this.positionCache = null;
+  }
+
+  invalidateLiveAdminCaches(): void {
+    this.invalidateEmployeeCache();
+    this.invalidateDepartmentCache();
+    this.invalidateAccessPointCache();
+    this.invalidateAccessRuleCache();
+    this.invalidatePositionCache();
+  }
 
   async testConnection(
     connection?: ConnectionType,
@@ -34,7 +80,96 @@ export class SigurDataService extends SigurServiceBase {
   }
 
   async getEmployees(filters?: Record<string, any>, connection?: ConnectionType) {
-    return this.fetchAllPaginated('/api/v1/employees', filters, connection, 1000);
+    return this.fetchAllPaginated('/api/v1/employees', filters, connection, 3000);
+  }
+
+  async getEmployeesPage(
+    filters?: Record<string, any>,
+    pagination?: { limit?: number; offset?: number },
+    connection?: ConnectionType,
+  ): Promise<Record<string, unknown>[]> {
+    const params = {
+      ...(filters || {}),
+      limit: Math.max(1, Math.min(3000, pagination?.limit || 200)),
+      offset: Math.max(0, pagination?.offset || 0),
+    };
+    const response = await this.request<any>('/api/v1/employees', params, connection);
+    const items = response?.data || response || [];
+    return Array.isArray(items) ? items : [];
+  }
+
+  async getEmployeesCount(filters?: Record<string, any>, connection?: ConnectionType): Promise<unknown> {
+    return this.request('/api/v1/employees/count', filters, connection);
+  }
+
+  private normalizeEmployeeCountGroups(raw: unknown): Map<number, number> {
+    const counts = new Map<number, number>();
+    if (!Array.isArray(raw)) {
+      return counts;
+    }
+
+    for (const item of raw) {
+      if (!item || typeof item !== 'object') continue;
+      const row = item as Record<string, unknown>;
+      const rawGroup = row.groupByField ?? row.groupByValue ?? row.departmentId ?? row.department_id ?? null;
+      const rawCount = row.employeeCount ?? row.count ?? row.value ?? null;
+      const departmentId = typeof rawGroup === 'number'
+        ? rawGroup
+        : (typeof rawGroup === 'string' && rawGroup.trim() ? Number(rawGroup) : NaN);
+      const employeeCount = typeof rawCount === 'number'
+        ? rawCount
+        : (typeof rawCount === 'string' && rawCount.trim() ? Number(rawCount) : NaN);
+
+      if (!Number.isFinite(departmentId) || departmentId <= 0 || !Number.isFinite(employeeCount)) {
+        continue;
+      }
+
+      counts.set(departmentId, employeeCount);
+    }
+
+    return counts;
+  }
+
+  async getEmployeeCountByDepartmentCached(connection?: ConnectionType): Promise<Map<number, number>> {
+    if (this.employeeCountCache && (Date.now() - this.employeeCountCache.fetchedAt) < this.CACHE_TTL) {
+      return new Map(this.employeeCountCache.map);
+    }
+
+    const rawCounts = await this.getEmployeesCount({ groupBy: 'departmentId' }, connection);
+    const map = this.normalizeEmployeeCountGroups(rawCounts);
+    this.employeeCountCache = { map: new Map(map), fetchedAt: Date.now() };
+    return map;
+  }
+
+  private async fetchEmployeesForDepartment(
+    departmentId: number,
+    connection?: ConnectionType,
+  ): Promise<Record<string, unknown>[]> {
+    const pageSizes = [1000, 250, 50];
+    let lastError: unknown = null;
+
+    for (const pageSize of pageSizes) {
+      try {
+        if (pageSize !== pageSizes[0]) {
+          console.warn(
+            `[sigur] retrying department ${departmentId} employees with smaller page size ${pageSize}`,
+          );
+        }
+
+        return await this.fetchAllPaginated<Record<string, unknown>>(
+          '/api/v1/employees',
+          { departmentId },
+          connection,
+          pageSize,
+        );
+      } catch (error) {
+        lastError = error;
+      }
+    }
+
+    throw lastError instanceof Error
+      ? lastError
+      : new Error(`Failed to fetch employees for department ${departmentId}`);
   }
 
   async getEmployeesByDepartments(
@@ -48,7 +183,7 @@ export class SigurDataService extends SigurServiceBase {
 
     if (total === 0) return allEmployees;
 
-    const concurrency = Math.min(8, total);
+    const concurrency = Math.min(16, total);
     let nextIndex = 0;
     let completed = 0;
 
@@ -58,12 +193,12 @@ export class SigurDataService extends SigurServiceBase {
         if (currentIndex >= total) return;
 
         const deptId = departmentIds[currentIndex];
-        const items = await this.fetchAllPaginated<Record<string, unknown>>(
-          '/api/v1/employees',
-          { departmentId: deptId },
-          connection,
-          1000,
-        );
+        let items: Record<string, unknown>[] = [];
+        try {
+          items = await this.fetchEmployeesForDepartment(deptId, connection);
+        } catch (error) {
+          console.warn(`[sigur] failed to fetch employees for department ${deptId}:`, error);
+        }
 
         for (const employee of items) {
           const id = employee.id as number;
@@ -74,6 +209,9 @@ export class SigurDataService extends SigurServiceBase {
         }
 
         completed++;
+        if (completed % 12 === 0 || items.length > 0 || completed === total) {
+          this.setEmployeeCache(allEmployees, false);
+        }
         if (onProgress) onProgress(allEmployees.length, completed, total);
       }
     };
@@ -83,6 +221,13 @@ export class SigurDataService extends SigurServiceBase {
     return allEmployees;
   }
 
+  private async getDepartmentIds(connection?: ConnectionType): Promise<number[]> {
+    const departments = await this.getDepartmentsCached(connection);
+    return departments
+      .map(department => typeof department.id === 'number' ? department.id : Number(department.id))
+      .filter((id): id is number => Number.isFinite(id) && id > 0);
+  }
+
   async getEmployeesLimited(maxItems = 3000, connection?: ConnectionType) {
     const response = await this.request<any>('/api/v1/employees', { limit: maxItems }, connection);
     const items = response?.data || response || [];
@@ -90,7 +235,11 @@ export class SigurDataService extends SigurServiceBase {
   }
 
   async getEmployeesCached(connection?: ConnectionType): Promise<Record<string, unknown>[]> {
-    if (this.employeeCache && (Date.now() - this.employeeCache.fetchedAt) < this.CACHE_TTL) {
+    if (
+      this.employeeCache
+      && this.employeeCache.complete
+      && (Date.now() - this.employeeCache.fetchedAt) < this.CACHE_TTL
+    ) {
       return this.employeeCache.data;
     }
 
@@ -100,10 +249,24 @@ export class SigurDataService extends SigurServiceBase {
     }
 
     console.log('[sigur] fetching employees (no cache)...');
-    this.employeeFetchPromise = this.getEmployees(undefined, connection)
-      .then(data => {
-        const employees = data as Record<string, unknown>[];
-        this.employeeCache = { data: employees, fetchedAt: Date.now() };
+    this.setEmployeeCache([], false);
+    this.employeeFetchPromise = this.getDepartmentIds(connection)
+      .then(async data => {
+        let employees: Record<string, unknown>[] = [];
+
+        if (data.length > 0) {
+          console.log(`[sigur] building employee cache from ${data.length} departments`);
+          employees = await this.getEmployeesByDepartments(data, connection);
+        } else {
+          console.warn('[sigur] no departments found; falling back to full employees endpoint');
+        }
+
+        if (employees.length === 0) {
+          console.warn('[sigur] department aggregation returned 0 employees; falling back to full employees endpoint');
+          employees = await this.getEmployees(undefined, connection) as Record<string, unknown>[];
+        }
+
+        this.setEmployeeCache(employees, true);
         console.log('[sigur] cached', employees.length, 'employees');
         return employees;
       })
@@ -114,14 +277,48 @@ export class SigurDataService extends SigurServiceBase {
     return this.employeeFetchPromise;
   }
 
+  findEmployeeInCache(id: number): Record<string, unknown> | null {
+    if (!this.employeeCache || (Date.now() - this.employeeCache.fetchedAt) >= this.CACHE_TTL) {
+      return null;
+    }
+
+    return this.employeeCache.data.find(employee => employee.id === id) || null;
+  }
+
+  getEmployeesCacheSnapshot(): Record<string, unknown>[] | null {
+    if (!this.employeeCache || (Date.now() - this.employeeCache.fetchedAt) >= this.CACHE_TTL) {
+      return null;
+    }
+
+    return this.employeeCache.data;
+  }
+
+  isEmployeeCacheLoading(): boolean {
+    return this.employeeFetchPromise !== null;
+  }
+
+  getEmployeesCacheMeta(): { count: number; loading: boolean; complete: boolean } {
+    const isFresh = !!this.employeeCache && (Date.now() - this.employeeCache.fetchedAt) < this.CACHE_TTL;
+    return {
+      count: isFresh ? this.employeeCache?.data.length || 0 : 0,
+      loading: this.isEmployeeCacheLoading(),
+      complete: isFresh ? this.employeeCache?.complete === true : false,
+    };
+  }
+
+  warmEmployeesCache(connection?: ConnectionType): void {
+    void this.getEmployeesCached(connection).catch(error => {
+      console.warn('[sigur] failed to warm employee cache:', error);
+    });
+  }
+
   async getDepartmentMapCached(connection?: ConnectionType): Promise<Map<number, string>> {
     if (this.departmentCache && (Date.now() - this.departmentCache.fetchedAt) < this.CACHE_TTL) {
       return this.departmentCache.map;
     }
 
     console.log('[sigur] fetching departments for cache...');
-    const response = await this.request<any>('/api/v1/departments', { limit: 500 }, connection);
-    const items = response?.data || response || [];
+    const items = await this.getDepartmentsCached(connection);
     const map = new Map<number, string>();
 
     if (Array.isArray(items)) {
@@ -137,6 +334,30 @@ export class SigurDataService extends SigurServiceBase {
     return map;
   }
 
+  async getDepartmentsCached(connection?: ConnectionType): Promise<Record<string, unknown>[]> {
+    if (this.departmentListCache && (Date.now() - this.departmentListCache.fetchedAt) < this.CACHE_TTL) {
+      return this.departmentListCache.data;
+    }
+
+    if (this.departmentFetchPromise) {
+      console.log('[sigur] waiting for ongoing department fetch...');
+      return this.departmentFetchPromise;
+    }
+
+    console.log('[sigur] fetching departments list (no cache)...');
+    this.departmentFetchPromise = this.getDepartments(connection)
+      .then(items => {
+        const data = items as Record<string, unknown>[];
+        this.departmentListCache = { data, fetchedAt: Date.now() };
+        return data;
+      })
+      .finally(() => {
+        this.departmentFetchPromise = null;
+      });
+
+    return this.departmentFetchPromise;
+  }
+
   async getDepartments(connection?: ConnectionType) {
     return this.fetchAllPaginated('/api/v1/departments', undefined, connection);
   }
@@ -145,8 +366,8 @@ export class SigurDataService extends SigurServiceBase {
     return this.fetchAllPaginated('/api/v1/cards', filters, connection);
   }
 
-  async getCardBindings(connection?: ConnectionType) {
-    return this.fetchAllPaginated('/api/v1/bindings/employees-cards', undefined, connection);
+  async getCardBindings(filters?: Record<string, any>, connection?: ConnectionType) {
+    return this.fetchAllPaginated('/api/v1/bindings/employees-cards', filters, connection);
   }
 
   async getAccessPoints(connection?: ConnectionType) {
@@ -173,8 +394,35 @@ export class SigurDataService extends SigurServiceBase {
     return map;
   }
 
+  async getAccessPointOptionsCached(connection?: ConnectionType): Promise<Array<{ id: number; name: string }>> {
+    const accessPointMap = await this.getAccessPointMapCached(connection);
+    return [...accessPointMap.entries()]
+      .map(([id, name]) => ({ id, name }))
+      .sort((left, right) => left.name.localeCompare(right.name, 'ru'));
+  }
+
   async getAccessRules(connection?: ConnectionType) {
     return this.fetchAllPaginated('/api/v1/accessrules', undefined, connection);
+  }
+
+  async getAccessRuleMapCached(connection?: ConnectionType): Promise<Map<number, string>> {
+    if (this.accessRuleCache && (Date.now() - this.accessRuleCache.fetchedAt) < this.CACHE_TTL) {
+      return this.accessRuleCache.map;
+    }
+
+    console.log('[sigur] fetching access rules for cache...');
+    const accessRules = await this.getAccessRules(connection) as Record<string, unknown>[];
+    const map = new Map<number, string>();
+
+    for (const rule of accessRules) {
+      if (typeof rule.id === 'number' && typeof rule.name === 'string') {
+        map.set(rule.id, rule.name);
+      }
+    }
+
+    this.accessRuleCache = { map, fetchedAt: Date.now() };
+    console.log('[sigur] cached', map.size, 'access rules');
+    return map;
   }
 
   async getZones(connection?: ConnectionType) {
@@ -492,6 +740,24 @@ export class SigurDataService extends SigurServiceBase {
     }
   }
 
+  async getPositionOptionsCached(connection?: ConnectionType): Promise<Array<{ id: number; name: string }>> {
+    if (this.positionCache && (Date.now() - this.positionCache.fetchedAt) < this.CACHE_TTL) {
+      return this.positionCache.data;
+    }
+
+    const positions = await this.getPositions(connection);
+    const data = (positions || [])
+      .map(position => ({
+        id: typeof position.id === 'number' ? position.id : Number(position.id),
+        name: typeof position.name === 'string' ? position.name.trim() : '',
+      }))
+      .filter(position => Number.isFinite(position.id) && position.name)
+      .sort((left, right) => left.name.localeCompare(right.name, 'ru'));
+
+    this.positionCache = { data, fetchedAt: Date.now() };
+    return data;
+  }
+
   async getDepartmentById(id: number, connection?: ConnectionType) {
     return this.request<Record<string, unknown>>(`/api/v1/departments/${id}`, undefined, connection);
   }
@@ -506,6 +772,17 @@ export class SigurDataService extends SigurServiceBase {
     connection?: ConnectionType,
   ): Promise<Record<string, unknown>> {
     return this.mutate<Record<string, unknown>>('put', `/api/v1/employees/${id}`, body, undefined, connection);
+  }
+
+  async createEmployee(
+    body: Record<string, unknown>,
+    connection?: ConnectionType,
+  ): Promise<Record<string, unknown>> {
+    return this.mutate<Record<string, unknown>>('post', '/api/v1/employees', body, undefined, connection);
+  }
+
+  async deleteEmployee(id: number, connection?: ConnectionType): Promise<void> {
+    await this.mutate<void>('delete', `/api/v1/employees/${id}`, undefined, undefined, connection);
   }
 
   async blockEmployee(id: number, connection?: ConnectionType): Promise<void> {
@@ -523,6 +800,18 @@ export class SigurDataService extends SigurServiceBase {
     return this.mutate<Record<string, unknown>>('post', '/api/v1/departments', body, undefined, connection);
   }
 
+  async updateDepartment(
+    id: number,
+    body: Record<string, unknown>,
+    connection?: ConnectionType,
+  ): Promise<Record<string, unknown>> {
+    return this.mutate<Record<string, unknown>>('put', `/api/v1/departments/${id}`, body, undefined, connection);
+  }
+
+  async deleteDepartment(id: number, connection?: ConnectionType): Promise<void> {
+    await this.mutate<void>('delete', `/api/v1/departments/${id}`, undefined, undefined, connection);
+  }
+
   async createPosition(
     body: Record<string, unknown>,
     connection?: ConnectionType,
@@ -530,16 +819,48 @@ export class SigurDataService extends SigurServiceBase {
     return this.mutate<Record<string, unknown>>('post', '/api/v1/positions', body, undefined, connection);
   }
 
-  async getEmployeeAccessPointBindings(connection?: ConnectionType): Promise<Record<string, unknown>[]> {
+  async getEmployeeAccessPointBindings(
+    filters?: Record<string, any>,
+    connection?: ConnectionType,
+  ): Promise<Record<string, unknown>[]> {
     try {
       return await this.fetchAllPaginated<Record<string, unknown>>(
         '/api/v1/bindings/employees-accesspoints',
-        undefined,
+        filters,
         connection,
       );
     } catch {
       return [];
     }
+  }
+
+  async getEmployeeAccessRuleBindings(
+    filters?: Record<string, any>,
+    connection?: ConnectionType,
+  ): Promise<Record<string, unknown>[]> {
+    try {
+      return await this.fetchAllPaginated<Record<string, unknown>>(
+        '/api/v1/bindings/employees-accessrules',
+        filters,
+        connection,
+      );
+    } catch {
+      return [];
+    }
+  }
+
+  async addEmployeeAccessRuleBinding(
+    body: Record<string, unknown>,
+    connection?: ConnectionType,
+  ): Promise<void> {
+    await this.mutate<void>('post', '/api/v1/bindings/employees-accessrules', body, undefined, connection);
+  }
+
+  async deleteEmployeeAccessRuleBinding(
+    body: Record<string, unknown>,
+    connection?: ConnectionType,
+  ): Promise<void> {
+    await this.mutate<void>('post', '/api/v1/bindings/employees-accessrules/delete', body, undefined, connection);
   }
 
   async createEmployeeAccessPointBindings(
@@ -565,6 +886,21 @@ export class SigurDataService extends SigurServiceBase {
       'post',
       '/api/v1/bindings/employees-accesspoints/delete',
       { employeeIds, accessPointIds },
+      undefined,
+      connection,
+    );
+  }
+
+  async updateEmployeeCardBindingExpiration(
+    employeeId: number,
+    cardId: number,
+    expirationDate: string,
+    connection?: ConnectionType,
+  ): Promise<void> {
+    await this.mutate<void>(
+      'put',
+      '/api/v1/bindings/employees-cards',
+      { employeeId, cardId, expirationDate },
       undefined,
       connection,
     );

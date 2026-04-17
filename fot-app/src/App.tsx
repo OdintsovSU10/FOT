@@ -43,7 +43,6 @@ const PayslipManagePage = lazy(() => import('./pages/super-admin/PayslipManagePa
 const SchedulesPage = lazy(() => import('./pages/admin/SchedulesPage').then(m => ({ default: m.SchedulesPage })));
 
 // Employees & SKUD
-const EmployeesPage = lazy(() => import('./pages/employees/EmployeesPage').then(m => ({ default: m.EmployeesPage })));
 const EmployeeCardPage = lazy(() => import('./pages/employees/EmployeeCardPage').then(m => ({ default: m.EmployeeCardPage })));
 const SigurSettingsPage = lazy(() => import('./pages/skud/SigurSettingsPage').then(m => ({ default: m.SigurSettingsPage })));
 const SigurRawDataPage = lazy(() => import('./pages/skud/SigurRawDataPage').then(m => ({ default: m.SigurRawDataPage })));
@@ -403,14 +402,10 @@ const AppRoutes = () => {
           />
         </Route>
 
-        <Route element={<ProtectedRoute requiredPage="/employees" />}>
+        <Route element={<ProtectedRoute requiredPage="/skud-settings" />}>
           <Route
             path="/employees"
-            element={
-              <Layout title="Сотрудники" theme={theme} onToggleTheme={toggleTheme}>
-                <EmployeesPage />
-              </Layout>
-            }
+            element={<Navigate to="/skud-settings?tab=employees" replace />}
           />
         </Route>
 

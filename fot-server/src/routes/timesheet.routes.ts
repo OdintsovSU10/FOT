@@ -8,6 +8,12 @@ router.use(authenticate);
 
 // GET /api/timesheet?month=YYYY-MM&department_id=...
 router.get(
+  '/overview',
+  requireAnyPageAccess(['/timesheet', '/timesheet-hr'], 'view'),
+  timesheetController.getOverview
+);
+
+router.get(
   '/',
   requireAnyPageAccess(['/employee/timesheet', '/timesheet', '/timesheet-hr'], 'view'),
   timesheetController.getAll

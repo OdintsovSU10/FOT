@@ -25,22 +25,46 @@ router.get(
   structureController.getPositions
 );
 
-// === Отделы (только super_admin) ===
+// === Отделы ===
 
 // POST /api/structure/departments - создание отдела
 router.post(
   '/departments',
-  requirePageAccess('/skud-settings', 'edit'),
+  requirePageAccess('/employees/structure-manage', 'edit'),
   requireCritical2FA,
   structureController.createDepartment
+);
+
+// PUT /api/structure/departments/:id - переименование/смена родителя
+router.put(
+  '/departments/:id',
+  requirePageAccess('/employees/structure-manage', 'edit'),
+  requireCritical2FA,
+  structureController.updateDepartment
+);
+
+// POST /api/structure/departments/batch-move - массовое перемещение отделов
+router.post(
+  '/departments/batch-move',
+  requirePageAccess('/employees/structure-manage', 'edit'),
+  requireCritical2FA,
+  structureController.batchMoveDepartments
 );
 
 // DELETE /api/structure/departments/:id - удаление отдела
 router.delete(
   '/departments/:id',
-  requirePageAccess('/skud-settings', 'edit'),
+  requirePageAccess('/employees/structure-manage', 'edit'),
   requireCritical2FA,
   structureController.deleteDepartment
+);
+
+// DELETE /api/structure/departments/:id/recursive - рекурсивное удаление отдела
+router.delete(
+  '/departments/:id/recursive',
+  requirePageAccess('/employees/structure-manage', 'edit'),
+  requireCritical2FA,
+  structureController.deleteDepartmentRecursive
 );
 
 // DELETE /api/structure/clear - очистка структуры (отделы + сотрудники)

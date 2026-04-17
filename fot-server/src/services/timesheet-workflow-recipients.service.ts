@@ -7,6 +7,7 @@ import {
   type DataScope,
 } from '../config/access-control.js';
 import { getEffectiveAccess } from './access-control.service.js';
+import { loadManagedDepartmentMap } from './department-access.service.js';
 import { getRoleByCode, getRoleById } from './roles-cache.service.js';
 
 type WorkflowRecipientKind = 'submit' | 'review' | 'monitor';
@@ -141,6 +142,15 @@ export async function listTimesheetWorkflowRecipientIds(
       .map((profile) => profile.employee_id)
       .filter((employeeId): employeeId is number => Number.isInteger(employeeId)),
   );
+  const managedDepartmentMap = await loadManagedDepartmentMap(
+    profiles.map(profile => ({
+      user_id: profile.id,
+      employee_id: profile.employee_id,
+      primary_department_id: profile.employee_id != null
+        ? (departmentByEmployeeId.get(profile.employee_id) ?? null)
+        : null,
+    })),
+  );
   const roleAccessByRef = await loadRoleWorkflowAccess(
     profiles
       .map((profile) => profile.system_role_id || profile.position_type)
@@ -178,8 +188,8 @@ export async function listTimesheetWorkflowRecipientIds(
     }
 
     if (roleAccess.dataScope === 'department' && profile.employee_id != null) {
-      const profileDepartmentId = departmentByEmployeeId.get(profile.employee_id) ?? null;
-      if (profileDepartmentId === departmentId) {
+      const managedDepartmentIds = managedDepartmentMap.get(profile.id)?.managed_department_ids || [];
+      if (managedDepartmentIds.includes(departmentId)) {
         recipients.add(profile.id);
       }
     }

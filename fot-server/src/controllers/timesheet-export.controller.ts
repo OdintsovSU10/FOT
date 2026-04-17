@@ -3,7 +3,7 @@ import ExcelJS from 'exceljs';
 import type { AuthenticatedRequest } from '../types/index.js';
 import { fetchTimesheetDataForDepartment, type TimesheetExportHalf } from '../services/timesheet-export.service.js';
 import { buildTimesheetSheet } from '../services/timesheet-excel.service.js';
-import { resolveRequestDataScope } from '../services/data-scope.service.js';
+import { resolveRequestDataScope, resolveScopedDepartmentId } from '../services/data-scope.service.js';
 
 const MONTH_NAMES = ['', 'Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь',
   'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
@@ -20,8 +20,12 @@ export async function exportTimesheet(req: AuthenticatedRequest, res: Response) 
     const exportHalf: TimesheetExportHalf = half === 'H1' || half === 'H2' || half === 'FULL'
       ? half
       : 'FULL';
-    const deptId = department_id && typeof department_id === 'string' ? department_id : null;
+    const requestedDepartmentId = department_id && typeof department_id === 'string' ? department_id : null;
     const scope = await resolveRequestDataScope(req);
+    const deptId = await resolveScopedDepartmentId(req, requestedDepartmentId);
+    if (scope === 'department' && !deptId) {
+      return res.status(403).json({ success: false, error: 'Нет доступа к выбранной бригаде для экспорта' });
+    }
     const data = await fetchTimesheetDataForDepartment(
       month,
       deptId,

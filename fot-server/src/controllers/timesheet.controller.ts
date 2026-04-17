@@ -2,12 +2,22 @@ import { Response } from 'express';
 import { z } from 'zod';
 import { supabase } from '../config/database.js';
 import { auditService } from '../services/audit.service.js';
-import type { AuthenticatedRequest, TimeStatus, IResolvedSchedule, WorkCategory } from '../types/index.js';
+import type {
+  AuthenticatedRequest,
+  IResolvedSchedule,
+  TimeStatus,
+  TimesheetApprovalStatus,
+  WorkCategory,
+} from '../types/index.js';
 import type { DataScope } from '../config/access-control.js';
 import { exportTimesheet } from './timesheet-export.controller.js';
 import { exportTimesheetMass } from './timesheet-mass-export.controller.js';
-import { resolveSchedulesForPeriod, isWorkingDay, getEffectiveLateThreshold, getScheduleForDate, loadCalendarMonth } from '../services/schedule.service.js';
-import { resolveRequestDataScope } from '../services/data-scope.service.js';
+import { resolveSchedulesForPeriod, resolveObjectSchedule, isWorkingDay, getEffectiveLateThreshold, getScheduleForDate, loadCalendarMonth } from '../services/schedule.service.js';
+import {
+  resolveManagedDepartmentIds,
+  resolveRequestDataScope,
+  resolveScopedDepartmentId,
+} from '../services/data-scope.service.js';
 import { hasPageEdit, hasPageView } from '../services/access-control.service.js';
 import { employeeChangesService } from '../services/employee-changes.service.js';
 import { employeeCache } from '../services/employee-cache.service.js';
@@ -25,6 +35,7 @@ import {
   listEmployeeIdsAssignedToDepartmentPeriod,
   resolveTimesheetPeriodRange,
 } from '../services/timesheet-department-assignments.service.js';
+import { fetchTimesheetDataForDepartment } from '../services/timesheet-export.service.js';
 
 const validStatuses = ['work', 'vacation', 'dayoff', 'remote', 'unpaid', 'absent', 'sick', 'business_trip', 'manual'] as const satisfies readonly [TimeStatus, ...TimeStatus[]];
 
@@ -84,6 +95,18 @@ const teamManagementAddEmployeeSchema = teamManagementMutationSchema.extend({
 
 const MANAGED_TIMESHEET_PAGE_KEYS = ['/timesheet', '/timesheet-hr'] as const;
 const TIMESHEET_TEAM_MANAGEMENT_PAGE_KEY = '/timesheet/team-management';
+const TIMESHEET_APPROVAL_HALVES = ['H1', 'H2'] as const;
+
+interface IManagedDepartmentTimesheetSummary {
+  department_id: string;
+  department_name: string;
+  employee_count: number;
+  norm_hours: number;
+  actual_hours: number;
+  deviations: { late: number; absent: number; sick: number };
+  approval_by_half: Record<'H1' | 'H2' | 'FULL', TimesheetApprovalStatus | null>;
+  is_primary: boolean;
+}
 
 function toMonthIndex(year: number, month: number): number {
   return year * 12 + month - 1;
@@ -126,6 +149,38 @@ async function resolvePlannedHoursByItems(items: Array<{ employee_id: number; wo
   }));
 }
 
+async function resolvePlannedHoursForObjectItem(params: {
+  employee_id: number;
+  work_date: string;
+  object_id?: string | null;
+}): Promise<number | null> {
+  const { data: employee, error } = await supabase
+    .from('employees')
+    .select('id, work_category')
+    .eq('id', params.employee_id)
+    .maybeSingle();
+
+  if (error) throw error;
+  if (!employee) return null;
+
+  const employeeSchedule = await resolveSchedulesForPeriod(
+    [{
+      id: Number(employee.id),
+      work_category: (employee.work_category as WorkCategory | null) ?? null,
+    }],
+    params.work_date,
+    params.work_date,
+  );
+
+  const objectSchedule = params.object_id
+    ? await resolveObjectSchedule(params.object_id, params.work_date)
+    : null;
+  const effectiveSchedule = objectSchedule || employeeSchedule.get(params.employee_id)?.get(params.work_date) || null;
+  if (!effectiveSchedule) return null;
+
+  return getScheduleForDate(effectiveSchedule, new Date(`${params.work_date}T00:00:00`)).work_hours;
+}
+
 async function canAccessEmployeeForTimesheetDate(
   req: AuthenticatedRequest,
   employeeId: number | null | undefined,
@@ -148,11 +203,15 @@ async function canAccessEmployeeForTimesheetDate(
     return req.user.employee_id === employeeId;
   }
 
-  if (!req.user.department_id) {
+  const managedDepartmentIds = await resolveManagedDepartmentIds(req);
+  if (managedDepartmentIds.length === 0) {
     return false;
   }
 
-  return isEmployeeAssignedToDepartmentOnDate(employeeId, req.user.department_id, workDate);
+  const matches = await Promise.all(
+    managedDepartmentIds.map(departmentId => isEmployeeAssignedToDepartmentOnDate(employeeId, departmentId, workDate)),
+  );
+  return matches.some(Boolean);
 }
 
 async function canAccessEmployeeForTimesheetPeriod(
@@ -178,12 +237,15 @@ async function canAccessEmployeeForTimesheetPeriod(
     return req.user.employee_id === employeeId;
   }
 
-  if (!req.user.department_id) {
+  const managedDepartmentIds = await resolveManagedDepartmentIds(req);
+  if (managedDepartmentIds.length === 0) {
     return false;
   }
 
-  const employeeIds = await listEmployeeIdsAssignedToDepartmentPeriod(req.user.department_id, startDate, endDate);
-  return employeeIds.includes(employeeId);
+  const employeeIdsByDepartment = await Promise.all(
+    managedDepartmentIds.map(departmentId => listEmployeeIdsAssignedToDepartmentPeriod(departmentId, startDate, endDate)),
+  );
+  return employeeIdsByDepartment.flat().includes(employeeId);
 }
 
 function clampInputHoursForScope(
@@ -202,36 +264,23 @@ async function resolveAllowedObjectHours(
   scope: string | null,
   employeeId: number,
   workDate: string,
-  objectKey: string,
+  objectId: string | null | undefined,
   requestedHours: number,
 ): Promise<number> {
   if (scope !== 'department') {
     return requestedHours;
   }
 
-  const plannedHours = (await resolvePlannedHoursByItems([{ employee_id: employeeId, work_date: workDate }]))
-    .get(`${employeeId}_${workDate}`);
+  const plannedHours = await resolvePlannedHoursForObjectItem({
+    employee_id: employeeId,
+    work_date: workDate,
+    object_id: objectId ?? null,
+  });
   if (plannedHours == null) {
     return requestedHours;
   }
 
-  const { data: existingEntries, error } = await supabase
-    .from('attendance_adjustments')
-    .select('source_id, hours_override')
-    .eq('employee_id', employeeId)
-    .eq('work_date', workDate)
-    .eq('source_type', OBJECT_ADJUSTMENT_SOURCE_TYPE);
-
-  if (error) throw error;
-
-  const otherHours = (existingEntries || []).reduce((sum, row) => {
-    if (String(row.source_id ?? '') === objectKey) {
-      return sum;
-    }
-    return sum + (typeof row.hours_override === 'number' ? row.hours_override : 0);
-  }, 0);
-
-  return Math.max(0, Math.min(requestedHours, Math.max(0, plannedHours - otherHours)));
+  return Math.max(0, Math.min(requestedHours, plannedHours));
 }
 
 async function hasManagedTimesheetAccess(
@@ -254,8 +303,11 @@ async function resolveTimesheetScope(req: AuthenticatedRequest): Promise<DataSco
     return 'all';
   }
 
-  if (req.user.department_id && await hasManagedTimesheetAccess(req, 'view')) {
-    return 'department';
+  if (await hasManagedTimesheetAccess(req, 'view')) {
+    const managedDepartmentIds = await resolveManagedDepartmentIds(req);
+    if (managedDepartmentIds.length > 0) {
+      return 'department';
+    }
   }
 
   if (explicitScope) {
@@ -283,7 +335,7 @@ async function resolveTimesheetScopedDepartmentId(
   }
 
   if (scope === 'department') {
-    return req.user.department_id ?? null;
+    return resolveScopedDepartmentId(req, requestedDepartmentId);
   }
 
   return null;
@@ -311,7 +363,144 @@ async function resolveManagedDepartmentId(
   return resolveTimesheetScopedDepartmentId(req, requestedDepartmentId);
 }
 
+function deriveFullApprovalStatus(statuses: Record<'H1' | 'H2', TimesheetApprovalStatus | null>): TimesheetApprovalStatus | null {
+  const values = Object.values(statuses).filter((status): status is TimesheetApprovalStatus => Boolean(status));
+  if (values.length === 0) {
+    return null;
+  }
+  if (values.includes('returned')) return 'returned';
+  if (values.includes('rejected')) return 'rejected';
+  if (statuses.H1 === 'approved' && statuses.H2 === 'approved') return 'approved';
+  if (values.includes('submitted')) return 'submitted';
+  if (values.includes('approved')) return 'draft';
+  return values[0] ?? null;
+}
+
+async function buildManagedDepartmentTimesheetSummary(params: {
+  departmentId: string;
+  month: string;
+  half: 'H1' | 'H2' | 'FULL';
+  isPrimary: boolean;
+}): Promise<IManagedDepartmentTimesheetSummary> {
+  const data = await fetchTimesheetDataForDepartment(
+    params.month,
+    params.departmentId,
+    params.half,
+    'capped_to_schedule',
+  );
+
+  let normHours = 0;
+  for (const employee of data.employees) {
+    for (const day of data.exportDays) {
+      const dateStr = `${params.month}-${String(day).padStart(2, '0')}`;
+      const schedule = data.dailySchedulesMap.get(employee.id)?.get(dateStr);
+      if (!schedule || !isWorkingDay(schedule, new Date(data.year, data.mon - 1, day), data.calendarMonth)) {
+        continue;
+      }
+      normHours += getScheduleForDate(schedule, new Date(data.year, data.mon - 1, day)).work_hours;
+    }
+  }
+
+  let actualHours = 0;
+  const deviations = { late: 0, absent: 0, sick: 0 };
+  for (const entry of data.entries) {
+    const visibleHours = entry.display_hours_worked ?? entry.hours_worked;
+    if (typeof visibleHours === 'number') {
+      actualHours += visibleHours;
+    }
+    if (entry.status === 'absent') deviations.absent++;
+    if (entry.status === 'sick') deviations.sick++;
+
+    const workDate = entry.work_date;
+    const schedule = data.dailySchedulesMap.get(entry.employee_id)?.get(workDate) || data.schedulesMap.get(entry.employee_id);
+    const lateThreshold = schedule ? getEffectiveLateThreshold(schedule, new Date(`${workDate}T00:00:00`)) : '09:00:00';
+    if (entry.status === 'work' && entry.first_entry && entry.first_entry > lateThreshold) {
+      deviations.late++;
+    }
+  }
+
+  const approvalPeriods = TIMESHEET_APPROVAL_HALVES.map(half => `${params.month}-${half}`);
+  const { data: approvals, error: approvalsError } = await supabase
+    .from('timesheet_approvals')
+    .select('period, status')
+    .eq('department_id', params.departmentId)
+    .in('period', approvalPeriods);
+
+  if (approvalsError) {
+    throw approvalsError;
+  }
+
+  const approvalByHalf: Record<'H1' | 'H2' | 'FULL', TimesheetApprovalStatus | null> = {
+    H1: null,
+    H2: null,
+    FULL: null,
+  };
+  for (const row of approvals || []) {
+    if (row.period === `${params.month}-H1`) approvalByHalf.H1 = row.status as TimesheetApprovalStatus;
+    if (row.period === `${params.month}-H2`) approvalByHalf.H2 = row.status as TimesheetApprovalStatus;
+  }
+  approvalByHalf.FULL = deriveFullApprovalStatus({
+    H1: approvalByHalf.H1,
+    H2: approvalByHalf.H2,
+  });
+
+  return {
+    department_id: params.departmentId,
+    department_name: data.departmentName,
+    employee_count: data.employees.length,
+    norm_hours: normHours,
+    actual_hours: actualHours,
+    deviations,
+    approval_by_half: approvalByHalf,
+    is_primary: params.isPrimary,
+  };
+}
+
 export const timesheetController = {
+  /** GET /api/timesheet/overview?month=YYYY-MM&half=H1|H2|FULL */
+  async getOverview(req: AuthenticatedRequest, res: Response) {
+    try {
+      const month = typeof req.query.month === 'string' ? req.query.month : null;
+      const half = req.query.half === 'H1' || req.query.half === 'H2' || req.query.half === 'FULL'
+        ? req.query.half
+        : 'FULL';
+      const scope = await resolveTimesheetScope(req);
+      if (scope !== 'department') {
+        return res.status(403).json({ success: false, error: 'Overview табелей доступен только для руководителей отделов' });
+      }
+      if (!month || !resolveTimesheetPeriodRange(month, half)) {
+        return res.status(400).json({ success: false, error: 'Параметр month обязателен (формат YYYY-MM)' });
+      }
+
+      const managedDepartmentIds = await resolveManagedDepartmentIds(req);
+      if (managedDepartmentIds.length === 0) {
+        return res.json({ success: true, data: [] });
+      }
+
+      const summaries = await Promise.all(
+        managedDepartmentIds.map(departmentId => buildManagedDepartmentTimesheetSummary({
+          departmentId,
+          month,
+          half,
+          isPrimary: departmentId === req.user.department_id,
+        })),
+      );
+
+      res.json({
+        success: true,
+        data: summaries.sort((left, right) => {
+          if (left.is_primary !== right.is_primary) {
+            return left.is_primary ? -1 : 1;
+          }
+          return left.department_name.localeCompare(right.department_name, 'ru');
+        }),
+      });
+    } catch (err) {
+      console.error('timesheet.getOverview error:', err);
+      res.status(500).json({ success: false, error: 'Ошибка загрузки обзора табелей' });
+    }
+  },
+
   /** GET /api/timesheet?month=YYYY-MM&department_id=...&employee_id=... */
   async getAll(req: AuthenticatedRequest, res: Response) {
     try {
@@ -772,7 +961,7 @@ export const timesheetController = {
         scope,
         parsed.employee_id,
         parsed.work_date,
-        parsed.object_key,
+        parsed.object_id,
         parsed.hours_worked,
       );
 

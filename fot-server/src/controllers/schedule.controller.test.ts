@@ -89,6 +89,13 @@ vi.mock('../services/schedule.service.js', () => ({
 
 vi.mock('../services/data-scope.service.js', () => ({
   resolveRequestDataScope: vi.fn(async () => mockedState.scope),
+  resolveScopedDepartmentIds: vi.fn(async (req: AuthenticatedRequest, departmentIds?: string[] | null) => {
+    if (mockedState.scope !== 'department') {
+      return departmentIds || [];
+    }
+    const allowedDepartmentId = req.user.department_id;
+    return (departmentIds || []).filter(departmentId => departmentId === allowedDepartmentId);
+  }),
 }));
 
 import { scheduleController } from './schedule.controller.js';

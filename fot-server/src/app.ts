@@ -1,7 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
-import { env } from './config/env.js';
+import { corsAllowedOrigins } from './config/env.js';
 import { apiLimiter } from './middleware/rateLimit.js';
 
 // Routes
@@ -36,7 +36,13 @@ app.set('trust proxy', 1);
 // Security middleware
 app.use(helmet());
 app.use(cors({
-  origin: env.CORS_ORIGIN,
+  origin(origin, callback) {
+    if (!origin || corsAllowedOrigins.includes(origin)) {
+      callback(null, true);
+      return;
+    }
+    callback(new Error(`CORS origin is not allowed: ${origin}`));
+  },
   credentials: true,
   exposedHeaders: ['Content-Disposition'],
 }));

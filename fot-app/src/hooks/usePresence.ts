@@ -1,3 +1,4 @@
+import { useCallback } from 'react';
 import { usePresenceQuery } from './useEmployeeDirectory';
 import { useDocumentVisibility } from './useDocumentVisibility';
 
@@ -13,14 +14,17 @@ export const usePresence = (departmentId: string | null): IUsePresenceReturn => 
   const isVisible = useDocumentVisibility();
   const { data, isLoading, error, dataUpdatedAt, refetch } = usePresenceQuery(departmentId, {
     enabled: !!departmentId,
-    refetchInterval: isVisible ? 60_000 : false,
+    refetchInterval: isVisible ? 120_000 : false,
   });
+  const refresh = useCallback(() => {
+    void refetch();
+  }, [refetch]);
 
   return {
     employees: data || [],
     loading: isLoading,
     error: error ? 'Ошибка загрузки статусов' : null,
     lastUpdated: dataUpdatedAt ? new Date(dataUpdatedAt) : null,
-    refresh: () => { refetch(); },
+    refresh,
   };
 };

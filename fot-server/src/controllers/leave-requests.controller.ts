@@ -4,7 +4,11 @@ import type { AuthenticatedRequest } from '../types/index.js';
 import { pushService } from '../services/push.service.js';
 import { notificationService } from '../services/notification.service.js';
 import { getIo } from '../socket/io-instance.js';
-import { canAccessEmployeeInScope, resolveScopedDepartmentId } from '../services/data-scope.service.js';
+import {
+  canAccessEmployeeInScope,
+  resolveManagedDepartmentIds,
+  resolveScopedDepartmentId,
+} from '../services/data-scope.service.js';
 import { upsertAttendanceAdjustment } from '../services/attendance.service.js';
 import type { TimeStatus } from '../types/index.js';
 
@@ -30,6 +34,26 @@ async function loadEmployeeIdsByDepartment(departmentId: string): Promise<Array<
     .from('employees')
     .select('id, full_name')
     .eq('org_department_id', departmentId)
+    .eq('employment_status', 'active');
+
+  if (error) {
+    throw error;
+  }
+
+  return data || [];
+}
+
+async function loadEmployeeIdsByDepartments(
+  departmentIds: string[],
+): Promise<Array<{ id: number; full_name: string | null; org_department_id?: string | null }>> {
+  if (departmentIds.length === 0) {
+    return [];
+  }
+
+  const { data, error } = await supabase
+    .from('employees')
+    .select('id, full_name, org_department_id')
+    .in('org_department_id', departmentIds)
     .eq('employment_status', 'active');
 
   if (error) {
@@ -144,13 +168,13 @@ const getMy = async (req: AuthenticatedRequest, res: Response): Promise<void> =>
 /** Заявления отдела (header) */
 const getDepartment = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
-    const departmentId = await resolveScopedDepartmentId(req, null);
-    if (!departmentId) {
+    const departmentIds = await resolveManagedDepartmentIds(req);
+    if (departmentIds.length === 0) {
       res.json({ success: true, data: [] });
       return;
     }
 
-    const employees = await loadEmployeeIdsByDepartment(departmentId);
+    const employees = await loadEmployeeIdsByDepartments(departmentIds);
     const empIds = (employees || []).map(e => e.id);
     if (empIds.length === 0) {
       res.json({ success: true, data: [] });
@@ -182,6 +206,7 @@ const getDepartment = async (req: AuthenticatedRequest, res: Response): Promise<
 const getAll = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
     const scopedDepartmentId = await resolveScopedDepartmentId(req, null);
+    const managedDepartmentIds = await resolveManagedDepartmentIds(req);
     let query = supabase
       .from('leave_requests')
       .select('*')
@@ -192,8 +217,10 @@ const getAll = async (req: AuthenticatedRequest, res: Response): Promise<void> =
       query = query.eq('status', status);
     }
 
-    if (scopedDepartmentId) {
-      const employees = await loadEmployeeIdsByDepartment(scopedDepartmentId);
+    if (managedDepartmentIds.length > 0) {
+      const employees = scopedDepartmentId
+        ? await loadEmployeeIdsByDepartment(scopedDepartmentId)
+        : await loadEmployeeIdsByDepartments(managedDepartmentIds);
       const employeeIds = employees.map(employee => employee.id);
       if (employeeIds.length === 0) {
         res.json({ success: true, data: [] });

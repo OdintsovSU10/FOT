@@ -35,7 +35,7 @@ export const EmployeeSigurAccessPointsCard: FC<IEmployeeSigurAccessPointsCardPro
     setLoading(true);
     setError('');
 
-    sigurService.getEmployeeAccessPoints(employeeId, selectedConnection)
+    sigurService.getEmployeeAccessPoints(employeeId, selectedConnection, true)
       .then(data => {
         if (cancelled) return;
         setLinked(data.linked);

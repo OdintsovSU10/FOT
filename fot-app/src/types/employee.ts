@@ -75,6 +75,13 @@ export interface EmployeeInput {
   patent_issue_date?: string | null;
   patent_expiry_date?: string | null;
   email?: string | null;
+  tab_number?: string | null;
+  current_status?: string | null;
+  permit_expiry_date?: string | null;
+  registration_cat1?: string | null;
+  registration_cat4?: string | null;
+  doc_receipt_date?: string | null;
+  work_object?: string | null;
   position_id?: string | null;
   org_department_id?: string | null;
 }

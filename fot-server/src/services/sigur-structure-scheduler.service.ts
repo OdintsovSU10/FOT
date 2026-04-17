@@ -1,4 +1,5 @@
 import { sigurService } from './sigur.service.js';
+import { IS_PRODUCTION } from '../config/features.js';
 import {
   acquireStructureSyncSchedulerLock,
   releaseStructureSyncSchedulerLock,
@@ -15,6 +16,7 @@ import type { ISyncContext } from './sigur-sync-shared.js';
 
 const STRUCTURE_SYNC_INTERVAL = 60 * 60_000; // 1 час
 const STARTUP_DELAY = 30_000; // 30 секунд после старта
+const RUN_STARTUP_SYNC = process.env.SIGUR_STRUCTURE_SYNC_ON_STARTUP === 'true' || IS_PRODUCTION;
 
 let schedulerTimer: ReturnType<typeof setInterval> | null = null;
 let startupTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -36,7 +38,7 @@ async function runStructureSyncCycle(): Promise<void> {
       await syncDepartmentsLogic(connectionType, context);
       await syncPositionsFromSigurLogic(connectionType, context);
       await seedPositionsLogic();
-      await syncEmployeesLogic(connectionType, () => {}, context, false);
+      await syncEmployeesLogic(connectionType, () => {}, context, true);
 
       // Сбрасываем кэш структуры, чтобы карточка сотрудника не мигала
       // между старыми и новыми именами отделов/должностей
@@ -65,10 +67,12 @@ export async function startStructureSyncScheduler(): Promise<void> {
     return;
   }
   console.log('[structure-scheduler] started (interval: 1h)');
-  startupTimeout = setTimeout(() => {
-    startupTimeout = null;
-    void runStructureSyncCycle();
-  }, STARTUP_DELAY);
+  if (RUN_STARTUP_SYNC) {
+    startupTimeout = setTimeout(() => {
+      startupTimeout = null;
+      void runStructureSyncCycle();
+    }, STARTUP_DELAY);
+  }
   schedulerTimer = setInterval(() => {
     void runStructureSyncCycle();
   }, STRUCTURE_SYNC_INTERVAL);

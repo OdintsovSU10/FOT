@@ -10,6 +10,7 @@ import {
 } from './sigur-sync-shared.js';
 import { employeeChangesService } from './employee-changes.service.js';
 import { employeeCache } from './employee-cache.service.js';
+import { assignEmployeesToArchiveDepartment } from './employee-archive-department.service.js';
 
 // ─── Типы результатов ───
 
@@ -182,7 +183,7 @@ export async function syncEmployeesLogic(
   // даже если они переехали за пределы whitelist-отделов
   const whitelist = await getWhitelistedDepartmentIdsCached(connection, context);
   if (whitelist) {
-    console.log(`[syncEmployees] whitelist active: ${whitelist.size} subtree departments (applies to inserts only)`);
+    console.log(`[syncEmployees] whitelist active: ${whitelist.size} subtree departments (applies to inserts and unmatched list)`);
   }
   const sigurEmployeesRaw = await sigurService.getEmployeesCached(connection);
   console.log('[syncEmployees] got', sigurEmployeesRaw.length, 'employees from Sigur');
@@ -205,6 +206,7 @@ export async function syncEmployeesLogic(
     department_locked: boolean;
     org_department_id: string | null;
     position_id: string | null;
+    tab_number: string | null;
     full_name: string | null;
     last_name: string | null;
     first_name: string | null;
@@ -215,7 +217,7 @@ export async function syncEmployeesLogic(
   while (true) {
     const { data: existingEmpsPage } = await supabase
       .from('employees')
-      .select('id, sigur_employee_id, employment_status, department_locked, org_department_id, position_id, full_name, last_name, first_name, middle_name')
+      .select('id, sigur_employee_id, employment_status, department_locked, org_department_id, position_id, tab_number, full_name, last_name, first_name, middle_name')
       .not('sigur_employee_id', 'is', null)
       .range(empOffset, empOffset + EMP_PAGE - 1);
     if (!existingEmpsPage || existingEmpsPage.length === 0) break;
@@ -229,6 +231,7 @@ export async function syncEmployeesLogic(
   const dbEmpById = new Map<number, {
     org_department_id: string | null;
     position_id: string | null;
+    tab_number: string | null;
     full_name: string | null;
     last_name: string | null;
     first_name: string | null;
@@ -243,6 +246,7 @@ export async function syncEmployeesLogic(
       dbEmpById.set(e.id, {
         org_department_id: e.org_department_id,
         position_id: e.position_id,
+        tab_number: e.tab_number,
         full_name: e.full_name,
         last_name: e.last_name,
         first_name: e.first_name,
@@ -352,6 +356,7 @@ export async function syncEmployeesLogic(
     const orgDepartmentId = sigurDeptId ? sigurDeptToDbId.get(sigurDeptId) || null : null;
     const sigurPosId = emp.positionId;
     const positionText = emp.position;
+    const tabNumber = emp.tabId ? emp.tabId.trim() : null;
 
     let positionId: string | null = null;
     if (sigurPosId) positionId = sigurPosToDbId.get(sigurPosId) || null;
@@ -386,6 +391,9 @@ export async function syncEmployeesLogic(
         updateFields.first_name = fio.firstName || null;
         updateFields.middle_name = fio.middleName || null;
       }
+      if ((prev?.tab_number || null) !== tabNumber) {
+        updateFields.tab_number = tabNumber;
+      }
       if (prev?.department_locked) {
         updateFields.department_locked = false;
       }
@@ -399,8 +407,9 @@ export async function syncEmployeesLogic(
     }
 
     if (autoInsert) {
-      // Whitelist ограничивает только вставку новых сотрудников, не обновление существующих
-      if (whitelist && sigurDeptId != null && !whitelist.has(sigurDeptId)) {
+      // Whitelist ограничивает только вставку новых сотрудников, не обновление существующих.
+      // Вставляем только сотрудников из реально выбранных для sync отделов.
+      if (whitelist && (sigurDeptId == null || !whitelist.has(sigurDeptId))) {
         skipped++;
         continue;
       }
@@ -414,9 +423,16 @@ export async function syncEmployeesLogic(
         sigur_employee_id: sigurEmpId || null,
         org_department_id: orgDepartmentId,
         position_id: positionId,
+        tab_number: tabNumber,
       });
     } else {
-      const sigurDeptId = emp.departmentId;
+      // Для ручного sync-all показываем unmatched только по отделам,
+      // которые реально входят в текущий whitelist синхронизации.
+      if (whitelist && (sigurDeptId == null || !whitelist.has(sigurDeptId))) {
+        skipped++;
+        continue;
+      }
+
       unmatchedList.push({
         sigurId: sigurEmpId,
         name: fullName.trim(),
@@ -504,22 +520,27 @@ export async function syncEmployeesLogic(
 
   let autoFired = 0;
   const today = new Date().toISOString().slice(0, 10);
+  const autoFiredIds: number[] = [];
 
   for (const emp of toAutoFire) {
     const { error: fireErr } = await supabase
       .from('employees')
-      .update({ employment_status: 'fired' })
+      .update({ employment_status: 'fired', updated_at: new Date().toISOString() })
       .eq('id', emp.id);
     if (fireErr) {
       errors.push(`auto-fire ${emp.id}: ${fireErr.message}`);
       continue;
     }
-    await supabase
-      .from('employee_assignments')
-      .update({ effective_to: today })
-      .eq('employee_id', emp.id)
-      .is('effective_to', null);
     autoFired++;
+    autoFiredIds.push(emp.id);
+  }
+
+  if (autoFiredIds.length > 0) {
+    try {
+      await assignEmployeesToArchiveDepartment(autoFiredIds, null, { connection, effectiveDate: today });
+    } catch (archiveError) {
+      errors.push(`auto-fire archive move: ${(archiveError as Error).message}`);
+    }
   }
 
   if (autoFired > 0) {

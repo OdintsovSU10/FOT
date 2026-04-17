@@ -22,6 +22,16 @@ const mockedState = vi.hoisted(() => ({
     id: number;
     org_department_id: string | null;
   }>,
+  userDepartmentAccess: [] as Array<{
+    user_id: string;
+    department_id: string;
+    is_active: boolean;
+  }>,
+  employeeDepartmentAccess: [] as Array<{
+    employee_id: number;
+    department_id: string;
+    is_active: boolean;
+  }>,
   effectiveAccessByRoleRef: new Map<string, {
     permissions: string[];
     page_access: Record<string, { can_view: boolean; can_edit: boolean }>;
@@ -57,6 +67,20 @@ function resolveQuery(query: QueryRecord): QueryResponse {
   if (query.table === 'employees') {
     return {
       data: mockedState.employees.filter(employee => matchesQueryRecord(employee, query)),
+      error: null,
+    };
+  }
+
+  if (query.table === 'user_department_access') {
+    return {
+      data: mockedState.userDepartmentAccess.filter(row => matchesQueryRecord(row, query)),
+      error: null,
+    };
+  }
+
+  if (query.table === 'employee_department_access') {
+    return {
+      data: mockedState.employeeDepartmentAccess.filter(row => matchesQueryRecord(row, query)),
       error: null,
     };
   }
@@ -111,6 +135,8 @@ describe('timesheet-workflow-recipients.service', () => {
   beforeEach(() => {
     mockedState.userProfiles = [];
     mockedState.employees = [];
+    mockedState.userDepartmentAccess = [];
+    mockedState.employeeDepartmentAccess = [];
     mockedState.effectiveAccessByRoleRef.clear();
     mockedState.rolesByCode.clear();
     mockedState.rolesById.clear();
@@ -202,6 +228,27 @@ describe('timesheet-workflow-recipients.service', () => {
       ['submit'],
       { includeDataScopes: ['department'] },
     );
+
+    expect(recipients).toEqual(['header-1']);
+  });
+
+  it('includes department-scoped recipients with explicit additional brigade access', async () => {
+    mockedState.userProfiles = [
+      { id: 'header-1', position_type: 'header', employee_id: 101, is_approved: true },
+    ];
+    mockedState.employees = [
+      { id: 101, org_department_id: 'dept-a' },
+    ];
+    mockedState.userDepartmentAccess = [
+      { user_id: 'header-1', department_id: 'dept-b', is_active: true },
+    ];
+    mockedState.rolesByCode.set('header', { code: 'header' });
+    mockedState.effectiveAccessByRoleRef.set('header', {
+      permissions: ['data.scope.department', 'timesheet.workflow.submit'],
+      page_access: { '/timesheet': { can_view: true, can_edit: true } },
+    });
+
+    const recipients = await listTimesheetWorkflowRecipientIds('dept-b', ['submit']);
 
     expect(recipients).toEqual(['header-1']);
   });

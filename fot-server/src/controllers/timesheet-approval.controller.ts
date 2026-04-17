@@ -6,7 +6,11 @@ import type {
   TimesheetApprovalEventAction,
   TimesheetApprovalStatus,
 } from '../types/index.js';
-import { resolveRequestDataScope, resolveScopedDepartmentId } from '../services/data-scope.service.js';
+import {
+  resolveManagedDepartmentIds,
+  resolveRequestDataScope,
+  resolveScopedDepartmentId,
+} from '../services/data-scope.service.js';
 import { notificationService } from '../services/notification.service.js';
 import { pushService } from '../services/push.service.js';
 import { auditService, AUDIT_ACTIONS } from '../services/audit.service.js';
@@ -489,8 +493,13 @@ const getPending = async (_req: AuthenticatedRequest, res: Response): Promise<vo
       .eq('status', 'submitted')
       .order('submitted_at', { ascending: false });
 
-    if (scope === 'department' && _req.user.department_id) {
-      query = query.eq('department_id', _req.user.department_id);
+    if (scope === 'department') {
+      const managedDepartmentIds = await resolveManagedDepartmentIds(_req);
+      if (managedDepartmentIds.length === 0) {
+        res.json({ success: true, data: [] });
+        return;
+      }
+      query = query.in('department_id', managedDepartmentIds);
     } else if (scope === 'self') {
       res.json({ success: true, data: [] });
       return;
@@ -527,8 +536,13 @@ const getByStatus = async (req: AuthenticatedRequest, res: Response): Promise<vo
       query = query.eq('status', status);
     }
 
-    if (scope === 'department' && req.user.department_id) {
-      query = query.eq('department_id', req.user.department_id);
+    if (scope === 'department') {
+      const managedDepartmentIds = await resolveManagedDepartmentIds(req);
+      if (managedDepartmentIds.length === 0) {
+        res.json({ success: true, data: [] });
+        return;
+      }
+      query = query.in('department_id', managedDepartmentIds);
     } else if (scope === 'self') {
       res.json({ success: true, data: [] });
       return;

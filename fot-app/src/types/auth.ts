@@ -38,6 +38,7 @@ export interface UserProfile {
   system_role_id?: string | null;
   employee_id: number | null;              // Связь с employees
   department_id: string | null;            // org_department_id сотрудника
+  managed_department_ids: string[];        // Все управляемые отделы для department-scope
   supervisor_id: string | null;            // ID руководителя
   chat_inbound_mode: ChatInboundMode;
   imported_position: string | null;        // Должность из импорта (для worker)

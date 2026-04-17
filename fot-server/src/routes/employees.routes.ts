@@ -121,6 +121,14 @@ router.post(
   employeesController.create
 );
 
+// POST /api/employees/batch-move - массовый перевод в отдел (header+, требуется 2FA)
+router.post(
+  '/batch-move',
+  requireAnyPageAccess(['/employees', '/staff-control'], 'edit'),
+  requireCritical2FA,
+  employeesController.batchMoveEmployees
+);
+
 // PUT /api/employees/:id - обновление (header+, требуется 2FA)
 router.put(
   '/:id',

@@ -490,7 +490,7 @@ export const SyncFilterTab = ({ connected, canEdit, onFilterCountChange }: ISync
       {selectedIds.size === 0 && (
         <div className="sync-filter-info">
           <Info size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} />
-          Если ничего не выбрано — синхронизируются все отделы Sigur
+          Если ничего не выбрано — портальные sync-процессы работают со всеми отделами Sigur
         </div>
       )}
 

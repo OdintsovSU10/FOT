@@ -7,6 +7,7 @@ import { auditService } from '../services/audit.service.js';
 import type { AuthenticatedRequest, UserProfile } from '../types/index.js';
 import { LOGIN_2FA_ENABLED } from '../config/features.js';
 import { getEffectiveAccess } from '../services/access-control.service.js';
+import { listManagedDepartmentIdsForUser } from '../services/department-access.service.js';
 import { getRoleById } from '../services/roles-cache.service.js';
 import { verify2FA, useRecoveryCode } from './auth-2fa.controller.js';
 import {
@@ -60,6 +61,14 @@ async function resolveProfileRoleCode(profile: Pick<UserProfile, 'position_type'
     }
   }
   return profile.position_type;
+}
+
+async function resolveManagedDepartmentIds(
+  profileId: string,
+  departmentId: string | null,
+  employeeId: number | null,
+): Promise<string[]> {
+  return listManagedDepartmentIdsForUser(profileId, departmentId, employeeId);
 }
 
 /**
@@ -158,6 +167,8 @@ async function login(req: Request, res: Response): Promise<void> {
 
     const positionType = await resolveProfileRoleCode(profile as UserProfile & { system_role_id?: string | null });
     const effectiveAccess = await getEffectiveAccess(profile.system_role_id ?? positionType);
+    const departmentId = await resolveDepartmentId(profile.employee_id);
+    const managedDepartmentIds = await resolveManagedDepartmentIds(profile.id, departmentId, profile.employee_id);
 
     if (!profile.is_approved) {
       res.status(403).json({
@@ -191,6 +202,10 @@ async function login(req: Request, res: Response): Promise<void> {
           page_access: effectiveAccess.page_access,
           chat_inbound_mode: profile.chat_inbound_mode || 'open',
           imported_position: profile.imported_position,
+          employee_id: profile.employee_id,
+          department_id: departmentId,
+          managed_department_ids: managedDepartmentIds,
+          supervisor_id: profile.supervisor_id,
           is_approved: profile.is_approved,
           two_factor_enabled: profile.two_factor_enabled,
         },
@@ -198,7 +213,6 @@ async function login(req: Request, res: Response): Promise<void> {
       return;
     }
 
-    const departmentId = await resolveDepartmentId(profile.employee_id);
     const accessToken = generateAccessToken(profile as UserProfile, email, true, departmentId);
     const refreshToken = generateRefreshToken(profile.id, email);
     setSessionCookies(res, accessToken, refreshToken);
@@ -224,6 +238,7 @@ async function login(req: Request, res: Response): Promise<void> {
         imported_position: profile.imported_position,
         employee_id: profile.employee_id,
         department_id: departmentId,
+        managed_department_ids: managedDepartmentIds,
         supervisor_id: profile.supervisor_id,
         is_approved: profile.is_approved,
         two_factor_enabled: profile.two_factor_enabled,
@@ -385,6 +400,7 @@ async function getMe(req: AuthenticatedRequest, res: Response): Promise<void> {
     const effectiveAccess = await getEffectiveAccess(profile.system_role_id ?? positionType);
 
     const departmentId = await resolveDepartmentId(profile.employee_id);
+    const managedDepartmentIds = await resolveManagedDepartmentIds(profile.id, departmentId, profile.employee_id);
 
     const freshToken = generateAccessToken(
       { ...profile, position_type: positionType } as UserProfile,
@@ -412,6 +428,7 @@ async function getMe(req: AuthenticatedRequest, res: Response): Promise<void> {
         imported_position: profile.imported_position,
         employee_id: profile.employee_id,
         department_id: departmentId,
+        managed_department_ids: managedDepartmentIds,
         supervisor_id: profile.supervisor_id,
         is_approved: profile.is_approved,
         two_factor_enabled: profile.two_factor_enabled,
@@ -458,6 +475,7 @@ async function refresh(req: Request, res: Response): Promise<void> {
     const positionType = await resolveProfileRoleCode(profile as UserProfile & { system_role_id?: string | null });
     const effectiveAccess = await getEffectiveAccess(profile.system_role_id ?? positionType);
     const departmentId = await resolveDepartmentId(profile.employee_id);
+    const managedDepartmentIds = await resolveManagedDepartmentIds(profile.id, departmentId, profile.employee_id);
     const accessToken = generateAccessToken(
       { ...profile, position_type: positionType } as UserProfile,
       decoded.email,
@@ -487,6 +505,7 @@ async function refresh(req: Request, res: Response): Promise<void> {
         imported_position: profile.imported_position,
         employee_id: profile.employee_id,
         department_id: departmentId,
+        managed_department_ids: managedDepartmentIds,
         supervisor_id: profile.supervisor_id,
         is_approved: profile.is_approved,
         two_factor_enabled: profile.two_factor_enabled,

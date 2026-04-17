@@ -297,6 +297,36 @@ export class SigurServiceBase {
     return `${time}+03:00`;
   }
 
+  private extractCollectionItems<T>(response: unknown, endpoint: string): T[] {
+    if (Array.isArray(response)) {
+      return response as T[];
+    }
+
+    if (!response || typeof response !== 'object') {
+      return [];
+    }
+
+    const record = response as Record<string, unknown>;
+    const preferredKeys = ['data', 'items', 'content', 'results', 'rows', 'employees', 'departments'];
+
+    for (const key of preferredKeys) {
+      if (Array.isArray(record[key])) {
+        return record[key] as T[];
+      }
+    }
+
+    const firstArrayEntry = Object.entries(record).find(([, value]) => Array.isArray(value));
+    if (firstArrayEntry) {
+      console.warn(`[sigur paginate] ${endpoint} used fallback array key "${firstArrayEntry[0]}"`);
+      return firstArrayEntry[1] as T[];
+    }
+
+    console.warn(
+      `[sigur paginate] ${endpoint} returned non-array payload with keys: [${Object.keys(record).join(', ')}]`,
+    );
+    return [];
+  }
+
   /** Пагинация с колбэком прогресса (для SSE). */
   async fetchWithProgress<T>(
     endpoint: string,
@@ -317,7 +347,7 @@ export class SigurServiceBase {
         offset,
       }, connection);
 
-      const items = response?.data || response || [];
+      const items = this.extractCollectionItems<T>(response, endpoint);
       if (!Array.isArray(items) || items.length === 0) break;
 
       allItems.push(...items);
@@ -348,10 +378,10 @@ export class SigurServiceBase {
         offset,
       }, connection);
 
-      const items = response?.data || response || [];
-      console.log(`[sigur paginate] page ${page} got ${Array.isArray(items) ? items.length : 'non-array'} items`);
+      const items = this.extractCollectionItems<T>(response, endpoint);
+      console.log(`[sigur paginate] page ${page} got ${items.length} items`);
 
-      if (!Array.isArray(items) || items.length === 0) {
+      if (items.length === 0) {
         break;
       }
 

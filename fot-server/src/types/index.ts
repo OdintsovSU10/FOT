@@ -38,6 +38,7 @@ export interface UserProfile {
   position_type: EmployeePositionType;    // Заменяет role
   system_role_id?: string | null;
   employee_id: number | null;              // Связь с employees (заполняется админом)
+  managed_department_ids?: string[];       // Дополнительные управляемые отделы для API/UI
   supervisor_id: string | null;            // ID руководителя
   chat_inbound_mode: ChatInboundMode;
   imported_position: string | null;        // Должность из импорта
@@ -480,6 +481,17 @@ export interface IEmployeeScheduleAssignment {
   updated_at: string;
 }
 
+export interface IObjectScheduleAssignment {
+  id: string;
+  object_id: string;
+  schedule_id: string;
+  effective_from: string;
+  effective_to: string | null;
+  created_by: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface IResolvedSchedule {
   schedule_id: string;
   schedule_type: ScheduleType;
@@ -496,7 +508,7 @@ export interface IResolvedSchedule {
   expected_saturdays_per_month: number;
   full_day_threshold_minutes: number | null;
   weekend_full_day_threshold_minutes: number | null;
-  source: 'employee' | 'category' | 'default';
+  source: 'object' | 'employee' | 'category' | 'default';
 }
 
 export interface IProductionCalendarMonth {

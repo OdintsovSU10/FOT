@@ -6,7 +6,7 @@ import { employeeChangesService } from '../services/employee-changes.service.js'
 import { pushService } from '../services/push.service.js';
 import { notificationService } from '../services/notification.service.js';
 import { getIo } from '../socket/io-instance.js';
-import { canAccessEmployeeInScope, resolveRequestDataScope } from '../services/data-scope.service.js';
+import { canAccessEmployeeInScope, resolveManagedDepartmentIds, resolveRequestDataScope } from '../services/data-scope.service.js';
 import { listTravelObjects } from '../services/skud-travel.service.js';
 import { buildAttendanceEntries, type IAttendanceEntry } from '../services/attendance.service.js';
 import { getDisciplineViolations } from '../services/skud-discipline.service.js';
@@ -407,13 +407,16 @@ const getScopedCandidateEmployeeIds = async (req: AuthenticatedRequest): Promise
       .filter((value) => value !== req.user.employee_id))];
   }
 
-  if (!req.user.department_id) {
+  const managedDepartmentIds = await resolveManagedDepartmentIds(req);
+  if (managedDepartmentIds.length === 0) {
     return [];
   }
 
   const today = DEFAULT_EFFECTIVE_DATE();
-  const ids = await listEmployeeIdsAssignedToDepartmentPeriod(req.user.department_id, today, today);
-  return ids.filter((value) => value !== req.user.employee_id);
+  const employeeIdsByDepartment = await Promise.all(
+    managedDepartmentIds.map(departmentId => listEmployeeIdsAssignedToDepartmentPeriod(departmentId, today, today)),
+  );
+  return [...new Set(employeeIdsByDepartment.flat())].filter((value) => value !== req.user.employee_id);
 };
 
 const canManageSalaryRaiseEmployee = async (req: AuthenticatedRequest, employeeId: number): Promise<boolean> => {
@@ -430,11 +433,19 @@ const canManageSalaryRaiseEmployee = async (req: AuthenticatedRequest, employeeI
     return canAccessEmployeeInScope(req, employeeId);
   }
 
-  if (!req.user.department_id) {
+  const managedDepartmentIds = await resolveManagedDepartmentIds(req);
+  if (managedDepartmentIds.length === 0) {
     return false;
   }
 
-  return isEmployeeAssignedToDepartmentOnDate(employeeId, req.user.department_id, DEFAULT_EFFECTIVE_DATE());
+  const checks = await Promise.all(
+    managedDepartmentIds.map(departmentId => isEmployeeAssignedToDepartmentOnDate(
+      employeeId,
+      departmentId,
+      DEFAULT_EFFECTIVE_DATE(),
+    )),
+  );
+  return checks.some(Boolean);
 };
 
 const buildEmployeeSnapshot = async (employeeId: number) => {

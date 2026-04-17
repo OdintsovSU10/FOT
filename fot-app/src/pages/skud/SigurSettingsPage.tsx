@@ -1,5 +1,6 @@
 import { Suspense, lazy, useState, useEffect, useCallback } from 'react';
-import { Settings, MapPin, Filter, Database } from 'lucide-react';
+import { Settings, MapPin, Filter, Database, Users } from 'lucide-react';
+import { useSearchParams } from 'react-router-dom';
 import { sigurService } from '../../services/sigurService';
 import { useAuth } from '../../contexts/AuthContext';
 import type { SettingsTab } from '../../components/skud/sigur-settings.types';
@@ -20,12 +21,31 @@ const TravelObjectsTab = lazy(() => import('../../components/skud/TravelObjectsT
 const TravelConfigTab = lazy(() => import('../../components/skud/TravelConfigTab').then(module => ({
   default: module.TravelConfigTab,
 })));
+const SigurEmployeesTab = lazy(() => import('../../components/skud/employees/SigurEmployeesTab').then(module => ({
+  default: module.SigurEmployeesTab,
+})));
+
+const SETTINGS_TABS: SettingsTab[] = [
+  'settings',
+  'employees',
+  'access-points',
+  'objects',
+  'travel-config',
+  'sync-filter',
+];
+
+const resolveSettingsTab = (value: string | null): SettingsTab => (
+  value && SETTINGS_TABS.includes(value as SettingsTab)
+    ? value as SettingsTab
+    : 'settings'
+);
 
 export const SigurSettingsPage = () => {
   const { canEditPage } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
   const canEdit = canEditPage('/skud-settings');
 
-  const [activeTab, setActiveTab] = useState<SettingsTab>('settings');
+  const [activeTab, setActiveTabState] = useState<SettingsTab>(() => resolveSettingsTab(searchParams.get('tab')));
 
   // Подключение
   const [connected, setConnected] = useState<boolean | null>(null);
@@ -42,6 +62,21 @@ export const SigurSettingsPage = () => {
       .catch(() => setSyncFilterCount(null));
   }, []);
 
+  const loadConnectionStatus = useCallback(async (): Promise<void> => {
+    setChecking(true);
+    try {
+      const result = await sigurService.getConnectionStatus();
+      setConnected(result.connected);
+      if (result.connections) {
+        setAvailableConnections(result.connections);
+      }
+    } catch {
+      // Не показываем ложный "Нет связи" только потому, что стартовый status-fetch не удался.
+    } finally {
+      setChecking(false);
+    }
+  }, []);
+
   const checkConnection = useCallback(async (): Promise<boolean> => {
     setChecking(true);
     setError('');
@@ -53,7 +88,6 @@ export const SigurSettingsPage = () => {
       }
       return result.success;
     } catch {
-      setConnected(false);
       setError('Не удалось проверить подключение');
       return false;
     } finally {
@@ -62,14 +96,29 @@ export const SigurSettingsPage = () => {
   }, []);
 
   useEffect(() => {
-    checkConnection();
-  }, [checkConnection]);
+    void loadConnectionStatus();
+  }, [loadConnectionStatus]);
+
+  useEffect(() => {
+    const tabFromQuery = resolveSettingsTab(searchParams.get('tab'));
+    setActiveTabState(prev => (prev === tabFromQuery ? prev : tabFromQuery));
+  }, [searchParams]);
+
+  const setActiveTab = useCallback((tab: SettingsTab) => {
+    setActiveTabState(tab);
+    setSearchParams(prev => {
+      const next = new URLSearchParams(prev);
+      if (tab === 'settings') next.delete('tab');
+      else next.set('tab', tab);
+      return next;
+    }, { replace: true });
+  }, [setSearchParams]);
 
   const syncFilterSummary = syncFilterCount === null
     ? 'Фильтр отделов не загружен'
     : syncFilterCount === 0
-      ? 'Фильтр не задан: синхронизация затронет все отделы'
-      : `Активен фильтр: ${syncFilterCount} отдел(ов)`;
+      ? 'Фильтр синхронизации не задан: портальные sync-процессы работают со всеми отделами'
+      : `Для портальных sync-процессов выбрано: ${syncFilterCount} отдел(ов)`;
 
   const tabFallback = (
     <div className="sigur-loading">
@@ -91,6 +140,13 @@ export const SigurSettingsPage = () => {
         >
           <Settings size={14} />
           Настройки
+        </button>
+        <button
+          className={`sigur-tab ${activeTab === 'employees' ? 'active' : ''}`}
+          onClick={() => setActiveTab('employees')}
+        >
+          <Users size={14} />
+          Сотрудники
         </button>
         <button
           className={`sigur-tab ${activeTab === 'access-points' ? 'active' : ''}`}
@@ -141,6 +197,15 @@ export const SigurSettingsPage = () => {
             checkConnection={checkConnection}
             setActiveTab={setActiveTab}
             syncFilterSummary={syncFilterSummary}
+          />
+        </Suspense>
+      )}
+
+      {activeTab === 'employees' && (
+        <Suspense fallback={tabFallback}>
+          <SigurEmployeesTab
+            canEdit={canEdit}
+            setError={setError}
           />
         </Suspense>
       )}

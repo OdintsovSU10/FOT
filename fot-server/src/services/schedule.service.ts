@@ -305,6 +305,73 @@ const pickScheduleForDate = (
   return null;
 };
 
+/** Resolve графика объекта на дату. Возвращает null, если для объекта нет назначения */
+export const resolveObjectSchedule = async (
+  objectId: string,
+  date: string,
+): Promise<IResolvedSchedule | null> => {
+  const { data } = await supabase
+    .from('object_schedule_assignments')
+    .select('schedule_id, work_schedules(*)')
+    .eq('object_id', objectId)
+    .lte('effective_from', date)
+    .or(`effective_to.is.null,effective_to.gte.${date}`)
+    .order('effective_from', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  const objectSchedule = extractWorkSchedule(data?.work_schedules);
+  return objectSchedule ? mapToResolved(objectSchedule, 'object') : null;
+};
+
+/** Resolve графиков объектов по каждому дню периода. Возвращает только даты с объектным назначением */
+export const resolveObjectSchedulesForPeriod = async (
+  objectIds: string[],
+  startDate: string,
+  endDate: string,
+): Promise<Map<string, Map<string, IResolvedSchedule>>> => {
+  const result = new Map<string, Map<string, IResolvedSchedule>>();
+  if (objectIds.length === 0) return result;
+
+  const uniqueObjectIds = [...new Set(objectIds.filter(Boolean))];
+  if (uniqueObjectIds.length === 0) return result;
+
+  const { data } = await supabase
+    .from('object_schedule_assignments')
+    .select('object_id, effective_from, effective_to, work_schedules(*)')
+    .in('object_id', uniqueObjectIds)
+    .lte('effective_from', endDate)
+    .or(`effective_to.is.null,effective_to.gte.${startDate}`)
+    .order('effective_from', { ascending: false });
+
+  const objectRows = new Map<string, Record<string, unknown>[]>();
+  for (const row of (data || []) as Record<string, unknown>[]) {
+    const objectId = String(row.object_id || '');
+    if (!objectId) continue;
+    const rows = objectRows.get(objectId) || [];
+    rows.push(row);
+    objectRows.set(objectId, rows);
+  }
+
+  for (const objectId of uniqueObjectIds) {
+    const dailyMap = new Map<string, IResolvedSchedule>();
+    const assignmentRows = objectRows.get(objectId) || [];
+
+    iterateDates(startDate, endDate, (date) => {
+      const objectSchedule = pickScheduleForDate(assignmentRows, date);
+      if (objectSchedule) {
+        dailyMap.set(date, mapToResolved(objectSchedule, 'object'));
+      }
+    });
+
+    if (dailyMap.size > 0) {
+      result.set(objectId, dailyMap);
+    }
+  }
+
+  return result;
+};
+
 /** Resolve для одного сотрудника на дату. Каскад: employee → category → default */
 export const resolveSchedule = async (
   employeeId: number,
@@ -522,7 +589,7 @@ export const resolveSchedulesForPeriod = async (
 
 function mapToResolved(
   ws: Record<string, unknown>,
-  source: 'employee' | 'category' | 'default',
+  source: 'object' | 'employee' | 'category' | 'default',
 ): IResolvedSchedule {
   return {
     schedule_id: ws.id as string,

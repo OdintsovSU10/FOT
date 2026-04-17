@@ -12,11 +12,17 @@ const PendingUsersTab = lazy(() => import('../../components/super-admin/PendingU
 const AllUsersTab = lazy(() => import('../../components/super-admin/AllUsersTab').then(module => ({
   default: module.AllUsersTab,
 })));
+const DepartmentAccessImportTab = lazy(() => import('../../components/super-admin/DepartmentAccessImportTab').then(module => ({
+  default: module.DepartmentAccessImportTab,
+})));
+const EmployeeDepartmentAssignmentsTab = lazy(() => import('../../components/super-admin/EmployeeDepartmentAssignmentsTab').then(module => ({
+  default: module.EmployeeDepartmentAssignmentsTab,
+})));
 
 export const UserManagementPage: React.FC = () => {
   const toast = useToast();
   const queryClient = useQueryClient();
-  const [activeTab, setActiveTab] = useState<'pending' | 'all'>('pending');
+  const [activeTab, setActiveTab] = useState<'pending' | 'all' | 'employee-access' | 'import'>('pending');
   const pendingUsersQuery = useQuery<IPendingUser[]>({
     queryKey: ['admin-users', 'pending'],
     queryFn: () => adminService.getPendingUsers(),
@@ -37,6 +43,7 @@ export const UserManagementPage: React.FC = () => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['admin-users', 'pending'] }),
         queryClient.invalidateQueries({ queryKey: ['admin-users', 'all'] }),
+        queryClient.invalidateQueries({ queryKey: ['admin-employees', 'department-access'] }),
       ]);
     } catch {
       toast.error('Ошибка загрузки данных');
@@ -74,6 +81,18 @@ export const UserManagementPage: React.FC = () => {
         >
           Все пользователи ({allUsers.length})
         </button>
+        <button
+          className={`${styles.tab} ${activeTab === 'employee-access' ? styles.active : ''}`}
+          onClick={() => setActiveTab('employee-access')}
+        >
+          Назначения сотрудников
+        </button>
+        <button
+          className={`${styles.tab} ${activeTab === 'import' ? styles.active : ''}`}
+          onClick={() => setActiveTab('import')}
+        >
+          Импорт назначений
+        </button>
       </div>
 
       {activeTab === 'pending' && (
@@ -88,6 +107,24 @@ export const UserManagementPage: React.FC = () => {
       {activeTab === 'all' && (
         <Suspense fallback={<div className={styles.loading}>Загрузка вкладки...</div>}>
           <AllUsersTab
+            allUsers={allUsers}
+            onReload={reloadUsers}
+          />
+        </Suspense>
+      )}
+
+      {activeTab === 'employee-access' && (
+        <Suspense fallback={<div className={styles.loading}>Загрузка вкладки...</div>}>
+          <EmployeeDepartmentAssignmentsTab
+            allUsers={allUsers}
+            onReload={reloadUsers}
+          />
+        </Suspense>
+      )}
+
+      {activeTab === 'import' && (
+        <Suspense fallback={<div className={styles.loading}>Загрузка вкладки...</div>}>
+          <DepartmentAccessImportTab
             allUsers={allUsers}
             onReload={reloadUsers}
           />

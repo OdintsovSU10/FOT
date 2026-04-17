@@ -1,141 +1,116 @@
-import { useRef, type FC } from 'react';
-import { useVirtualizer } from '@tanstack/react-virtual';
+import type { FC } from 'react';
 import { Users } from 'lucide-react';
 import type { Employee, IEmployeePresence } from '../../types';
-
-const getInitials = (name: string): string => {
-  const parts = name.trim().split(/\s+/);
-  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
-  return (parts[0]?.[0] || '?').toUpperCase();
-};
-
-const formatTime = (val: string): string => {
-  if (val.includes('T')) return val.slice(11, 16);
-  return val.slice(0, 5);
-};
-
-const formatHM = (decimal: number): string => {
-  const h = Math.floor(decimal);
-  const m = Math.round((decimal - h) * 60);
-  if (m === 0) return `${h}ч`;
-  return `${h}ч ${m}м`;
-};
 
 interface IEmpVirtualListProps {
   employees: Employee[];
   loading: boolean;
   selectedEmps: Set<number>;
   presenceMap: Map<number, IEmployeePresence>;
-  canEdit: boolean;
-  showMove?: boolean;
-  onEmpClick: (emp: Employee) => void;
-  onToggleSelection: (id: number, e: React.MouseEvent) => void;
-  onFire: (emp: Employee, e: React.MouseEvent) => void;
-  onRehire: (emp: Employee, e: React.MouseEvent) => void;
-  onMove: (id: number, e: React.MouseEvent) => void;
+  allVisibleSelected: boolean;
+  onEmpClick: (employee: Employee) => void;
+  onToggleSelection: (id: number) => void;
+  onToggleVisibleSelection: () => void;
 }
 
-export const EmpVirtualList: FC<IEmpVirtualListProps> = ({
-  employees, loading, selectedEmps, presenceMap, canEdit, showMove = true,
-  onEmpClick, onToggleSelection, onFire, onRehire, onMove,
-}) => {
-  const listRef = useRef<HTMLDivElement>(null);
-  const virtualizer = useVirtualizer({
-    count: employees.length,
-    getScrollElement: () => listRef.current,
-    estimateSize: () => 72,
-    overscan: 10,
-  });
+const renderPresenceDot = (presence?: IEmployeePresence): string => {
+  if (!presence) return '';
+  return presence.status;
+};
 
-  if (loading) return <div className="ep-emp-list"><div className="ep-loading">Загрузка...</div></div>;
+export const EmpVirtualList: FC<IEmpVirtualListProps> = ({
+  employees,
+  loading,
+  selectedEmps,
+  presenceMap,
+  allVisibleSelected,
+  onEmpClick,
+  onToggleSelection,
+  onToggleVisibleSelection,
+}) => {
+  if (loading) {
+    return <div className="ep-emp-list"><div className="ep-loading">Загрузка...</div></div>;
+  }
+
   if (employees.length === 0) {
     return (
       <div className="ep-emp-list">
         <div className="ep-empty">
           <div className="ep-empty-icon"><Users size={28} /></div>
           <h3>Сотрудники не найдены</h3>
-          <p>Попробуйте изменить фильтры или выбрать другой отдел</p>
+          <p>Попробуйте изменить фильтры, отдел или строку поиска.</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="ep-emp-list" ref={listRef}>
-      <div style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
-        {virtualizer.getVirtualItems().map(vRow => {
-          const emp = employees[vRow.index];
-          return (
-            <div
-              key={emp.id}
-              className={`ep-emp-card ${selectedEmps.has(emp.id) ? 'selected' : ''}`}
-              onClick={() => onEmpClick(emp)}
-              onMouseDown={e => { if (e.button === 1) { e.preventDefault(); window.open(`/employees/${emp.id}`, '_blank'); } }}
-              style={{ position: 'absolute', top: 0, left: 0, width: '100%', transform: `translateY(${vRow.start}px)` }}
-            >
-              <div
-                className={`ep-emp-checkbox ${selectedEmps.has(emp.id) ? 'checked' : ''}`}
-                onClick={e => onToggleSelection(emp.id, e)}
-              >
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
-                  <polyline points="20 6 9 17 4 12" />
-                </svg>
-              </div>
-              <div className="ep-emp-avatar">{getInitials(emp.full_name)}</div>
-              <div className="ep-emp-info">
-                <div className="ep-emp-name">
-                  {emp.full_name}
-                  {presenceMap.has(emp.id) && (
-                    <span
-                      className={`ep-emp-badge ${presenceMap.get(emp.id)!.status}`}
-                      title={presenceMap.get(emp.id)!.status === 'online' ? 'На месте' : 'Отсутствует'}
-                    />
-                  )}
-                </div>
-                <div className="ep-emp-position">{emp.position_name || '—'}</div>
-              </div>
-              {emp.employment_status !== 'fired' && presenceMap.has(emp.id) && (
-                <div className="ep-emp-meta">
-                  {presenceMap.get(emp.id)!.total_hours != null && (
-                    <div className="ep-emp-stat">
-                      <span className="ep-emp-stat-value">
-                        {formatHM(presenceMap.get(emp.id)!.total_hours!)}
-                      </span>
-                      <span className="ep-emp-stat-label">Сегодня</span>
+    <div className="ep-emp-list">
+      <div className="ep-table-shell">
+        <table className="ep-emp-table">
+          <thead>
+            <tr>
+              <th className="ep-col-check">
+                <label className={`ep-table-check ${allVisibleSelected ? 'checked' : ''}`}>
+                  <input
+                    type="checkbox"
+                    checked={allVisibleSelected}
+                    onChange={onToggleVisibleSelection}
+                    aria-label="Выбрать сотрудников на странице"
+                  />
+                  <span />
+                </label>
+              </th>
+              <th>ФИО</th>
+              <th>Отдел</th>
+              <th>Должность</th>
+            </tr>
+          </thead>
+          <tbody>
+            {employees.map(employee => {
+              const isSelected = selectedEmps.has(employee.id);
+              const presence = presenceMap.get(employee.id);
+              const presenceStatus = renderPresenceDot(presence);
+
+              return (
+                <tr
+                  key={employee.id}
+                  className={isSelected ? 'selected' : ''}
+                  onClick={() => onEmpClick(employee)}
+                  onMouseDown={event => {
+                    if (event.button === 1) {
+                      event.preventDefault();
+                      window.open(`/employees/${employee.id}`, '_blank');
+                    }
+                  }}
+                >
+                  <td className="ep-col-check" onClick={event => event.stopPropagation()}>
+                    <label className={`ep-table-check ${isSelected ? 'checked' : ''}`}>
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={(event) => {
+                          event.stopPropagation();
+                          onToggleSelection(employee.id);
+                        }}
+                        aria-label={`Выбрать ${employee.full_name}`}
+                      />
+                      <span />
+                    </label>
+                  </td>
+                  <td className="ep-cell-name">
+                    <div className="ep-table-name">
+                      {presenceStatus && <span className={`ep-table-dot ${presenceStatus}`} />}
+                      <span>{employee.full_name}</span>
                     </div>
-                  )}
-                  {presenceMap.get(emp.id)!.first_entry && (
-                    <div className="ep-emp-stat">
-                      <span className="ep-emp-stat-value">
-                        {formatTime(presenceMap.get(emp.id)!.first_entry!)}
-                      </span>
-                      <span className="ep-emp-stat-label">Вход</span>
-                    </div>
-                  )}
-                </div>
-              )}
-              {canEdit && emp.employment_status !== 'fired' && (
-                <div className="ep-emp-actions">
-                  <button className="ep-action-btn dismiss" onClick={e => onFire(emp, e)}>
-                    Уволить
-                  </button>
-                  {showMove && (
-                    <button className="ep-action-btn move" onClick={e => onMove(emp.id, e)}>
-                      Переместить
-                    </button>
-                  )}
-                </div>
-              )}
-              {emp.employment_status === 'fired' && (
-                <div className="ep-emp-actions">
-                  <button className="ep-action-btn move" onClick={e => onRehire(emp, e)}>
-                    Восстановить
-                  </button>
-                </div>
-              )}
-            </div>
-          );
-        })}
+                  </td>
+                  <td className="ep-cell-muted">{employee.department || '—'}</td>
+                  <td className="ep-cell-muted">{employee.position_name || '—'}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
       </div>
     </div>
   );

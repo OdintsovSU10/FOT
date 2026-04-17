@@ -129,6 +129,7 @@ export interface INormalizedEmployee {
   departmentId: number | undefined;
   positionId: number | undefined;
   position: string;
+  tabId: string;
 }
 
 export function normalizeEmployee(raw: Record<string, unknown>): INormalizedEmployee {
@@ -138,6 +139,7 @@ export function normalizeEmployee(raw: Record<string, unknown>): INormalizedEmpl
     departmentId: resolveField<number>(raw, 'departmentId', 'department_id', 'DEPARTMENTID', 'DepartmentId'),
     positionId: resolveField<number>(raw, 'positionId', 'position_id', 'POSITIONID', 'PositionId'),
     position: (resolveField<string>(raw, 'position', 'positionName', 'position_name', 'POSITION', 'jobTitle') ?? '').trim(),
+    tabId: String(resolveField<string | number>(raw, 'tabId', 'tabID', 'tab_id', 'tabNumber', 'tab_number', 'TabId') ?? '').trim(),
   };
 }
 

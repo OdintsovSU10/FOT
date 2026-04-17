@@ -2,14 +2,17 @@ import { Suspense, lazy, type FC, useState, useMemo } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { scheduleService } from '../../services/scheduleService';
 import { workCategoryService } from '../../services/workCategoryService';
+import { travelTimeService } from '../../services/travelTimeService';
 import type {
   IDayOverride,
   IWorkSchedule,
   ICategorySchedule,
+  IObjectScheduleAssignment,
   IWorkCategory,
   ScheduleType,
   PatternType,
 } from '../../types/schedule';
+import type { ITravelObject } from '../../types/travel';
 import {
   PATTERN_TYPE_LABELS,
   SCHEDULE_TYPE_LABELS,
@@ -22,7 +25,7 @@ const ProductionCalendarPage = lazy(() => import('../super-admin/ProductionCalen
   default: module.ProductionCalendarPage,
 })));
 
-type TabKey = 'templates' | 'category-assignments' | 'category-manage' | 'production-calendar';
+type TabKey = 'templates' | 'object-assignments' | 'category-assignments' | 'category-manage' | 'production-calendar';
 
 interface IFormState {
   id: string | null;
@@ -128,7 +131,9 @@ const PATTERN_PRESETS: Record<PatternType, Partial<IFormState>> = {
 };
 const EMPTY_TEMPLATES: IWorkSchedule[] = [];
 const EMPTY_ASSIGNMENTS: ICategorySchedule[] = [];
+const EMPTY_OBJECT_ASSIGNMENTS: IObjectScheduleAssignment[] = [];
 const EMPTY_WORK_CATEGORIES: IWorkCategory[] = [];
+const EMPTY_TRAVEL_OBJECTS: ITravelObject[] = [];
 
 export const SchedulesPage: FC = () => {
   const today = getLocalISODate();
@@ -144,8 +149,10 @@ export const SchedulesPage: FC = () => {
   const [editingCategoryCode, setEditingCategoryCode] = useState<string | null>(null);
   const [categoryForm, setCategoryForm] = useState({ code: '', name: '', description: '', sort_order: 0 });
 
-  const needsTemplates = tab === 'templates' || tab === 'category-assignments';
+  const needsTemplates = tab === 'templates' || tab === 'category-assignments' || tab === 'object-assignments';
   const needsAssignments = tab === 'category-assignments';
+  const needsObjectAssignments = tab === 'object-assignments';
+  const needsObjects = tab === 'object-assignments';
   const needsWorkCategories = tab === 'category-assignments' || tab === 'category-manage';
 
   const templatesQuery = useQuery({
@@ -162,6 +169,20 @@ export const SchedulesPage: FC = () => {
     staleTime: 5 * 60_000,
     placeholderData: previousData => previousData,
   });
+  const objectAssignmentsQuery = useQuery({
+    queryKey: ['schedules', 'object-assignments'],
+    queryFn: () => scheduleService.listObjectAssignments(),
+    enabled: needsObjectAssignments,
+    staleTime: 5 * 60_000,
+    placeholderData: previousData => previousData,
+  });
+  const objectsQuery = useQuery({
+    queryKey: ['travel-objects'],
+    queryFn: () => travelTimeService.getObjects(),
+    enabled: needsObjects,
+    staleTime: 5 * 60_000,
+    placeholderData: previousData => previousData,
+  });
   const workCategoriesQuery = useQuery({
     queryKey: ['work-categories'],
     queryFn: () => workCategoryService.list(),
@@ -171,15 +192,21 @@ export const SchedulesPage: FC = () => {
   });
   const templates = templatesQuery.data ?? EMPTY_TEMPLATES;
   const assignments = assignmentsQuery.data ?? EMPTY_ASSIGNMENTS;
+  const objectAssignments = objectAssignmentsQuery.data ?? EMPTY_OBJECT_ASSIGNMENTS;
+  const travelObjects = objectsQuery.data ?? EMPTY_TRAVEL_OBJECTS;
   const workCategories = workCategoriesQuery.data ?? EMPTY_WORK_CATEGORIES;
   const loading = (
     (needsTemplates && templatesQuery.isPending)
     || (needsAssignments && assignmentsQuery.isPending)
+    || (needsObjectAssignments && objectAssignmentsQuery.isPending)
+    || (needsObjects && objectsQuery.isPending)
     || (needsWorkCategories && workCategoriesQuery.isPending)
   );
   const queryError = (
     (needsTemplates ? templatesQuery.error : null)
     || (needsAssignments ? assignmentsQuery.error : null)
+    || (needsObjectAssignments ? objectAssignmentsQuery.error : null)
+    || (needsObjects ? objectsQuery.error : null)
     || (needsWorkCategories ? workCategoriesQuery.error : null)
   );
   const visibleError = error || (queryError instanceof Error ? queryError.message : '');
@@ -188,6 +215,7 @@ export const SchedulesPage: FC = () => {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ['schedules', 'templates'] }),
       queryClient.invalidateQueries({ queryKey: ['schedules', 'category-assignments'] }),
+      queryClient.invalidateQueries({ queryKey: ['schedules', 'object-assignments'] }),
       queryClient.invalidateQueries({ queryKey: ['work-categories'] }),
     ]);
   };
@@ -375,6 +403,18 @@ export const SchedulesPage: FC = () => {
     return map;
   }, [workCategories, assignments, today]);
 
+  const activeObjectAssignments = useMemo(() => {
+    const map = new Map<string, IObjectScheduleAssignment | null>();
+    for (const objectItem of travelObjects) {
+      const active = objectAssignments.find(assignment => (
+        assignment.object_id === objectItem.id
+        && isActiveScheduleAssignment(assignment.effective_from, assignment.effective_to, today)
+      )) || null;
+      map.set(objectItem.id, active);
+    }
+    return map;
+  }, [travelObjects, objectAssignments, today]);
+
   const handleAssignCategory = async (category: string, scheduleId: string) => {
     setError('');
     try {
@@ -389,6 +429,23 @@ export const SchedulesPage: FC = () => {
       await reloadScheduleData();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Ошибка назначения');
+    }
+  };
+
+  const handleAssignObject = async (objectId: string, scheduleId: string) => {
+    setError('');
+    try {
+      if (!scheduleId) {
+        await scheduleService.removeObjectAssignment(objectId);
+      } else {
+        await scheduleService.assignObject(objectId, {
+          schedule_id: scheduleId,
+          effective_from: today,
+        });
+      }
+      await reloadScheduleData();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Ошибка назначения графика объекту');
     }
   };
 
@@ -477,6 +534,12 @@ export const SchedulesPage: FC = () => {
           onClick={() => setTab('category-manage')}
         >
           Категории труда
+        </button>
+        <button
+          className={`${styles.tab} ${tab === 'object-assignments' ? styles.tabActive : ''}`}
+          onClick={() => setTab('object-assignments')}
+        >
+          Графики объектов
         </button>
         <button
           className={`${styles.tab} ${tab === 'category-assignments' ? styles.tabActive : ''}`}
@@ -772,6 +835,70 @@ export const SchedulesPage: FC = () => {
                     </td>
                   </tr>
                 ))}
+              </tbody>
+            </table>
+          )}
+        </>
+      )}
+
+      {tab === 'object-assignments' && (
+        <>
+          <div style={{ marginBottom: 12, color: 'var(--text-secondary)', fontSize: 13 }}>
+            Для объектных строк табеля сначала используется график, назначенный объекту. Если для
+            объекта график не задан, система берёт график сотрудника по обычному каскаду
+            назначений.
+          </div>
+          {travelObjects.length === 0 ? (
+            <div style={{ padding: 16, color: 'var(--text-secondary)' }}>
+              Нет объектов SKUD. Сначала создайте их в разделе маршрутов и объектов.
+            </div>
+          ) : (
+            <table className={styles.table}>
+              <thead>
+                <tr>
+                  <th>Объект</th>
+                  <th>Текущий график</th>
+                  <th>Действует с</th>
+                  <th>Изменить</th>
+                </tr>
+              </thead>
+              <tbody>
+                {travelObjects
+                  .slice()
+                  .sort((left, right) => left.name.localeCompare(right.name, 'ru'))
+                  .map(objectItem => {
+                    const assigned = activeObjectAssignments.get(objectItem.id) || null;
+                    const assignedSchedId = assigned?.schedule_id || '';
+                    return (
+                      <tr key={objectItem.id}>
+                        <td>
+                          {objectItem.name}
+                          {!objectItem.is_active && (
+                            <span className={`${styles.badge}`} style={{ marginLeft: 8 }}>неактивен</span>
+                          )}
+                        </td>
+                        <td>
+                          {assigned?.work_schedules?.name || (
+                            <span style={{ color: 'var(--text-secondary)' }}>— не назначен —</span>
+                          )}
+                        </td>
+                        <td>{assigned?.effective_from || '—'}</td>
+                        <td>
+                          <select
+                            value={assignedSchedId}
+                            onChange={e => handleAssignObject(objectItem.id, e.target.value)}
+                          >
+                            <option value="">— снять —</option>
+                            {templates.map(template => (
+                              <option key={template.id} value={template.id}>
+                                {template.name}
+                              </option>
+                            ))}
+                          </select>
+                        </td>
+                      </tr>
+                    );
+                  })}
               </tbody>
             </table>
           )}

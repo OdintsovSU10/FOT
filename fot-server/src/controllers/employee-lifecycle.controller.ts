@@ -5,19 +5,177 @@ import { employeeChangesService } from '../services/employee-changes.service.js'
 import { loadStructureCache, decryptEmployee } from '../services/employee-mapper.service.js';
 import { employeeCache } from '../services/employee-cache.service.js';
 import {
+  assignEmployeesToArchiveDepartment,
+  ensureLocalArchiveDepartment,
+  isProtectedArchiveDepartment,
+} from '../services/employee-archive-department.service.js';
+import {
   ensureArchiveSigurDepartment,
   syncLinkedEmployeeFromSigur,
 } from '../services/sigur-linked-employees.service.js';
 import { sigurService } from '../services/sigur.service.js';
 import type { AuthenticatedRequest, EmployeeEncrypted } from '../types/index.js';
-import { canAccessEmployeeInScope } from '../services/data-scope.service.js';
+import {
+  canAccessDepartmentInScope,
+  canAccessEmployeeInScope,
+  resolveRequestDataScope,
+} from '../services/data-scope.service.js';
 
-// Явный набор колонок для lifecycle-операций
 const EMPLOYEE_LIFECYCLE_COLUMNS = 'id, full_name, last_name, first_name, middle_name, current_salary, salary_actual, salary_calculated, staff_units, birth_date, hire_date, country, pension_number, patent_issue_date, patent_expiry_date, email, org_department_id, org_company_id, position_id, sigur_employee_id, tab_number, current_status, permit_expiry_date, registration_cat1, registration_cat4, doc_receipt_date, work_object, employment_status, department_locked, is_archived, archived_at, created_at, updated_at, work_category';
 
-/**
- * POST /api/employees/:id/archive
- */
+interface IHttpError extends Error {
+  status?: number;
+  code?: string;
+}
+
+interface ITargetDepartmentRow {
+  id: string;
+  sigur_department_id: number | null;
+  name: string;
+}
+
+function createHttpError(status: number, message: string, code?: string): IHttpError {
+  const error = new Error(message) as IHttpError;
+  error.status = status;
+  error.code = code;
+  return error;
+}
+
+function getHttpErrorStatus(error: unknown): number | null {
+  if (!error || typeof error !== 'object') return null;
+  const status = 'status' in error ? Number(error.status) : Number.NaN;
+  return Number.isFinite(status) ? status : null;
+}
+
+function getHttpErrorCode(error: unknown): string | null {
+  if (!error || typeof error !== 'object' || !('code' in error)) return null;
+  return typeof error.code === 'string' ? error.code : null;
+}
+
+function getErrorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error && error.message ? error.message : fallback;
+}
+
+async function loadEmployeeLifecycleRow(employeeId: number): Promise<EmployeeEncrypted | null> {
+  const { data, error } = await supabase
+    .from('employees')
+    .select(EMPLOYEE_LIFECYCLE_COLUMNS)
+    .eq('id', employeeId)
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  return (data as EmployeeEncrypted | null) ?? null;
+}
+
+async function loadTargetDepartment(id: string): Promise<ITargetDepartmentRow | null> {
+  const { data, error } = await supabase
+    .from('org_departments')
+    .select('id, sigur_department_id, name')
+    .eq('id', id)
+    .eq('is_active', true)
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  return (data as ITargetDepartmentRow | null) ?? null;
+}
+
+async function assertDepartmentMoveAllowed(
+  req: AuthenticatedRequest,
+  targetDepartmentId: string,
+): Promise<void> {
+  const scope = await resolveRequestDataScope(req);
+  if (!scope) {
+    throw createHttpError(403, 'Data scope не настроен для роли');
+  }
+
+  if (scope === 'self') {
+    throw createHttpError(403, 'Недостаточно прав для перевода сотрудников');
+  }
+
+  if (scope === 'department' && !(await canAccessDepartmentInScope(req, targetDepartmentId))) {
+    throw createHttpError(403, 'Нельзя перевести сотрудника в другой отдел при department scope');
+  }
+}
+
+async function moveEmployeeToDepartmentInternal(params: {
+  req: AuthenticatedRequest;
+  employee: EmployeeEncrypted;
+  targetDepartment: ITargetDepartmentRow;
+  connection?: 'external' | 'internal';
+  reason: string;
+  effectiveDate?: string;
+}): Promise<'sigur' | 'portal' | 'noop'> {
+  const {
+    req,
+    employee,
+    targetDepartment,
+    connection,
+    reason,
+    effectiveDate,
+  } = params;
+
+  if (employee.org_department_id === targetDepartment.id) {
+    return 'noop';
+  }
+
+  if (await isProtectedArchiveDepartment(targetDepartment.id, connection)) {
+    throw createHttpError(409, 'Папка "Уволенные" доступна только через сценарий увольнения');
+  }
+
+  if (employee.sigur_employee_id) {
+    if (!(await sigurService.isConfigured())) {
+      throw createHttpError(503, 'Sigur не настроен');
+    }
+
+    if (!targetDepartment.sigur_department_id) {
+      throw createHttpError(409, 'У выбранного отдела нет привязки к Sigur');
+    }
+
+    await sigurService.updateEmployee(employee.sigur_employee_id, {
+      departmentId: targetDepartment.sigur_department_id,
+    }, connection);
+
+    await employeeChangesService.changeDepartment(employee.id, targetDepartment.id, {
+      reason,
+      lockDepartment: false,
+      createdBy: req.user.id,
+      effectiveDate,
+    });
+
+    await syncLinkedEmployeeFromSigur(employee.id, connection);
+    return 'sigur';
+  }
+
+  await employeeChangesService.changeDepartment(employee.id, targetDepartment.id, {
+    reason,
+    lockDepartment: true,
+    createdBy: req.user.id,
+    effectiveDate,
+  });
+
+  return 'portal';
+}
+
+async function sendUpdatedEmployee(res: Response, employeeId: number): Promise<void> {
+  const updatedEmployee = await loadEmployeeLifecycleRow(employeeId);
+  if (!updatedEmployee) {
+    res.status(404).json({ success: false, error: 'Employee not found' });
+    return;
+  }
+
+  const structureCache = await loadStructureCache();
+  res.json({
+    success: true,
+    data: decryptEmployee(updatedEmployee, structureCache),
+  });
+}
+
 export async function archive(req: AuthenticatedRequest, res: Response): Promise<void> {
   try {
     const { id } = req.params;
@@ -54,9 +212,6 @@ export async function archive(req: AuthenticatedRequest, res: Response): Promise
   }
 }
 
-/**
- * POST /api/employees/:id/restore
- */
 export async function restore(req: AuthenticatedRequest, res: Response): Promise<void> {
   try {
     const { id } = req.params;
@@ -80,7 +235,7 @@ export async function restore(req: AuthenticatedRequest, res: Response): Promise
     employeeCache.invalidate(id);
 
     const structureCache = await loadStructureCache();
-    const employee = decryptEmployee(data as unknown as EmployeeEncrypted, structureCache);
+    const employee = decryptEmployee(data as EmployeeEncrypted, structureCache);
 
     await auditService.logFromRequest(req, req.user.id, 'RESTORE_EMPLOYEE', {
       entityType: 'employee',
@@ -94,9 +249,6 @@ export async function restore(req: AuthenticatedRequest, res: Response): Promise
   }
 }
 
-/**
- * POST /api/employees/:id/fire — уволить сотрудника
- */
 export async function fire(req: AuthenticatedRequest, res: Response): Promise<void> {
   try {
     const { id } = req.params;
@@ -106,13 +258,8 @@ export async function fire(req: AuthenticatedRequest, res: Response): Promise<vo
       return;
     }
 
-    const { data: existing, error: existingError } = await supabase
-      .from('employees')
-      .select(EMPLOYEE_LIFECYCLE_COLUMNS)
-      .eq('id', id)
-      .single();
-
-    if (existingError || !existing) {
+    const existing = await loadEmployeeLifecycleRow(employeeId);
+    if (!existing) {
       res.status(404).json({ success: false, error: 'Employee not found' });
       return;
     }
@@ -148,7 +295,7 @@ export async function fire(req: AuthenticatedRequest, res: Response): Promise<vo
             partial_failure: true,
             movedToArchive,
             blocked,
-            error: error instanceof Error ? error.message : 'Unknown Sigur error',
+            error: getErrorMessage(error, 'Unknown Sigur error'),
           },
         });
 
@@ -162,16 +309,27 @@ export async function fire(req: AuthenticatedRequest, res: Response): Promise<vo
         return;
       }
 
-      targetDepartmentId = archive.localDepartmentId || targetDepartmentId;
+      const localArchive = await ensureLocalArchiveDepartment(req.user.id, { connection });
+      targetDepartmentId = archive.localDepartmentId || localArchive.id;
+    } else {
+      const archive = await ensureLocalArchiveDepartment(req.user.id, { connection });
+      targetDepartmentId = archive.id;
+    }
 
-      if (archive.localDepartmentId && archive.localDepartmentId !== existing.org_department_id) {
-        await employeeChangesService.changeDepartment(employeeId, archive.localDepartmentId, {
-          reason: 'Увольнение — перевод в архивный отдел Sigur',
-          lockDepartment: false,
-          createdBy: req.user.id,
-          effectiveDate: today,
-        });
-      }
+    if (targetDepartmentId && existing.org_department_id !== targetDepartmentId) {
+      await employeeChangesService.changeDepartment(employeeId, targetDepartmentId, {
+        reason: 'Увольнение — перевод в папку "Уволенные"',
+        lockDepartment: false,
+        createdBy: req.user.id,
+        effectiveDate: today,
+      });
+    }
+
+    if (targetDepartmentId) {
+      await assignEmployeesToArchiveDepartment([employeeId], req.user.id, {
+        connection,
+        effectiveDate: today,
+      });
     }
 
     const { data, error } = await supabase
@@ -192,7 +350,6 @@ export async function fire(req: AuthenticatedRequest, res: Response): Promise<vo
 
     employeeCache.invalidate(id);
 
-    // Закрываем все активные назначения при увольнении
     await supabase
       .from('employee_assignments')
       .update({ effective_to: today })
@@ -209,7 +366,7 @@ export async function fire(req: AuthenticatedRequest, res: Response): Promise<vo
     });
 
     const structureCache = await loadStructureCache();
-    const updatedEmployee = decryptEmployee(data as unknown as EmployeeEncrypted, structureCache);
+    const updatedEmployee = decryptEmployee(data as EmployeeEncrypted, structureCache);
     res.json({ success: true, data: updatedEmployee });
   } catch (error) {
     console.error('Fire employee error:', error);
@@ -217,15 +374,25 @@ export async function fire(req: AuthenticatedRequest, res: Response): Promise<vo
   }
 }
 
-/**
- * POST /api/employees/:id/rehire — восстановить на работу
- */
 export async function rehire(req: AuthenticatedRequest, res: Response): Promise<void> {
   try {
     const { id } = req.params;
-    if (!(await canAccessEmployeeInScope(req, Number(id)))) {
+    const employeeId = Number(id);
+    if (!(await canAccessEmployeeInScope(req, employeeId))) {
       res.status(403).json({ success: false, error: 'Нет доступа к сотруднику' });
       return;
+    }
+
+    const existing = await loadEmployeeLifecycleRow(employeeId);
+    if (!existing) {
+      res.status(404).json({ success: false, error: 'Employee not found' });
+      return;
+    }
+
+    const connection = (req.body.connection as 'external' | 'internal') || undefined;
+    if (existing.sigur_employee_id && (await sigurService.isConfigured())) {
+      await sigurService.unblockEmployee(existing.sigur_employee_id, connection);
+      await syncLinkedEmployeeFromSigur(existing.id, connection);
     }
 
     const { data, error } = await supabase
@@ -242,12 +409,11 @@ export async function rehire(req: AuthenticatedRequest, res: Response): Promise<
 
     employeeCache.invalidate(id);
 
-    // Создаём новое назначение при восстановлении
     const today = new Date().toISOString().slice(0, 10);
     await supabase
       .from('employee_assignments')
       .insert({
-        employee_id: Number(id),
+        employee_id: employeeId,
         org_department_id: data.org_department_id || null,
         position_id: data.position_id || null,
         effective_from: today,
@@ -260,10 +426,13 @@ export async function rehire(req: AuthenticatedRequest, res: Response): Promise<
     await auditService.logFromRequest(req, req.user.id, 'REHIRE_EMPLOYEE', {
       entityType: 'employee',
       entityId: id,
+      details: {
+        source: existing.sigur_employee_id ? 'sigur' : 'portal',
+      },
     });
 
     const structureCache = await loadStructureCache();
-    const employee = decryptEmployee(data as unknown as EmployeeEncrypted, structureCache);
+    const employee = decryptEmployee(data as EmployeeEncrypted, structureCache);
     res.json({ success: true, data: employee });
   } catch (error) {
     console.error('Rehire employee error:', error);
@@ -271,9 +440,6 @@ export async function rehire(req: AuthenticatedRequest, res: Response): Promise<
   }
 }
 
-/**
- * POST /api/employees/:id/move-department — переместить в другой отдел
- */
 export async function moveDepartment(req: AuthenticatedRequest, res: Response): Promise<void> {
   try {
     const { id } = req.params;
@@ -282,102 +448,181 @@ export async function moveDepartment(req: AuthenticatedRequest, res: Response): 
       res.status(403).json({ success: false, error: 'Нет доступа к сотруднику' });
       return;
     }
-    const { org_department_id } = req.body as { org_department_id: string };
 
+    const { org_department_id } = req.body as { org_department_id: string };
     if (!org_department_id) {
       res.status(400).json({ success: false, error: 'org_department_id required' });
       return;
     }
 
-    const { data: employeeRow, error: employeeError } = await supabase
-      .from('employees')
-      .select(EMPLOYEE_LIFECYCLE_COLUMNS)
-      .eq('id', id)
-      .single();
+    await assertDepartmentMoveAllowed(req, org_department_id);
 
-    if (employeeError || !employeeRow) {
+    const [employeeRow, targetDepartment] = await Promise.all([
+      loadEmployeeLifecycleRow(employeeId),
+      loadTargetDepartment(org_department_id),
+    ]);
+
+    if (!employeeRow) {
       res.status(404).json({ success: false, error: 'Employee not found' });
       return;
     }
 
-    if (employeeRow.sigur_employee_id) {
-      if (!(await sigurService.isConfigured())) {
-        res.status(503).json({ success: false, error: 'Sigur не настроен' });
-        return;
-      }
-
-      const { data: targetDepartment, error: targetDepartmentError } = await supabase
-        .from('org_departments')
-        .select('id, sigur_department_id')
-        .eq('id', org_department_id)
-        .single();
-
-      if (targetDepartmentError || !targetDepartment) {
-        res.status(400).json({ success: false, error: 'Целевой отдел не найден' });
-        return;
-      }
-
-      if (!targetDepartment.sigur_department_id) {
-        res.status(409).json({ success: false, error: 'У выбранного отдела нет привязки к Sigur' });
-        return;
-      }
-
-      const connection = (req.body.connection as 'external' | 'internal') || undefined;
-      await sigurService.updateEmployee(employeeRow.sigur_employee_id, {
-        departmentId: targetDepartment.sigur_department_id,
-      }, connection);
-
-      if (employeeRow.org_department_id !== org_department_id) {
-        await employeeChangesService.changeDepartment(employeeId, org_department_id, {
-          reason: 'Перевод в другой отдел',
-          lockDepartment: false,
-          createdBy: req.user.id,
-        });
-      }
-
-      await syncLinkedEmployeeFromSigur(employeeId, connection);
-    } else {
-      await employeeChangesService.changeDepartment(employeeId, org_department_id, {
-        reason: 'Перевод в другой отдел',
-        lockDepartment: true,
-        createdBy: req.user.id,
-      });
+    if (!targetDepartment) {
+      res.status(400).json({ success: false, error: 'Целевой отдел не найден' });
+      return;
     }
+
+    const connection = (req.body.connection as 'external' | 'internal') || undefined;
+    const source = await moveEmployeeToDepartmentInternal({
+      req,
+      employee: employeeRow,
+      targetDepartment,
+      connection,
+      reason: 'Перевод в другой отдел',
+    });
 
     employeeCache.invalidate(id);
-
-    const { data, error } = await supabase
-      .from('employees')
-      .select(EMPLOYEE_LIFECYCLE_COLUMNS)
-      .eq('id', id)
-      .single();
-
-    if (error || !data) {
-      res.status(404).json({ success: false, error: 'Employee not found' });
-      return;
-    }
 
     await auditService.logFromRequest(req, req.user.id, 'MOVE_EMPLOYEE_DEPARTMENT', {
       entityType: 'employee',
       entityId: id,
       details: {
         org_department_id,
-        source: employeeRow.sigur_employee_id ? 'sigur' : 'portal',
+        source: source === 'noop' ? (employeeRow.sigur_employee_id ? 'sigur' : 'portal') : source,
       },
     });
 
-    const structureCache = await loadStructureCache();
-    const updatedEmployee = decryptEmployee(data as unknown as EmployeeEncrypted, structureCache);
-    res.json({ success: true, data: updatedEmployee });
+    await sendUpdatedEmployee(res, employeeId);
   } catch (error) {
+    const status = getHttpErrorStatus(error);
+    if (status) {
+      res.status(status).json({
+        success: false,
+        error: getErrorMessage(error, 'Failed to move employee'),
+        ...(getHttpErrorCode(error) ? { code: getHttpErrorCode(error) } : {}),
+      });
+      return;
+    }
+
     console.error('Move department error:', error);
     res.status(500).json({ success: false, error: 'Failed to move employee' });
   }
 }
 
-/**
- * GET /api/employees/:id/history
- */
+export async function batchMoveEmployees(req: AuthenticatedRequest, res: Response): Promise<void> {
+  try {
+    const {
+      employee_ids,
+      org_department_id,
+      connection,
+    } = req.body as {
+      employee_ids?: number[];
+      org_department_id?: string;
+      connection?: 'external' | 'internal';
+    };
+
+    const employeeIds = Array.from(
+      new Set((employee_ids || []).map(value => Number(value)).filter(value => Number.isFinite(value) && value > 0)),
+    );
+
+    if (employeeIds.length === 0) {
+      res.status(400).json({ success: false, error: 'employee_ids required' });
+      return;
+    }
+
+    if (!org_department_id) {
+      res.status(400).json({ success: false, error: 'org_department_id required' });
+      return;
+    }
+
+    await assertDepartmentMoveAllowed(req, org_department_id);
+
+    const targetDepartment = await loadTargetDepartment(org_department_id);
+    if (!targetDepartment) {
+      res.status(400).json({ success: false, error: 'Целевой отдел не найден' });
+      return;
+    }
+
+    if (await isProtectedArchiveDepartment(org_department_id, connection)) {
+      res.status(409).json({
+        success: false,
+        error: 'Папка "Уволенные" доступна только через сценарий увольнения',
+      });
+      return;
+    }
+
+    const failures: Array<{ employee_id: number; error: string }> = [];
+    const movedIds: number[] = [];
+    const skippedIds: number[] = [];
+
+    for (const employeeId of employeeIds) {
+      if (!(await canAccessEmployeeInScope(req, employeeId))) {
+        failures.push({ employee_id: employeeId, error: 'Нет доступа к сотруднику' });
+        continue;
+      }
+
+      const employeeRow = await loadEmployeeLifecycleRow(employeeId);
+      if (!employeeRow) {
+        failures.push({ employee_id: employeeId, error: 'Employee not found' });
+        continue;
+      }
+
+      try {
+        const source = await moveEmployeeToDepartmentInternal({
+          req,
+          employee: employeeRow,
+          targetDepartment,
+          connection,
+          reason: 'Массовый перевод в другой отдел',
+        });
+
+        if (source === 'noop') {
+          skippedIds.push(employeeId);
+          continue;
+        }
+
+        movedIds.push(employeeId);
+        await auditService.logFromRequest(req, req.user.id, 'MOVE_EMPLOYEE_DEPARTMENT', {
+          entityType: 'employee',
+          entityId: String(employeeId),
+          details: {
+            org_department_id,
+            source,
+            batch: true,
+          },
+        });
+      } catch (error) {
+        failures.push({
+          employee_id: employeeId,
+          error: getErrorMessage(error, 'Failed to move employee'),
+        });
+      }
+    }
+
+    res.json({
+      success: true,
+      data: {
+        target_department_id: org_department_id,
+        moved_count: movedIds.length,
+        skipped_count: skippedIds.length,
+        failed_count: failures.length,
+        moved_ids: movedIds,
+        skipped_ids: skippedIds,
+        failures,
+      },
+    });
+  } catch (error) {
+    const status = getHttpErrorStatus(error);
+    if (status) {
+      res.status(status).json({ success: false, error: getErrorMessage(error, 'Failed to move employees') });
+      return;
+    }
+
+    console.error('Batch move employees error:', error);
+    res.status(500).json({ success: false, error: 'Failed to move employees' });
+  }
+}
+
 export async function getHistory(req: AuthenticatedRequest, res: Response): Promise<void> {
   try {
     const { id } = req.params;
@@ -387,7 +632,6 @@ export async function getHistory(req: AuthenticatedRequest, res: Response): Prom
     }
 
     const { data: emp } = await supabase.from('employees').select('id').eq('id', id).single();
-
     if (!emp) {
       res.status(404).json({ success: false, error: 'Employee not found' });
       return;
@@ -451,9 +695,6 @@ export async function getHistory(req: AuthenticatedRequest, res: Response): Prom
   }
 }
 
-/**
- * PUT /api/employees/:id/history/:eventId
- */
 export async function updateHistoryEvent(req: AuthenticatedRequest, res: Response): Promise<void> {
   try {
     const employeeId = Number(req.params.id);
@@ -461,8 +702,8 @@ export async function updateHistoryEvent(req: AuthenticatedRequest, res: Respons
       res.status(403).json({ success: false, error: 'Нет доступа к сотруднику' });
       return;
     }
-    const eventId = req.params.eventId;
 
+    const eventId = req.params.eventId;
     if (eventId.startsWith('sal_')) {
       const historyId = Number(eventId.replace('sal_', ''));
       await employeeChangesService.updateSalaryHistory(historyId, employeeId, {
@@ -487,9 +728,6 @@ export async function updateHistoryEvent(req: AuthenticatedRequest, res: Respons
   }
 }
 
-/**
- * DELETE /api/employees/:id/history/:eventId
- */
 export async function deleteHistoryEvent(req: AuthenticatedRequest, res: Response): Promise<void> {
   try {
     const employeeId = Number(req.params.id);
@@ -497,8 +735,8 @@ export async function deleteHistoryEvent(req: AuthenticatedRequest, res: Respons
       res.status(403).json({ success: false, error: 'Нет доступа к сотруднику' });
       return;
     }
-    const eventId = req.params.eventId;
 
+    const eventId = req.params.eventId;
     if (eventId.startsWith('sal_')) {
       const historyId = Number(eventId.replace('sal_', ''));
       await employeeChangesService.deleteSalaryHistory(historyId, employeeId);

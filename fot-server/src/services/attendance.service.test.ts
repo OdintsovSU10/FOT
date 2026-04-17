@@ -25,6 +25,7 @@ const mockedState = vi.hoisted(() => ({
   scheduleWorkHours: 8,
   isWorkingDay: true,
   needsSkudCheck: false,
+  objectSchedulesByDate: new Map<string, Map<string, IResolvedSchedule>>(),
   objectAttendanceData: {
     objectEntries: [] as Array<Record<string, unknown>>,
     objectEntriesByEmployeeDate: new Map<number, Map<string, Array<Record<string, unknown>>>>(),
@@ -98,9 +99,12 @@ vi.mock('./skud-travel.service.js', () => ({
 }));
 
 vi.mock('./schedule.service.js', () => ({
-  getScheduleForDate: vi.fn(() => ({ work_hours: mockedState.scheduleWorkHours })),
+  getScheduleForDate: vi.fn((schedule?: { work_hours?: number }) => ({
+    work_hours: schedule?.work_hours ?? mockedState.scheduleWorkHours,
+  })),
   isWorkingDay: vi.fn(() => mockedState.isWorkingDay),
   needsSkudCheck: vi.fn(() => mockedState.needsSkudCheck),
+  resolveObjectSchedulesForPeriod: vi.fn(async () => mockedState.objectSchedulesByDate),
 }));
 
 vi.mock('./skud-shared.service.js', () => ({
@@ -125,6 +129,7 @@ describe('attendance.service', () => {
     mockedState.scheduleWorkHours = 8;
     mockedState.isWorkingDay = true;
     mockedState.needsSkudCheck = false;
+    mockedState.objectSchedulesByDate = new Map();
     mockedState.objectAttendanceData = {
       objectEntries: [],
       objectEntriesByEmployeeDate: new Map(),
@@ -487,7 +492,9 @@ describe('attendance.service', () => {
     });
   });
 
-  it('caps manager-facing display hours to schedule and redistributes object rows proportionally', async () => {
+  it('caps manager-facing object rows by object schedule and falls back to employee schedule', async () => {
+    mockedState.scheduleWorkHours = 4;
+
     const objectEntryA = {
       adjustment_id: 1,
       employee_id: 1,
@@ -513,6 +520,9 @@ describe('attendance.service', () => {
       is_correction: false,
     };
 
+    mockedState.objectSchedulesByDate = new Map([
+      ['obj-a', new Map([['2026-04-01', { work_hours: 3 } as IResolvedSchedule]])],
+    ]);
     mockedState.objectAttendanceData = {
       objectEntries: [objectEntryA, objectEntryB],
       objectEntriesByEmployeeDate: new Map([
@@ -561,7 +571,7 @@ describe('attendance.service', () => {
       employee_id: 1,
       work_date: '2026-04-01',
       hours_worked: 10,
-      display_hours_worked: 8,
+      display_hours_worked: 7,
       base_hours_worked: 10,
       object_detail_mode: 'available',
     });
@@ -569,7 +579,7 @@ describe('attendance.service', () => {
       expect.objectContaining({
         object_key: 'obj-a',
         hours_worked: 5,
-        display_hours_worked: 4,
+        display_hours_worked: 3,
       }),
       expect.objectContaining({
         object_key: 'obj-b',

@@ -1,7 +1,7 @@
 import { supabase } from '../config/database.js';
 import { loadCalendarMonth, resolveSchedulesForPeriod } from './schedule.service.js';
 import type { IProductionCalendarMonth, IResolvedSchedule } from '../types/index.js';
-import { buildAttendanceEntries } from './attendance.service.js';
+import { buildAttendanceEntries, type IAttendanceEntry } from './attendance.service.js';
 import type { IAttendanceObjectEntry } from './timesheet-object.service.js';
 import {
   listEmployeeIdsAssignedToDepartmentPeriod,
@@ -29,6 +29,7 @@ export interface IDepartmentTimesheetData {
   schedulesMap: Map<number, IResolvedSchedule>;
   dailySchedulesMap: Map<number, Map<string, IResolvedSchedule>>;
   calendarMonth: IProductionCalendarMonth | null;
+  entries: IAttendanceEntry[];
   dataMap: Map<number, Map<string, { status: string; hours: number; corrected?: boolean }>>;
   objectEntries: IAttendanceObjectEntry[];
   skudMap: Map<number, Map<string, { hours: number; corrected: boolean }>>;
@@ -168,6 +169,7 @@ export async function fetchTimesheetDataForDepartment(
     schedulesMap,
     dailySchedulesMap,
     calendarMonth,
+    entries: attendance.entries,
     dataMap,
     objectEntries: attendance.objectEntries,
     skudMap,

@@ -41,6 +41,37 @@ export const structureApi = {
     }
   },
 
+  async updateDepartment(
+    id: string,
+    payload: { name?: string; parent_id?: string | null },
+  ): Promise<ApiResponse<OrgDepartment>> {
+    try {
+      const res = await apiClient.put<ApiResponse<OrgDepartment>>(`/structure/departments/${id}`, payload);
+      return { data: res.data, message: res.message || 'ok' };
+    } catch (error) {
+      return {
+        error: error instanceof Error ? error.message : 'Ошибка обновления отдела',
+      };
+    }
+  },
+
+  async batchMoveDepartments(
+    departmentIds: string[],
+    parentId: string | null,
+  ): Promise<ApiResponse<{ moved_count: number; skipped_count: number; moved_ids: string[]; skipped_ids: string[]; parent_id: string | null }>> {
+    try {
+      const res = await apiClient.post<ApiResponse<{ moved_count: number; skipped_count: number; moved_ids: string[]; skipped_ids: string[]; parent_id: string | null }>>('/structure/departments/batch-move', {
+        department_ids: departmentIds,
+        parent_id: parentId,
+      });
+      return { data: res.data, message: res.message || 'ok' };
+    } catch (error) {
+      return {
+        error: error instanceof Error ? error.message : 'Ошибка перемещения отделов',
+      };
+    }
+  },
+
   async clearStructure(): Promise<ApiResponse<{ employeesDeleted: number; departmentsDeleted: number }>> {
     try {
       const res = await apiClient.delete<ApiResponse<{ employeesDeleted: number; departmentsDeleted: number }>>('/structure/clear');
@@ -59,6 +90,17 @@ export const structureApi = {
     } catch (error) {
       return {
         error: error instanceof Error ? error.message : 'Ошибка удаления отдела',
+      };
+    }
+  },
+
+  async deleteDepartmentRecursive(id: string): Promise<ApiResponse<{ deleted_count: number; deleted_department_ids: string[]; target_parent_id: string | null }>> {
+    try {
+      const res = await apiClient.delete<ApiResponse<{ deleted_count: number; deleted_department_ids: string[]; target_parent_id: string | null }>>(`/structure/departments/${id}/recursive`);
+      return { data: res.data, message: res.message || 'ok' };
+    } catch (error) {
+      return {
+        error: error instanceof Error ? error.message : 'Ошибка рекурсивного удаления отдела',
       };
     }
   },

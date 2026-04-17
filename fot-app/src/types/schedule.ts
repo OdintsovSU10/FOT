@@ -64,6 +64,18 @@ export interface IEmployeeScheduleAssignment {
   updated_at: string;
 }
 
+export interface IObjectScheduleAssignment {
+  id: string;
+  object_id: string;
+  schedule_id: string;
+  work_schedules?: IWorkSchedule;
+  effective_from: string;
+  effective_to: string | null;
+  created_by: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface IResolvedSchedule {
   schedule_id: string;
   schedule_type: ScheduleType;
@@ -80,7 +92,7 @@ export interface IResolvedSchedule {
   expected_saturdays_per_month: number;
   full_day_threshold_minutes: number | null;
   weekend_full_day_threshold_minutes: number | null;
-  source: 'employee' | 'category' | 'default';
+  source: 'object' | 'employee' | 'category' | 'default';
 }
 
 export const SCHEDULE_TYPE_LABELS: Record<ScheduleType, string> = {

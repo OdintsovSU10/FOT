@@ -5,6 +5,8 @@ import type {
   SigurConnectionSettings,
   SigurEmployeeAccessPointsSaveResult,
   SigurEmployeeAccessPointsState,
+  SigurEmployeeCardSummary,
+  SigurEmployeeProfileState,
 } from '../types';
 
 interface ApiResponse<T> {
@@ -16,6 +18,15 @@ interface ISigurTestResult {
   success: boolean;
   message: string;
   connection: string;
+  connections: { external: boolean; internal: boolean };
+}
+
+interface ISigurConnectionStatusResult {
+  connected: boolean | null;
+  latestCheckStatus: 'success' | 'failure' | 'silence' | null;
+  lastCheckedAt: string | null;
+  lastSuccessfulSignalAt: string | null;
+  lastError: string | null;
   connections: { external: boolean; internal: boolean };
 }
 
@@ -54,6 +65,11 @@ export const sigurService = {
   async testConnection(connection?: 'internal' | 'external'): Promise<ISigurTestResult> {
     const params = connection ? `?connection=${connection}` : '';
     return apiClient.get<ISigurTestResult>(`/sigur/test${params}`);
+  },
+
+  async getConnectionStatus(): Promise<ISigurConnectionStatusResult> {
+    const response = await apiClient.get<ApiResponse<ISigurConnectionStatusResult>>('/sigur/connection-status');
+    return response.data;
   },
 
   async preview(startTime: string, endTime: string, departmentId?: string, connection?: 'internal' | 'external'): Promise<ISigurPreviewResult> {
@@ -97,10 +113,34 @@ export const sigurService = {
     return apiClient.get('/sigur/access-rules');
   },
 
-  async getEmployeeAccessPoints(employeeId: number, connection?: SigurConnectionScope): Promise<SigurEmployeeAccessPointsState> {
-    const params = connection ? `?connection=${connection}` : '';
+  async getEmployeeAccessPoints(
+    employeeId: number,
+    connection?: SigurConnectionScope,
+    includeOptions = false,
+    refresh = false,
+  ): Promise<SigurEmployeeAccessPointsState> {
+    const searchParams = new URLSearchParams();
+    if (connection) searchParams.set('connection', connection);
+    if (includeOptions) searchParams.set('includeOptions', 'true');
+    if (refresh) searchParams.set('refresh', '1');
+    const params = searchParams.toString() ? `?${searchParams.toString()}` : '';
     const response = await apiClient.get<ApiResponse<SigurEmployeeAccessPointsState>>(
       `/sigur/employees/${employeeId}/access-points${params}`,
+    );
+    return response.data;
+  },
+
+  async getEmployeeProfile(
+    employeeId: number,
+    connection?: SigurConnectionScope,
+    refresh = false,
+  ): Promise<SigurEmployeeProfileState> {
+    const searchParams = new URLSearchParams();
+    if (connection) searchParams.set('connection', connection);
+    if (refresh) searchParams.set('refresh', '1');
+    const params = searchParams.toString() ? `?${searchParams.toString()}` : '';
+    const response = await apiClient.get<ApiResponse<SigurEmployeeProfileState>>(
+      `/sigur/employees/${employeeId}/profile${params}`,
     );
     return response.data;
   },
@@ -113,6 +153,19 @@ export const sigurService = {
     const response = await apiClient.put<ApiResponse<SigurEmployeeAccessPointsSaveResult>>(
       `/sigur/employees/${employeeId}/access-points`,
       { accessPointIds, connection },
+    );
+    return response.data;
+  },
+
+  async updateEmployeeCardExpiration(
+    employeeId: number,
+    cardId: number,
+    expirationDate: string,
+    connection?: SigurConnectionScope,
+  ): Promise<SigurEmployeeCardSummary> {
+    const response = await apiClient.put<ApiResponse<SigurEmployeeCardSummary>>(
+      `/sigur/employees/${employeeId}/cards/${cardId}/expiration`,
+      { expirationDate, connection },
     );
     return response.data;
   },

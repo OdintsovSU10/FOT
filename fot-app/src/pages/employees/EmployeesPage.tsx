@@ -1,10 +1,21 @@
-import { useState, useEffect, useMemo, type FC } from 'react';
+import { useCallback, useEffect, useMemo, useState, type FC } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { X, ChevronLeft, ChevronRight, FolderOpen, Search } from 'lucide-react';
+import {
+  AlertTriangle,
+  ChevronLeft,
+  ChevronRight,
+  FolderOpen,
+  MoveRight,
+  Search,
+  UserRoundX,
+  X,
+} from 'lucide-react';
 import { employeeService } from '../../services/employeeService';
+import { structureApi } from '../../api/structure';
 import { useAuth } from '../../contexts/AuthContext';
 import { EmpVirtualList } from '../../components/employees/EmpVirtualList';
 import { DepartmentPanel } from '../../components/employees/DepartmentPanel';
+import { EmployeeSigurSidebar } from '../../components/employees/EmployeeSigurSidebar';
 import { useIsMobile } from '../../hooks/useIsMobile';
 import type { Employee, OrgDepartmentNode, IEmployeePresence } from '../../types';
 import {
@@ -15,6 +26,7 @@ import {
   usePaginatedEmployeesQuery,
   usePresenceQuery,
 } from '../../hooks/useEmployeeDirectory';
+import { usePresenceRealtime } from '../../hooks/usePresenceRealtime';
 import { useStructureTree } from '../../hooks/useStructure';
 import { getSortedFlatDepartments } from '../../utils/departmentUtils';
 import '../../styles/EmployeesPage.css';
@@ -22,34 +34,51 @@ import '../../styles/EmployeesPage.css';
 const PAGE_SIZE = 50;
 const EMPTY_DEPARTMENTS: OrgDepartmentNode[] = [];
 
+type DepartmentDialogState =
+  | { mode: 'create'; parentId: string | null; name: string; description: string }
+  | { mode: 'rename'; departmentId: string; name: string }
+  | { mode: 'move'; departmentIds: string[]; parentId: string | null }
+  | { mode: 'delete'; departmentIds: string[] }
+  | { mode: 'deleteRecursive'; departmentId: string }
+  | null;
+
+const walkDepartmentTree = (nodes: OrgDepartmentNode[], cb: (node: OrgDepartmentNode) => void): void => {
+  for (const node of nodes) {
+    cb(node);
+    walkDepartmentTree(node.children, cb);
+  }
+};
+
 export const EmployeesPage: FC = () => {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { canEditPage, hasPermission, profile } = useAuth();
+  const { canEditPage, canViewPage, hasPermission, profile } = useAuth();
   const isMobile = useIsMobile(768);
+
   const canEdit = canEditPage('/employees') || canEditPage('/staff-control');
+  const canManageStructure = canEditPage('/employees/structure-manage');
   const isDepartmentScope = hasPermission('data.scope.department') && !hasPermission('data.scope.all');
   const initialPage = Number.parseInt(searchParams.get('page') || '1', 10);
 
   const [error, setError] = useState('');
   const [page, setPage] = useState(Number.isFinite(initialPage) && initialPage > 0 ? initialPage : 1);
-
-  // Filters
   const [selectedDeptId, setSelectedDeptId] = useState<string | null>(searchParams.get('dept'));
   const [expandedDepts, setExpandedDepts] = useState<Set<string>>(new Set());
   const [unifiedSearch, setUnifiedSearch] = useState(searchParams.get('q') || '');
   const [debouncedSearch, setDebouncedSearch] = useState(unifiedSearch);
-  const [activeTab, setActiveTab] = useState<'all' | 'fired'>(searchParams.get('tab') === 'fired' ? 'fired' : 'all');
+  const [lastActiveDeptId, setLastActiveDeptId] = useState<string | null>(
+    searchParams.get('dept') || null,
+  );
   const [isDeptPanelOpen, setIsDeptPanelOpen] = useState(false);
-
-  // Modals
-  const [moveEmpId, setMoveEmpId] = useState<number | null>(null);
-  const [moveDeptId, setMoveDeptValue] = useState('');
-
-  // Selection
   const [selectedEmps, setSelectedEmps] = useState<Set<number>>(new Set());
+  const [selectedManageDeptIds, setSelectedManageDeptIds] = useState<Set<string>>(new Set());
+  const [moveEmployeeIds, setMoveEmployeeIds] = useState<number[]>([]);
+  const [moveDeptId, setMoveDeptId] = useState('');
+  const [editingEmployeeId, setEditingEmployeeId] = useState<number | null>(null);
+  const [editingEmployee, setEditingEmployee] = useState<Employee | null>(null);
+  const [departmentDialog, setDepartmentDialog] = useState<DepartmentDialogState>(null);
+  const [isDepartmentActionRunning, setIsDepartmentActionRunning] = useState(false);
 
-  // Debounce search
   useEffect(() => {
     const timer = setTimeout(() => {
       setDebouncedSearch(unifiedSearch);
@@ -58,15 +87,13 @@ export const EmployeesPage: FC = () => {
     return () => clearTimeout(timer);
   }, [unifiedSearch]);
 
-  // URL sync
   useEffect(() => {
     const params = new URLSearchParams();
     if (unifiedSearch) params.set('q', unifiedSearch);
     if (!isDepartmentScope && selectedDeptId) params.set('dept', selectedDeptId);
-    if (activeTab !== 'all') params.set('tab', activeTab);
     if (page > 1) params.set('page', String(page));
     setSearchParams(params, { replace: true });
-  }, [activeTab, isDepartmentScope, page, unifiedSearch, selectedDeptId, setSearchParams]);
+  }, [isDepartmentScope, page, selectedDeptId, setSearchParams, unifiedSearch]);
 
   useEffect(() => {
     if (isDepartmentScope) {
@@ -74,15 +101,10 @@ export const EmployeesPage: FC = () => {
     }
   }, [isDepartmentScope]);
 
-  // Resolve department_id for server (selected dept + children for header filtering)
   const serverDeptId = useMemo(() => {
-    // Для department-scope всегда работаем в рамках отдела пользователя.
-    // Для серверной пагинации передаём только выбранный отдел.
-    // Дочерние отделы будут включены, т.к. backend фильтрует по org_department_id
     if (isDepartmentScope) {
       return profile?.department_id || undefined;
     }
-
     return selectedDeptId || undefined;
   }, [isDepartmentScope, profile?.department_id, selectedDeptId]);
 
@@ -90,28 +112,50 @@ export const EmployeesPage: FC = () => {
   const departments = isDepartmentScope
     ? EMPTY_DEPARTMENTS
     : structureQuery.data?.departments ?? EMPTY_DEPARTMENTS;
+  const archiveDepartmentId = isDepartmentScope
+    ? null
+    : structureQuery.data?.stats.archive_department_id || null;
+  const isArchiveView = !!archiveDepartmentId && selectedDeptId === archiveDepartmentId;
+  const normalizedSearch = debouncedSearch.trim();
+  const flatDepts = useMemo(() => getSortedFlatDepartments(departments), [departments]);
+  const departmentSearchMatches = useMemo(() => {
+    if (!normalizedSearch) return [];
+    const query = normalizedSearch.toLowerCase();
+    return flatDepts.filter(department => department.name.toLowerCase().includes(query));
+  }, [flatDepts, normalizedSearch]);
+  const hasDepartmentSearchMatches = !isDepartmentScope && departmentSearchMatches.length > 0;
+  const employeeSearchValue = normalizedSearch && !hasDepartmentSearchMatches ? normalizedSearch : undefined;
 
-  // Detect if query matches any department name (dept-search mode)
-  const matchesDept = useMemo(() => {
-    if (!debouncedSearch) return false;
-    const q = debouncedSearch.toLowerCase();
-    const check = (nodes: OrgDepartmentNode[]): boolean =>
-      nodes.some(n => n.name.toLowerCase().includes(q) || check(n.children));
-    return check(departments);
-  }, [debouncedSearch, departments]);
+  useEffect(() => {
+    if (selectedDeptId && selectedDeptId !== archiveDepartmentId) {
+      setLastActiveDeptId(selectedDeptId);
+    }
+  }, [archiveDepartmentId, selectedDeptId]);
 
   const employeesQuery = usePaginatedEmployeesQuery({
     page,
     pageSize: PAGE_SIZE,
-    search: (!matchesDept && debouncedSearch) ? debouncedSearch : undefined,
-    status: activeTab === 'fired' ? 'fired' : 'active',
+    search: employeeSearchValue,
+    status: isArchiveView ? 'fired' : 'active',
     departmentId: serverDeptId,
   });
   const countsQuery = useEmployeeCountsQuery(false);
   const presenceQuery = usePresenceQuery(serverDeptId ?? null, {
-    enabled: activeTab !== 'fired',
-    refetchInterval: activeTab === 'fired' ? false : 30_000,
+    enabled: !isArchiveView,
+    refetchInterval: isArchiveView ? false : 120_000,
   });
+  const refreshPresence = useCallback(() => {
+    if (isArchiveView) return;
+    void presenceQuery.refetch();
+  }, [isArchiveView, presenceQuery]);
+
+  usePresenceRealtime({
+    enabled: !isArchiveView,
+    owner: 'employees-presence',
+    onPresenceUpdate: refreshPresence,
+    onVisible: refreshPresence,
+  });
+
   const employees = (employeesQuery.data || EMPTY_PAGINATED_RESPONSE).data;
   const meta = (employeesQuery.data || EMPTY_PAGINATED_RESPONSE).meta || EMPTY_PAGINATED_META;
   const counts = countsQuery.data || EMPTY_EMPLOYEE_COUNTS;
@@ -124,49 +168,31 @@ export const EmployeesPage: FC = () => {
         ? 'Ошибка загрузки сотрудников'
         : '';
   const visibleError = error || queryError;
-  const refetchPresence = presenceQuery.refetch;
   const presenceMap = useMemo(() => {
-    if (activeTab === 'fired') return new Map<number, IEmployeePresence>();
+    if (isArchiveView) return new Map<number, IEmployeePresence>();
     const map = new Map<number, IEmployeePresence>();
     (presenceQuery.data || []).forEach(presence => map.set(presence.employee_id, presence));
     return map;
-  }, [activeTab, presenceQuery.data]);
+  }, [isArchiveView, presenceQuery.data]);
 
-  useEffect(() => {
-    if (activeTab === 'fired') {
-      return;
-    }
-
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible') {
-        void refetchPresence();
-      }
-    };
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    return () => {
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-    };
-  }, [activeTab, refetchPresence]);
-
-  // Highlight departments of found employees when in employee-search mode
   const highlightedDeptIds = useMemo(() => {
-    if (!debouncedSearch || matchesDept) return new Set<string>();
+    if (!employeeSearchValue) return new Set<string>();
     const ids = new Set<string>();
-    for (const emp of employees) {
-      if (emp.org_department_id) ids.add(emp.org_department_id);
+    for (const employee of employees) {
+      if (employee.org_department_id) ids.add(employee.org_department_id);
     }
     return ids;
-  }, [debouncedSearch, matchesDept, employees]);
+  }, [employeeSearchValue, employees]);
 
   const effectiveExpandedDepts = useMemo(() => {
-    if (!debouncedSearch || highlightedDeptIds.size === 0 || departments.length === 0) {
+    if (!employeeSearchValue || highlightedDeptIds.size === 0 || departments.length === 0) {
       return expandedDepts;
     }
     const flatMap = new Map<string, OrgDepartmentNode>();
-    const walk = (nodes: OrgDepartmentNode[]) => {
-      for (const n of nodes) { flatMap.set(n.id, n); walk(n.children); }
-    };
-    walk(departments);
+    walkDepartmentTree(departments, node => {
+      flatMap.set(node.id, node);
+    });
+
     const toExpand = new Set<string>();
     for (const deptId of highlightedDeptIds) {
       let node = flatMap.get(deptId);
@@ -175,153 +201,365 @@ export const EmployeesPage: FC = () => {
         node = node.parent_id ? flatMap.get(node.parent_id) : undefined;
       }
     }
+
     const next = new Set(expandedDepts);
     for (const id of toExpand) next.add(id);
     return next;
-  }, [debouncedSearch, departments, expandedDepts, highlightedDeptIds]);
+  }, [departments, employeeSearchValue, expandedDepts, highlightedDeptIds]);
 
-  // Department employee counts from server
   const deptCounts = useMemo(() => {
-    const map = new Map<string, number>();
+    const baseCounts = new Map<string, number>();
     for (const [id, count] of Object.entries(counts.byDepartment)) {
-      map.set(id, count);
+      baseCounts.set(id, count);
     }
-    // Compute totals for parent departments (include children)
+
     const totals = new Map<string, number>();
     const compute = (node: OrgDepartmentNode): number => {
-      let count = map.get(node.id) || 0;
+      let count = baseCounts.get(node.id) || 0;
       for (const child of node.children) count += compute(child);
       totals.set(node.id, count);
       return count;
     };
-    departments.forEach(d => compute(d));
+
+    departments.forEach(department => compute(department));
+    if (archiveDepartmentId) {
+      totals.set(archiveDepartmentId, counts.byStatus.fired);
+    }
     return totals;
-  }, [counts.byDepartment, departments]);
+  }, [archiveDepartmentId, counts.byDepartment, counts.byStatus.fired, departments]);
 
-  const tabCounts = useMemo(() => counts.byStatus, [counts.byStatus]);
-  const totalActive = counts.byStatus.active;
+  const moveTargetDepartments = useMemo(
+    () => flatDepts.filter(department => department.id !== archiveDepartmentId),
+    [archiveDepartmentId, flatDepts],
+  );
+  const selectedDeptInfo = useMemo(() => {
+    if (!selectedDeptId) return null;
+    const find = (nodes: OrgDepartmentNode[]): OrgDepartmentNode | null => {
+      for (const node of nodes) {
+        if (node.id === selectedDeptId) return node;
+        const childMatch = find(node.children);
+        if (childMatch) return childMatch;
+      }
+      return null;
+    };
+    return find(departments);
+  }, [departments, selectedDeptId]);
 
-  // Flat departments for select
-  const flatDepts = useMemo(() => {
-    return getSortedFlatDepartments(departments);
-  }, [departments]);
+  useEffect(() => {
+    if (isDepartmentScope || !hasDepartmentSearchMatches) {
+      return;
+    }
+
+    if (selectedDeptId && departmentSearchMatches.some(department => department.id === selectedDeptId)) {
+      return;
+    }
+
+    setSelectedDeptId(departmentSearchMatches[0].id);
+    setPage(1);
+  }, [departmentSearchMatches, hasDepartmentSearchMatches, isDepartmentScope, selectedDeptId]);
+
+  const selectedDeptLabel = isDepartmentScope
+    ? employees.find(employee => employee.department)?.department || 'Сотрудники'
+    : selectedDeptInfo?.name || 'Все сотрудники';
+  const selectedCountLabel = isArchiveView ? counts.byStatus.fired : meta.total;
+
   const employeeCardBackState = useMemo(() => {
     const params = new URLSearchParams();
     if (unifiedSearch) params.set('q', unifiedSearch);
     if (!isDepartmentScope && selectedDeptId) params.set('dept', selectedDeptId);
-    if (activeTab !== 'all') params.set('tab', activeTab);
     if (page > 1) params.set('page', String(page));
     const query = params.toString();
     return {
       label: 'Сотрудники',
       from: `/employees${query ? `?${query}` : ''}`,
     };
-  }, [activeTab, isDepartmentScope, page, unifiedSearch, selectedDeptId]);
+  }, [isDepartmentScope, page, selectedDeptId, unifiedSearch]);
 
-  // Selected department info
-  const selectedDeptInfo = useMemo(() => {
-    if (!selectedDeptId) return null;
-    const find = (nodes: OrgDepartmentNode[]): OrgDepartmentNode | null => {
-      for (const n of nodes) {
-        if (n.id === selectedDeptId) return n;
-        const f = find(n.children);
-        if (f) return f;
-      }
-      return null;
-    };
-    return find(departments);
-  }, [selectedDeptId, departments]);
-
-  // Handlers
-  const toggleDept = (id: string) => {
-    setExpandedDepts(prev => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
-      return next;
-    });
-  };
-
-  const handleEmpClick = (emp: Employee) => {
+  const openFullEmployeeCard = useCallback((employeeId: number) => {
     if (isMobile) setIsDeptPanelOpen(false);
-    navigate(`/employees/${emp.id}`, { state: employeeCardBackState });
-  };
+    navigate(`/employees/${employeeId}`, { state: employeeCardBackState });
+  }, [employeeCardBackState, isMobile, navigate]);
 
   const refetchDirectory = async () => {
     await Promise.all([
       employeesQuery.refetch(),
       countsQuery.refetch(),
-      activeTab === 'fired' ? Promise.resolve() : presenceQuery.refetch(),
+      isArchiveView ? Promise.resolve() : presenceQuery.refetch(),
     ]);
   };
 
-  const handleRefreshDepartments = () => {
-    void Promise.all([
+  const refetchStructureAndDirectory = async () => {
+    await Promise.all([
       structureQuery.refetch(),
-      countsQuery.refetch(),
+      refetchDirectory(),
     ]);
   };
 
-  const handleFire = async (emp: Employee, e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (!confirm(`Уволить ${emp.full_name}?`)) return;
-    try {
-      await employeeService.fire(emp.id);
-      await refetchDirectory();
-    } catch { setError('Ошибка увольнения'); }
+  const resetEmployeeEditor = () => {
+    setEditingEmployeeId(null);
+    setEditingEmployee(null);
   };
 
-  const handleRehire = async (emp: Employee, e: React.MouseEvent) => {
-    e.stopPropagation();
-    try {
-      await employeeService.rehire(emp.id);
-      await refetchDirectory();
-    } catch { setError('Ошибка восстановления'); }
-  };
+  const allVisibleSelected = employees.length > 0 && employees.every(employee => selectedEmps.has(employee.id));
 
-  const handleConfirmMove = async () => {
-    if (!moveEmpId || !moveDeptId) return;
-    try {
-      await employeeService.moveDepartment(moveEmpId, moveDeptId);
-      setMoveEmpId(null);
-      await refetchDirectory();
-    } catch { setError('Ошибка перемещения'); }
-  };
-
-
-  const toggleEmpSelection = (id: number, e: React.MouseEvent) => {
-    e.stopPropagation();
+  const toggleVisibleEmployeesSelection = () => {
     setSelectedEmps(prev => {
       const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
+      if (allVisibleSelected) {
+        employees.forEach(employee => next.delete(employee.id));
+      } else {
+        employees.forEach(employee => next.add(employee.id));
+      }
       return next;
     });
   };
 
-  // Pagination helpers
+  const showArchiveEmployees = () => {
+    if (archiveDepartmentId) {
+      setSelectedDeptId(archiveDepartmentId);
+      setPage(1);
+    }
+  };
+
+  const showActiveEmployees = () => {
+    setSelectedDeptId(lastActiveDeptId && lastActiveDeptId !== archiveDepartmentId ? lastActiveDeptId : null);
+    setPage(1);
+  };
+
+  const toggleDept = (id: string) => {
+    setExpandedDepts(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleEmpSelection = (id: number) => {
+    setSelectedEmps(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleManageDeptSelection = (id: string) => {
+    setSelectedManageDeptIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const openEmployeeEditor = (employee: Employee) => {
+    setEditingEmployeeId(employee.id);
+    setEditingEmployee(employee);
+    if (isMobile) setIsDeptPanelOpen(false);
+  };
+
+  const handleEmpClick = (employee: Employee) => {
+    openEmployeeEditor(employee);
+  };
+
+  const fireEmployee = async (employee: Employee) => {
+    try {
+      await employeeService.fire(employee.id);
+      if (editingEmployeeId === employee.id) resetEmployeeEditor();
+      await refetchDirectory();
+    } catch {
+      setError('Ошибка увольнения');
+    }
+  };
+
+  const rehireEmployee = async (employee: Employee) => {
+    try {
+      await employeeService.rehire(employee.id);
+      if (editingEmployeeId === employee.id) resetEmployeeEditor();
+      await refetchDirectory();
+    } catch {
+      setError('Ошибка восстановления');
+    }
+  };
+
+  const handleFireFromSidebar = (employee: Employee) => {
+    if (!confirm(`Уволить ${employee.full_name}?`)) return;
+    void fireEmployee(employee);
+  };
+
+  const handleRehireFromSidebar = (employee: Employee) => {
+    void rehireEmployee(employee);
+  };
+
+  const openMoveModal = (employeeIds: number[]) => {
+    if (employeeIds.length === 0) return;
+    setMoveEmployeeIds(employeeIds);
+    setMoveDeptId('');
+  };
+
+  const handleConfirmMove = async () => {
+    if (moveEmployeeIds.length === 0 || !moveDeptId) return;
+    try {
+      if (moveEmployeeIds.length === 1) {
+        await employeeService.moveDepartment(moveEmployeeIds[0], moveDeptId);
+      } else {
+        const result = await employeeService.batchMove(moveEmployeeIds, moveDeptId);
+        if (result.failed_count > 0) {
+          setError(result.failures[0]?.error || 'Не всех сотрудников удалось переместить');
+        }
+      }
+      setMoveEmployeeIds([]);
+      setMoveDeptId('');
+      setSelectedEmps(new Set());
+      await refetchDirectory();
+    } catch {
+      setError('Ошибка перемещения');
+    }
+  };
+
+  const handleDropEmployees = async (departmentId: string, employeeIds: number[]) => {
+    try {
+      if (employeeIds.length === 1) {
+        await employeeService.moveDepartment(employeeIds[0], departmentId);
+      } else {
+        const result = await employeeService.batchMove(employeeIds, departmentId);
+        if (result.failed_count > 0) {
+          setError(result.failures[0]?.error || 'Не всех сотрудников удалось переместить');
+        }
+      }
+      setSelectedEmps(new Set());
+      await refetchDirectory();
+    } catch {
+      setError('Ошибка перемещения');
+    }
+  };
+
+  const handleDepartmentAction = async () => {
+    if (!departmentDialog) return;
+    setIsDepartmentActionRunning(true);
+    setError('');
+
+    try {
+      if (departmentDialog.mode === 'create') {
+        const result = await structureApi.createDepartment(
+          departmentDialog.name,
+          departmentDialog.description || undefined,
+          departmentDialog.parentId,
+        );
+        if (result.error) throw new Error(result.error);
+      }
+
+      if (departmentDialog.mode === 'rename') {
+        const result = await structureApi.updateDepartment(departmentDialog.departmentId, {
+          name: departmentDialog.name,
+        });
+        if (result.error) throw new Error(result.error);
+      }
+
+      if (departmentDialog.mode === 'move') {
+        const result = await structureApi.batchMoveDepartments(
+          departmentDialog.departmentIds,
+          departmentDialog.parentId,
+        );
+        if (result.error) throw new Error(result.error);
+      }
+
+      if (departmentDialog.mode === 'delete') {
+        for (const departmentId of departmentDialog.departmentIds) {
+          const result = await structureApi.deleteDepartment(departmentId);
+          if (result.error) throw new Error(result.error);
+        }
+      }
+
+      if (departmentDialog.mode === 'deleteRecursive') {
+        const result = await structureApi.deleteDepartmentRecursive(departmentDialog.departmentId);
+        if (result.error) throw new Error(result.error);
+        if (selectedDeptId === departmentDialog.departmentId) {
+          setSelectedDeptId(result.data?.target_parent_id || null);
+        }
+      }
+
+      setDepartmentDialog(null);
+      setSelectedManageDeptIds(new Set());
+      await refetchStructureAndDirectory();
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : 'Ошибка изменения структуры');
+    } finally {
+      setIsDepartmentActionRunning(false);
+    }
+  };
+
   const canPrev = page > 1;
   const canNext = page < meta.totalPages;
-  const selectedDeptLabel = isDepartmentScope
-    ? employees.find(emp => emp.department)?.department || 'Сотрудники'
-    : selectedDeptInfo?.name || 'Все сотрудники';
+
   const departmentPanelNode = !isDepartmentScope ? (
     <DepartmentPanel
       departments={departments}
       selectedDeptId={selectedDeptId}
       expandedDepts={effectiveExpandedDepts}
       deptCounts={deptCounts}
-      totalActive={totalActive}
+      totalActive={counts.byStatus.active}
+      archiveDepartmentId={archiveDepartmentId}
       highlightedDeptIds={highlightedDeptIds}
-      deptSearch={matchesDept ? unifiedSearch : ''}
-      visibleDeptIds={(!matchesDept && debouncedSearch) ? highlightedDeptIds : undefined}
-      searchValue={unifiedSearch}
-      onSearchChange={setUnifiedSearch}
+      deptSearch={hasDepartmentSearchMatches ? normalizedSearch : ''}
+      visibleDeptIds={employeeSearchValue ? highlightedDeptIds : undefined}
+      canManage={canManageStructure}
+      selectedManageDeptIds={selectedManageDeptIds}
       onSelectDept={(deptId) => {
         setSelectedDeptId(deptId);
         setPage(1);
         if (isMobile) setIsDeptPanelOpen(false);
       }}
       onToggleDept={toggleDept}
-      onRefresh={handleRefreshDepartments}
+      onRefresh={() => { void refetchStructureAndDirectory(); }}
+      onToggleManageSelection={toggleManageDeptSelection}
+      onSetManageSelection={(departmentIds) => setSelectedManageDeptIds(new Set(departmentIds))}
+      onClearManageSelection={() => setSelectedManageDeptIds(new Set())}
+      onCreateRootDepartment={() => {
+        setDepartmentDialog({
+          mode: 'create',
+          parentId: null,
+          name: '',
+          description: '',
+        });
+      }}
+      onCreateDepartment={(parentId) => {
+        setDepartmentDialog({
+          mode: 'create',
+          parentId: parentId === archiveDepartmentId ? null : parentId,
+          name: '',
+          description: '',
+        });
+      }}
+      onRenameDepartment={(departmentId) => {
+        const department = flatDepts.find(item => item.id === departmentId);
+        setDepartmentDialog({
+          mode: 'rename',
+          departmentId,
+          name: department?.name || '',
+        });
+      }}
+      onMoveDepartments={(departmentIds) => {
+        setDepartmentDialog({
+          mode: 'move',
+          departmentIds,
+          parentId: null,
+        });
+      }}
+      onDeleteDepartments={(departmentIds) => {
+        setDepartmentDialog({
+          mode: 'delete',
+          departmentIds,
+        });
+      }}
+      onDeleteDepartmentRecursive={(departmentId) => {
+        setDepartmentDialog({
+          mode: 'deleteRecursive',
+          departmentId,
+        });
+      }}
+      onDropEmployees={canEdit ? handleDropEmployees : undefined}
     />
   ) : null;
 
@@ -341,55 +579,55 @@ export const EmployeesPage: FC = () => {
         departmentPanelNode
       ) : null}
 
-      {/* Employees Panel */}
       <div className="ep-emp-panel">
         <div className="ep-emp-header">
-          <div className="ep-emp-head-main">
-            {isMobile && !isDepartmentScope && (
-              <button
-                className="ep-mobile-filter-btn"
-                onClick={() => setIsDeptPanelOpen(true)}
-              >
-                <FolderOpen size={16} />
-                <span className="ep-mobile-filter-label">{selectedDeptLabel}</span>
-              </button>
-            )}
-            <div className="ep-emp-title">
-              <h2>{selectedDeptLabel}</h2>
-              <span className="ep-emp-count">{meta.total} чел.</span>
+          <div className="ep-emp-header-top">
+            <div className="ep-emp-head-main">
+              {isMobile && !isDepartmentScope && (
+                <button
+                  className="ep-mobile-filter-btn"
+                  onClick={() => setIsDeptPanelOpen(true)}
+                >
+                  <FolderOpen size={16} />
+                  <span className="ep-mobile-filter-label">{selectedDeptLabel}</span>
+                </button>
+              )}
+              <div className="ep-emp-title">
+                <h2>{selectedDeptLabel}</h2>
+                <span className="ep-emp-count">{selectedCountLabel} чел.</span>
+              </div>
+              {isArchiveView && (
+                <span className="ep-archive-chip">
+                  <UserRoundX size={14} />
+                  <span>Уволенные</span>
+                </span>
+              )}
+            </div>
+            <div className="ep-toolbar-actions">
+              {selectedEmps.size > 0 && (
+                <span className="ep-selection-chip">{selectedEmps.size} выбрано</span>
+              )}
+              {canEdit && !isArchiveView && (
+                <button
+                  className="ep-toolbar-btn primary"
+                  onClick={() => openMoveModal([...selectedEmps])}
+                  disabled={selectedEmps.size === 0}
+                >
+                  <MoveRight size={16} />
+                  <span>Переместить</span>
+                </button>
+              )}
             </div>
           </div>
-          <div className="ep-emp-tabs">
-            <button
-                className={`ep-tab ${activeTab === 'all' ? 'active' : ''}`}
-              onClick={() => {
-                setActiveTab('all');
-                setPage(1);
-              }}
-            >
-              Все<span className="ep-tab-num">({tabCounts.active})</span>
-            </button>
-            <button
-              className={`ep-tab ${activeTab === 'fired' ? 'active' : ''}`}
-              onClick={() => {
-                setActiveTab('fired');
-                setPage(1);
-              }}
-            >
-              Уволенные<span className="ep-tab-num">({tabCounts.fired})</span>
-            </button>
-          </div>
-        </div>
 
-        {isDepartmentScope && (
           <div className="ep-emp-toolbar">
             <div className="ep-toolbar-search">
               <Search size={14} />
               <input
                 type="text"
                 value={unifiedSearch}
-                onChange={(e) => setUnifiedSearch(e.target.value)}
-                placeholder="Поиск по сотруднику..."
+                onChange={(event) => setUnifiedSearch(event.target.value)}
+                placeholder="Найти сотрудника или отдел..."
               />
               {unifiedSearch && (
                 <button className="ep-search-clear" onClick={() => setUnifiedSearch('')}>
@@ -397,8 +635,33 @@ export const EmployeesPage: FC = () => {
                 </button>
               )}
             </div>
+
+            <div className="ep-toolbar-filters">
+              <div className="ep-chip-group">
+                <button
+                  className={`ep-filter-chip ${!isArchiveView ? 'active' : ''}`}
+                  onClick={showActiveEmployees}
+                >
+                  Активные
+                </button>
+                {archiveDepartmentId && (
+                  <button
+                    className={`ep-filter-chip ${isArchiveView ? 'active danger' : ''}`}
+                    onClick={showArchiveEmployees}
+                  >
+                    Уволенные
+                  </button>
+                )}
+              </div>
+
+              {selectedEmps.size > 0 && (
+                <button className="ep-filter-chip ghost" onClick={() => setSelectedEmps(new Set())}>
+                  Сбросить выбор
+                </button>
+              )}
+            </div>
           </div>
-        )}
+        </div>
 
         {visibleError && (
           <div className="ep-error">
@@ -412,45 +675,68 @@ export const EmployeesPage: FC = () => {
           loading={loading}
           selectedEmps={selectedEmps}
           presenceMap={presenceMap}
-          canEdit={canEdit}
+          allVisibleSelected={allVisibleSelected}
           onEmpClick={handleEmpClick}
           onToggleSelection={toggleEmpSelection}
-          onFire={handleFire}
-          onRehire={handleRehire}
-          onMove={(id, e) => { e.stopPropagation(); setMoveEmpId(id); setMoveDeptValue(''); }}
+          onToggleVisibleSelection={toggleVisibleEmployeesSelection}
         />
 
-        {/* Pagination */}
         {meta.totalPages > 1 && (
           <div className="ep-pagination">
-            <button
-              className="ep-pagination-btn"
-              disabled={!canPrev}
-              onClick={() => setPage(p => p - 1)}
-            >
+            <button className="ep-pagination-btn" disabled={!canPrev} onClick={() => setPage(value => value - 1)}>
               <ChevronLeft size={16} />
             </button>
             <span className="ep-pagination-info">
               {meta.page} / {meta.totalPages}
             </span>
-            <button
-              className="ep-pagination-btn"
-              disabled={!canNext}
-              onClick={() => setPage(p => p + 1)}
-            >
+            <button className="ep-pagination-btn" disabled={!canNext} onClick={() => setPage(value => value + 1)}>
               <ChevronRight size={16} />
             </button>
           </div>
         )}
       </div>
 
-      {/* Move Department Modal */}
-      {moveEmpId !== null && (
-        <div className="ep-modal-overlay" onClick={() => setMoveEmpId(null)}>
-          <div className="ep-modal" onClick={e => e.stopPropagation()}>
+      {editingEmployeeId !== null && editingEmployee && !isMobile && (
+        <EmployeeSigurSidebar
+          employeeId={editingEmployeeId}
+          employee={editingEmployee}
+          canEdit={canEdit}
+          canPreviewAccessPointMap={canViewPage('/skud-settings')}
+          onClose={resetEmployeeEditor}
+          onOpenFullCard={openFullEmployeeCard}
+          onMove={(employeeId) => openMoveModal([employeeId])}
+          onFire={handleFireFromSidebar}
+          onRehire={handleRehireFromSidebar}
+        />
+      )}
+
+      {editingEmployeeId !== null && editingEmployee && isMobile && (
+        <>
+          <div className="ep-sigur-mobile-overlay" onClick={resetEmployeeEditor} />
+          <div className="ep-sigur-mobile-sheet open">
+            <EmployeeSigurSidebar
+              employeeId={editingEmployeeId}
+              employee={editingEmployee}
+              canEdit={canEdit}
+              canPreviewAccessPointMap={canViewPage('/skud-settings')}
+              onClose={resetEmployeeEditor}
+              onOpenFullCard={openFullEmployeeCard}
+              onMove={(employeeId) => openMoveModal([employeeId])}
+              onFire={handleFireFromSidebar}
+              onRehire={handleRehireFromSidebar}
+            />
+          </div>
+        </>
+      )}
+
+      {moveEmployeeIds.length > 0 && (
+        <div className="ep-modal-overlay" onClick={() => setMoveEmployeeIds([])}>
+          <div className="ep-modal" onClick={event => event.stopPropagation()}>
             <div className="ep-modal-header">
-              <span className="ep-modal-title">Переместить в отдел</span>
-              <button className="ep-modal-close" onClick={() => setMoveEmpId(null)}>
+              <span className="ep-modal-title">
+                {moveEmployeeIds.length > 1 ? 'Переместить выбранных сотрудников' : 'Переместить в отдел'}
+              </span>
+              <button className="ep-modal-close" onClick={() => setMoveEmployeeIds([])}>
                 <X size={14} />
               </button>
             </div>
@@ -458,26 +744,22 @@ export const EmployeesPage: FC = () => {
               <label>Выберите отдел</label>
               <select
                 value={moveDeptId}
-                onChange={e => setMoveDeptValue(e.target.value)}
+                onChange={event => setMoveDeptId(event.target.value)}
                 className="ep-modal-select"
               >
                 <option value="">— Выберите —</option>
-                {flatDepts.map(d => (
-                  <option key={d.id} value={d.id}>
-                    {'\u00A0\u00A0'.repeat(d.level)}{d.name}
+                {moveTargetDepartments.map(department => (
+                  <option key={department.id} value={department.id}>
+                    {'\u00A0\u00A0'.repeat(department.level)}{department.name}
                   </option>
                 ))}
               </select>
             </div>
             <div className="ep-modal-footer">
-              <button className="ep-modal-btn secondary" onClick={() => setMoveEmpId(null)}>
+              <button className="ep-modal-btn secondary" onClick={() => setMoveEmployeeIds([])}>
                 Отмена
               </button>
-              <button
-                className="ep-modal-btn primary"
-                onClick={handleConfirmMove}
-                disabled={!moveDeptId}
-              >
+              <button className="ep-modal-btn primary" onClick={handleConfirmMove} disabled={!moveDeptId}>
                 Переместить
               </button>
             </div>
@@ -485,6 +767,92 @@ export const EmployeesPage: FC = () => {
         </div>
       )}
 
+      {departmentDialog && (
+        <div className="ep-modal-overlay" onClick={() => setDepartmentDialog(null)}>
+          <div className="ep-modal" onClick={event => event.stopPropagation()}>
+            <div className="ep-modal-header">
+              <span className="ep-modal-title">
+                {departmentDialog.mode === 'create' && 'Новый отдел'}
+                {departmentDialog.mode === 'rename' && 'Переименовать отдел'}
+                {departmentDialog.mode === 'move' && 'Переместить отделы'}
+                {departmentDialog.mode === 'delete' && 'Удалить отделы'}
+                {departmentDialog.mode === 'deleteRecursive' && 'Удалить ветку'}
+              </span>
+              <button className="ep-modal-close" onClick={() => setDepartmentDialog(null)}>
+                <X size={14} />
+              </button>
+            </div>
+            <div className="ep-modal-body">
+              {departmentDialog.mode === 'create' && (
+                <div className="ep-modal-stack">
+                  <label className="ep-form-field">
+                    <span>Название</span>
+                    <input
+                      value={departmentDialog.name}
+                      onChange={event => setDepartmentDialog(prev => prev?.mode === 'create' ? { ...prev, name: event.target.value } : prev)}
+                    />
+                  </label>
+                  <label className="ep-form-field">
+                    <span>Описание</span>
+                    <textarea
+                      rows={3}
+                      value={departmentDialog.description}
+                      onChange={event => setDepartmentDialog(prev => prev?.mode === 'create' ? { ...prev, description: event.target.value } : prev)}
+                    />
+                  </label>
+                </div>
+              )}
+              {departmentDialog.mode === 'rename' && (
+                <label className="ep-form-field">
+                  <span>Новое название</span>
+                  <input
+                    value={departmentDialog.name}
+                    onChange={event => setDepartmentDialog(prev => prev?.mode === 'rename' ? { ...prev, name: event.target.value } : prev)}
+                  />
+                </label>
+              )}
+              {departmentDialog.mode === 'move' && (
+                <label className="ep-form-field">
+                  <span>Новый родительский отдел</span>
+                  <select
+                    value={departmentDialog.parentId || ''}
+                    onChange={event => setDepartmentDialog(prev => prev?.mode === 'move' ? { ...prev, parentId: event.target.value || null } : prev)}
+                  >
+                    <option value="">Корень</option>
+                    {moveTargetDepartments
+                      .filter(department => !departmentDialog.departmentIds.includes(department.id))
+                      .map(department => (
+                        <option key={department.id} value={department.id}>
+                          {'\u00A0\u00A0'.repeat(department.level)}{department.name}
+                        </option>
+                      ))}
+                  </select>
+                </label>
+              )}
+              {departmentDialog.mode === 'delete' && (
+                <div className="ep-danger-note">
+                  <AlertTriangle size={18} />
+                  <span>Удаление работает только для пустых отделов. Если внутри есть сотрудники или подпапки, используйте рекурсивное удаление или сначала перенесите содержимое.</span>
+                </div>
+              )}
+              {departmentDialog.mode === 'deleteRecursive' && (
+                <div className="ep-danger-note">
+                  <AlertTriangle size={18} />
+                  <span>Сотрудники из удаляемой ветки будут переведены в родительский отдел корня ветки. Операция необратима.</span>
+                </div>
+              )}
+            </div>
+            <div className="ep-modal-footer">
+              <button className="ep-modal-btn secondary" onClick={() => setDepartmentDialog(null)}>
+                Отмена
+              </button>
+              <button className={`ep-modal-btn ${departmentDialog.mode === 'delete' || departmentDialog.mode === 'deleteRecursive' ? 'danger' : 'primary'}`} onClick={handleDepartmentAction} disabled={isDepartmentActionRunning}>
+                {isDepartmentActionRunning ? 'Выполняем...' : 'Подтвердить'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

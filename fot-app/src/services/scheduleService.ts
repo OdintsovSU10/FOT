@@ -4,6 +4,7 @@ import type {
   IResolvedSchedule,
   ICategorySchedule,
   IEmployeeScheduleAssignment,
+  IObjectScheduleAssignment,
   WorkCategory,
 } from '../types/schedule';
 
@@ -79,6 +80,13 @@ export const scheduleService = {
     return res.data;
   },
 
+  /** Все привязки графиков к объектам */
+  async listObjectAssignments(): Promise<IObjectScheduleAssignment[]> {
+    const res = await apiClient.get<ApiResponse<IObjectScheduleAssignment[]>>('/schedules/objects');
+    if (!res.data) throw new Error(res.error || 'Ошибка загрузки графиков объектов');
+    return res.data;
+  },
+
   /** Назначить график категории труда */
   async assignCategory(
     category: WorkCategory,
@@ -105,10 +113,27 @@ export const scheduleService = {
     return res.data;
   },
 
+  /** Назначить график объекту */
+  async assignObject(
+    objectId: string,
+    data: { schedule_id: string; effective_from: string; effective_to?: string | null },
+  ): Promise<IObjectScheduleAssignment> {
+    const res = await apiClient.put<ApiResponse<IObjectScheduleAssignment>>(`/schedules/object/${objectId}`, data);
+    if (!res.data) throw new Error(res.error || 'Ошибка назначения графика объекту');
+    return res.data;
+  },
+
   /** Снять персональный график сотрудника */
   async removeEmployeeAssignment(employeeId: number, effectiveTo?: string): Promise<void> {
     const query = effectiveTo ? `?effective_to=${encodeURIComponent(effectiveTo)}` : '';
     const res = await apiClient.delete<ApiResponse<null>>(`/schedules/employee/${employeeId}${query}`);
+    if (res.error) throw new Error(res.error);
+  },
+
+  /** Снять график объекта */
+  async removeObjectAssignment(objectId: string, effectiveTo?: string): Promise<void> {
+    const query = effectiveTo ? `?effective_to=${encodeURIComponent(effectiveTo)}` : '';
+    const res = await apiClient.delete<ApiResponse<null>>(`/schedules/object/${objectId}${query}`);
     if (res.error) throw new Error(res.error);
   },
 

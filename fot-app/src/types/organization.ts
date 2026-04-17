@@ -26,6 +26,7 @@ export interface OrgStructureResponse {
   departments: OrgDepartmentNode[];
   stats: {
     departments: number;
+    archive_department_id?: string | null;
   };
 }
 

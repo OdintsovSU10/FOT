@@ -24,7 +24,12 @@ import {
 } from '../services/skud-shared.service.js';
 import { skudWriteController } from './skud-write.controller.js';
 import { skudTravelController } from './skud-travel.controller.js';
-import { canAccessEmployeeInScope, resolveScopedDepartmentId, resolveRequestDataScope } from '../services/data-scope.service.js';
+import {
+  canAccessEmployeeInScope,
+  resolveManagedDepartmentIds,
+  resolveRequestDataScope,
+  resolveScopedDepartmentId,
+} from '../services/data-scope.service.js';
 import type { IAccessPointOption, IDisciplineResult } from '../types/skud.types.js';
 
 const MONTH_PATTERN = /^\d{4}-\d{2}$/;
@@ -257,8 +262,12 @@ async function getInternalAccessPointsForRequest(req: AuthenticatedRequest): Pro
     .from('skud_access_point_settings')
     .select('access_point_name, is_internal');
 
-  if (scope === 'department' && req.user.department_id) {
-    query = query.eq('department_id', req.user.department_id);
+  if (scope === 'department') {
+    const managedDepartmentIds = await resolveManagedDepartmentIds(req);
+    if (managedDepartmentIds.length === 0) {
+      return new Set();
+    }
+    query = query.in('department_id', managedDepartmentIds);
   }
 
   const { data, error } = await query;
@@ -280,12 +289,21 @@ async function getScopedDisciplineData(
   const data = await getDisciplineViolations({ startMonth, endMonth });
   const scope = await resolveRequestDataScope(req);
 
-  if (scope !== 'department' || !req.user.department_id) {
+  if (scope !== 'department') {
     return data;
   }
 
+  const managedDepartmentIds = await resolveManagedDepartmentIds(req);
+  if (managedDepartmentIds.length === 0) {
+    return {
+      ...data,
+      employees: {},
+      violations: [],
+    };
+  }
+
   const filteredEmployeeIds = Object.entries(data.employees)
-    .filter(([, employee]) => employee.department_id === req.user.department_id)
+    .filter(([, employee]) => employee.department_id != null && managedDepartmentIds.includes(employee.department_id))
     .map(([employeeId]) => Number(employeeId));
   const employeeIdSet = new Set(filteredEmployeeIds);
 
@@ -655,11 +673,16 @@ const skudReadController = {
 
       if (!departmentId) {
         const scope = await resolveRequestDataScope(req);
-        if (scope === 'department' && req.user.department_id) {
+        if (scope === 'department') {
+          const managedDepartmentIds = await resolveManagedDepartmentIds(req);
+          if (managedDepartmentIds.length === 0) {
+            res.json({ success: true, data: [] });
+            return;
+          }
           const { data, error } = await supabase
             .from('skud_access_point_settings')
             .select('access_point_name, is_internal')
-            .eq('department_id', req.user.department_id);
+            .in('department_id', managedDepartmentIds);
 
           if (error) {
             console.error('Get access point settings error:', error);

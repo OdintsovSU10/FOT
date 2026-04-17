@@ -8,10 +8,73 @@ import {
   replaceEmployeeAccessPointBindings,
 } from '../services/sigur-linked-employees.service.js';
 import { settingsService } from '../services/settings.service.js';
+import { getSigurMonitorStatus } from '../services/sigur-monitor.service.js';
 import { sigurService } from '../services/sigur.service.js';
 import { resolveField } from '../services/sigur-sync-shared.js';
+import { createCache } from '../utils/cache.js';
 import { mapSigurEvent } from '../utils/sigur.mapper.js';
 import type { AuthenticatedRequest } from '../types/index.js';
+
+interface IAccessPointObjectMeta {
+  objectId: string | null;
+  objectName: string | null;
+  hasMapPreview: boolean;
+}
+
+interface IEnrichedAccessPointBinding {
+  accessPointId: number;
+  accessPointName: string | null;
+  objectId: string | null;
+  objectName: string | null;
+  hasMapPreview: boolean;
+}
+
+interface IEnrichedAccessPointOption {
+  id: number | null;
+  name: string;
+  objectId: string | null;
+  objectName: string | null;
+  hasMapPreview: boolean;
+}
+
+interface IEmployeeProfileResponse {
+  linked: boolean;
+  employeeId: number;
+  sigurEmployeeId: number | null;
+  profile: {
+    fullName: string;
+    departmentId: number | null;
+    departmentName: string | null;
+    positionId: number | null;
+    positionName: string | null;
+    tabNumber: string | null;
+    description: string | null;
+    blocked: boolean | null;
+  };
+  cards: Array<{
+    cardId: number;
+    cardNumber: string | null;
+    status: string | null;
+    expirationDate: string | null;
+  }>;
+  accessRules: Array<{ accessRuleId: number; accessRuleName: string | null }>;
+  accessPoints: IEnrichedAccessPointBinding[];
+}
+
+const SIGUR_METADATA_CACHE_TTL_MS = 5 * 60 * 1000;
+const SIGUR_EMPLOYEE_PROFILE_CACHE_TTL_MS = 5 * 60 * 1000;
+const PASSIVE_CONNECTION_STATUS_TTL_MS = 15 * 60 * 1000;
+
+const accessPointObjectMetaCache = createCache<{ map: Map<string, IAccessPointObjectMeta> }>({
+  max: 1,
+  ttlMs: SIGUR_METADATA_CACHE_TTL_MS,
+});
+const employeeProfileCache = createCache<{ data: IEmployeeProfileResponse }>({
+  max: 500,
+  ttlMs: SIGUR_EMPLOYEE_PROFILE_CACHE_TTL_MS,
+});
+const employeeProfileInFlight = new Map<string, Promise<IEmployeeProfileResponse>>();
+let accessPointObjectMetaInFlight: Promise<Map<string, IAccessPointObjectMeta>> | null = null;
 
 async function ensureSigurConfigured(
   res: Response,
@@ -29,11 +92,421 @@ async function ensureSigurConfigured(
   return false;
 }
 
-function toAccessPointOption(raw: Record<string, unknown>): { id: number | null; name: string } | null {
+function normalizeAccessPointKey(value: string | null | undefined): string {
+  return value?.trim().toLocaleLowerCase('ru') || '';
+}
+
+function parseOptionalIsoDate(value: string | null | undefined): Date | null {
+  if (!value) return null;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function buildEmployeeProfileCacheKey(employeeId: number, connection?: 'external' | 'internal'): string {
+  return `${employeeId}:${connection || 'default'}`;
+}
+
+function invalidateEmployeeProfileCache(employeeId: number): void {
+  for (const connectionKey of ['default', 'internal', 'external']) {
+    const key = `${employeeId}:${connectionKey}`;
+    employeeProfileCache.delete(key);
+    employeeProfileInFlight.delete(key);
+  }
+}
+
+async function loadAccessPointObjectMetaMap(): Promise<Map<string, IAccessPointObjectMeta>> {
+  const cached = accessPointObjectMetaCache.get('default');
+  if (cached) {
+    return cached.map;
+  }
+
+  if (accessPointObjectMetaInFlight) {
+    return accessPointObjectMetaInFlight;
+  }
+
+  accessPointObjectMetaInFlight = (async () => {
+    const [objectsResult, accessPointsResult, mapPointsResult] = await Promise.all([
+      supabase.from('skud_objects').select('id, name, map_storage_path'),
+      supabase.from('skud_object_access_points').select('object_id, access_point_name'),
+      supabase.from('skud_object_map_points').select('object_id, access_point_name'),
+    ]);
+
+    if (objectsResult.error) throw objectsResult.error;
+    if (accessPointsResult.error) throw accessPointsResult.error;
+    if (mapPointsResult.error) throw mapPointsResult.error;
+
+    const objectMetaById = new Map<string, { name: string | null; hasMap: boolean }>();
+    for (const row of objectsResult.data || []) {
+      objectMetaById.set(String(row.id), {
+        name: typeof row.name === 'string' && row.name.trim() ? row.name.trim() : null,
+        hasMap: !!row.map_storage_path,
+      });
+    }
+
+    const mapPointObjectByName = new Map<string, string>();
+    for (const row of mapPointsResult.data || []) {
+      const key = normalizeAccessPointKey(row.access_point_name);
+      if (!key) continue;
+      mapPointObjectByName.set(key, String(row.object_id));
+    }
+
+    const metaMap = new Map<string, IAccessPointObjectMeta>();
+    for (const row of accessPointsResult.data || []) {
+      const key = normalizeAccessPointKey(row.access_point_name);
+      if (!key) continue;
+
+      const objectId = row.object_id ? String(row.object_id) : (mapPointObjectByName.get(key) || null);
+      const objectMeta = objectId ? objectMetaById.get(objectId) : null;
+      metaMap.set(key, {
+        objectId,
+        objectName: objectMeta?.name || null,
+        hasMapPreview: !!objectId && mapPointObjectByName.has(key) && !!objectMeta?.hasMap,
+      });
+    }
+
+    for (const [key, objectId] of mapPointObjectByName.entries()) {
+      if (metaMap.has(key)) continue;
+      const objectMeta = objectMetaById.get(objectId);
+      metaMap.set(key, {
+        objectId,
+        objectName: objectMeta?.name || null,
+        hasMapPreview: !!objectMeta?.hasMap,
+      });
+    }
+
+    accessPointObjectMetaCache.set('default', { map: metaMap });
+    return metaMap;
+  })()
+    .catch((error) => {
+      console.warn('Sigur access point object metadata warning:', error);
+      return new Map<string, IAccessPointObjectMeta>();
+    })
+    .finally(() => {
+      accessPointObjectMetaInFlight = null;
+    });
+
+  return accessPointObjectMetaInFlight;
+}
+
+function enrichAccessPointBinding(
+  binding: { accessPointId: number; accessPointName: string | null },
+  metaMap: Map<string, IAccessPointObjectMeta>,
+): IEnrichedAccessPointBinding {
+  const meta = binding.accessPointName ? metaMap.get(normalizeAccessPointKey(binding.accessPointName)) : undefined;
+  return {
+    accessPointId: binding.accessPointId,
+    accessPointName: binding.accessPointName,
+    objectId: meta?.objectId || null,
+    objectName: meta?.objectName || null,
+    hasMapPreview: meta?.hasMapPreview === true,
+  };
+}
+
+function toAccessPointOption(
+  raw: Record<string, unknown>,
+  metaMap?: Map<string, IAccessPointObjectMeta>,
+): IEnrichedAccessPointOption | null {
   const id = resolveField<number>(raw, 'id', 'ID', 'Id') ?? null;
   const name = String(resolveField<string>(raw, 'name', 'Name', 'title') || '').trim();
   if (!name) return null;
-  return { id, name };
+  const meta = metaMap?.get(normalizeAccessPointKey(name));
+  return {
+    id,
+    name,
+    objectId: meta?.objectId || null,
+    objectName: meta?.objectName || null,
+    hasMapPreview: meta?.hasMapPreview === true,
+  };
+}
+
+function normalizeBoolean(value: unknown): boolean | null {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return value !== 0;
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (['1', 'true', 'yes', 'y'].includes(normalized)) return true;
+    if (['0', 'false', 'no', 'n'].includes(normalized)) return false;
+  }
+  return null;
+}
+
+function normalizeInt(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string') {
+    const parsed = Number(value.trim());
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return null;
+}
+
+function toSigurCard(raw: Record<string, unknown>): {
+  cardId: number;
+  cardNumber: string | null;
+  status: string | null;
+  expirationDate: string | null;
+} | null {
+  const cardId = normalizeInt(resolveField(raw, 'id', 'ID', 'Id', 'cardId', 'card_id', 'cardID'));
+  if (!cardId) return null;
+
+  const cardNumber = String(
+    resolveField<string | number>(raw, 'number', 'Number', 'cardNumber', 'card_number', 'serialNumber', 'serial_number')
+    ?? '',
+  ).trim() || null;
+  const status = String(resolveField<string>(raw, 'status', 'Status', 'state') || '').trim() || null;
+  const expirationDate = String(
+    resolveField<string>(raw, 'expirationDate', 'expiration_date', 'expiresAt', 'expiryDate', 'validTo')
+    || '',
+  ).trim() || null;
+
+  return {
+    cardId,
+    cardNumber,
+    status,
+    expirationDate,
+  };
+}
+
+function toCardBinding(raw: Record<string, unknown>): {
+  employeeId: number;
+  cardId: number;
+  cardNumber: string | null;
+  status: string | null;
+  expirationDate: string | null;
+} | null {
+  const employeeId = normalizeInt(resolveField(raw, 'employeeId', 'employee_id'));
+  const cardId = normalizeInt(resolveField(raw, 'cardId', 'card_id', 'cardID', 'cardid'));
+  if (!employeeId || !cardId) return null;
+
+  return {
+    employeeId,
+    cardId,
+    cardNumber: String(
+      resolveField<string | number>(raw, 'cardNumber', 'card_number', 'number', 'Number')
+      ?? '',
+    ).trim() || null,
+    status: String(resolveField<string>(raw, 'status', 'Status', 'state') || '').trim() || null,
+    expirationDate: String(
+      resolveField<string>(raw, 'expirationDate', 'expiration_date', 'expiresAt', 'expiryDate', 'validTo')
+      || '',
+    ).trim() || null,
+  };
+}
+
+function toCardSummary(raw: Record<string, unknown>): {
+  cardId: number;
+  cardNumber: string | null;
+  status: string | null;
+  expirationDate: string | null;
+} | null {
+  const binding = toCardBinding(raw);
+  if (binding) {
+    return {
+      cardId: binding.cardId,
+      cardNumber: binding.cardNumber,
+      status: binding.status,
+      expirationDate: binding.expirationDate,
+    };
+  }
+
+  return toSigurCard(raw);
+}
+
+function toAccessRuleBinding(raw: Record<string, unknown>): { employeeId: number; accessRuleId: number } | null {
+  const employeeId = normalizeInt(resolveField(raw, 'employeeId', 'employee_id'));
+  const accessRuleId = normalizeInt(resolveField(
+    raw,
+    'accessRuleId',
+    'access_rule_id',
+    'accessruleId',
+    'accessRuleID',
+  ));
+
+  if (!employeeId || !accessRuleId) return null;
+  return { employeeId, accessRuleId };
+}
+
+async function buildEmployeeProfileData(
+  employeeId: number,
+  connection?: 'external' | 'internal',
+  refresh = false,
+): Promise<IEmployeeProfileResponse> {
+  const { data: employee, error: employeeError } = await supabase
+    .from('employees')
+    .select('id, full_name, position_id, sigur_employee_id, tab_number')
+    .eq('id', employeeId)
+    .maybeSingle();
+
+  if (employeeError) throw employeeError;
+  if (!employee) {
+    const error = new Error('Сотрудник не найден');
+    (error as Error & { status?: number }).status = 404;
+    throw error;
+  }
+
+  if (!employee.sigur_employee_id) {
+    return {
+      linked: false,
+      employeeId,
+      sigurEmployeeId: null,
+      profile: {
+        fullName: employee.full_name || '',
+        departmentId: null,
+        departmentName: null,
+        positionId: null,
+        positionName: null,
+        tabNumber: employee.tab_number || null,
+        description: null,
+        blocked: null,
+      },
+      cards: [],
+      accessRules: [],
+      accessPoints: [],
+    };
+  }
+
+  const accessPointObjectMetaPromise = loadAccessPointObjectMetaMap();
+  const cachedRemoteEmployee = sigurService.findEmployeeInCache(employee.sigur_employee_id);
+  if (!cachedRemoteEmployee) {
+    sigurService.warmEmployeesCache(connection);
+  }
+
+  const [remoteEmployeeRaw, departmentMap, accessPointObjectMeta, accessRuleCatalog, cardBindingsResult, accessRuleBindingsResult, accessPointsResult] = await Promise.all([
+    cachedRemoteEmployee
+      ? Promise.resolve(cachedRemoteEmployee)
+      : sigurService.getEmployeeById(employee.sigur_employee_id, connection),
+    sigurService.getDepartmentMapCached(connection),
+    accessPointObjectMetaPromise,
+    sigurService.getAccessRuleMapCached(connection).catch((catalogError) => {
+      console.warn('Sigur get employee profile access rules catalog warning:', catalogError);
+      return null;
+    }),
+    sigurService.getCardBindings({ employeeId: employee.sigur_employee_id }, connection)
+      .then(value => ({ status: 'fulfilled', value }) as const)
+      .catch(reason => ({ status: 'rejected', reason }) as const),
+    sigurService.getEmployeeAccessRuleBindings({ employeeId: employee.sigur_employee_id }, connection)
+      .then(value => ({ status: 'fulfilled', value }) as const)
+      .catch(reason => ({ status: 'rejected', reason }) as const),
+    getEmployeeAccessPointBindings(employee.sigur_employee_id, connection, refresh)
+      .then(value => ({ status: 'fulfilled', value }) as const)
+      .catch(reason => ({ status: 'rejected', reason }) as const),
+  ]);
+
+  const remoteFullName = String(
+    resolveField<string>(remoteEmployeeRaw, 'name', 'NAME', 'Name', 'fullName', 'full_name')
+    || employee.full_name
+    || '',
+  ).trim();
+  const departmentId = normalizeInt(resolveField(
+    remoteEmployeeRaw,
+    'departmentId',
+    'department_id',
+    'DEPARTMENTID',
+    'DepartmentId',
+  )) || null;
+  const positionId = normalizeInt(resolveField(
+    remoteEmployeeRaw,
+    'positionId',
+    'position_id',
+    'POSITIONID',
+    'PositionId',
+  )) || null;
+  const positionName = String(
+    resolveField<string>(
+      remoteEmployeeRaw,
+      'position',
+      'positionName',
+      'position_name',
+      'POSITION',
+      'jobTitle',
+    )
+    || '',
+  ).trim() || null;
+  const tabNumber = String(
+    resolveField<string | number>(
+      remoteEmployeeRaw,
+      'tabId',
+      'tabID',
+      'tab_id',
+      'tabNumber',
+      'tab_number',
+      'TabId',
+    )
+    ?? employee.tab_number
+    ?? '',
+  ).trim() || null;
+
+  const cardsRaw = cardBindingsResult.status === 'fulfilled'
+    ? cardBindingsResult.value as Record<string, unknown>[]
+    : [];
+  if (cardBindingsResult.status === 'rejected') {
+    console.warn('Sigur get employee profile cards warning:', cardBindingsResult.reason);
+  }
+
+  const cards = cardsRaw
+    .map(card => toCardSummary(card))
+    .filter((card): card is NonNullable<ReturnType<typeof toCardSummary>> => !!card)
+    .sort((left, right) => (left.cardNumber || '').localeCompare(right.cardNumber || '', 'ru'));
+
+  const accessRuleBindingsRaw = accessRuleBindingsResult.status === 'fulfilled'
+    ? accessRuleBindingsResult.value as Record<string, unknown>[]
+    : [];
+  if (accessRuleBindingsResult.status === 'rejected') {
+    console.warn('Sigur get employee profile access rules warning:', accessRuleBindingsResult.reason);
+  }
+
+  let accessRules: Array<{ accessRuleId: number; accessRuleName: string | null }> = [];
+  if (accessRuleBindingsRaw.length > 0) {
+    const normalizedAccessRuleBindings = accessRuleBindingsRaw
+      .map(binding => toAccessRuleBinding(binding))
+      .filter((binding): binding is NonNullable<ReturnType<typeof toAccessRuleBinding>> => !!binding);
+
+    if (accessRuleCatalog) {
+      accessRules = normalizedAccessRuleBindings
+        .map(binding => ({
+          accessRuleId: binding.accessRuleId,
+          accessRuleName: accessRuleCatalog.get(binding.accessRuleId) || null,
+        }))
+        .sort((left, right) => (left.accessRuleName || '').localeCompare(right.accessRuleName || '', 'ru'));
+    } else {
+      accessRules = normalizedAccessRuleBindings
+        .map(binding => ({
+          accessRuleId: binding.accessRuleId,
+          accessRuleName: null,
+        }))
+        .sort((left, right) => left.accessRuleId - right.accessRuleId);
+    }
+  }
+
+  const accessPoints = accessPointsResult.status === 'fulfilled'
+    ? accessPointsResult.value.map(binding => enrichAccessPointBinding(binding, accessPointObjectMeta))
+    : [];
+  if (accessPointsResult.status === 'rejected') {
+    console.warn('Sigur get employee profile access points warning:', accessPointsResult.reason);
+  }
+
+  return {
+    linked: true,
+    employeeId,
+    sigurEmployeeId: employee.sigur_employee_id,
+    profile: {
+      fullName: remoteFullName,
+      departmentId,
+      departmentName: departmentId ? (departmentMap.get(departmentId) || null) : null,
+      positionId,
+      positionName,
+      tabNumber,
+      description: String(
+        resolveField<string>(remoteEmployeeRaw, 'description', 'Description', 'comment', 'Comment')
+        || '',
+      ).trim() || null,
+      blocked: normalizeBoolean(
+        resolveField<unknown>(remoteEmployeeRaw, 'blocked', 'isBlocked', 'IsBlocked', 'is_blocked'),
+      ),
+    },
+    cards,
+    accessRules,
+    accessPoints,
+  };
 }
 
 export const sigurController = {
@@ -54,6 +527,74 @@ export const sigurController = {
     } catch (error) {
       console.error('Sigur get connection settings error:', error);
       res.status(500).json({ success: false, error: 'Ошибка получения настроек подключения Sigur' });
+    }
+  },
+
+  async getConnectionStatus(_req: AuthenticatedRequest, res: Response): Promise<void> {
+    try {
+      const connections = await sigurService.getAvailableConnections();
+      const isConfigured = connections.external || connections.internal;
+
+      if (!isConfigured) {
+        res.json({
+          success: true,
+          data: {
+            connected: false,
+            latestCheckStatus: null,
+            lastCheckedAt: null,
+            lastSuccessfulSignalAt: null,
+            lastError: null,
+            connections,
+          },
+        });
+        return;
+      }
+
+      const monitorStatus = await getSigurMonitorStatus();
+      const now = Date.now();
+      const latestCheck = monitorStatus.latestCheck;
+      const latestCheckAt = parseOptionalIsoDate(latestCheck?.checked_at || null);
+      const latestCheckIsFresh = latestCheckAt
+        ? now - latestCheckAt.getTime() <= PASSIVE_CONNECTION_STATUS_TTL_MS
+        : false;
+      const lastSuccessfulSignalAt = parseOptionalIsoDate(monitorStatus.lastSuccessfulSignalAt);
+      const hasRecentSuccess = lastSuccessfulSignalAt
+        ? now - lastSuccessfulSignalAt.getTime() <= PASSIVE_CONNECTION_STATUS_TTL_MS
+        : false;
+      const hasOpenFailureIncident = Boolean(
+        monitorStatus.activeIncident && monitorStatus.activeIncident.detected_by !== 'silence_detector',
+      );
+
+      let connected: boolean | null = null;
+      if (latestCheckIsFresh && latestCheck?.status === 'failure') {
+        connected = false;
+      } else if (latestCheckIsFresh && (latestCheck?.status === 'success' || latestCheck?.status === 'silence')) {
+        connected = true;
+      } else if (hasOpenFailureIncident) {
+        connected = false;
+      } else if (hasRecentSuccess) {
+        connected = true;
+      } else {
+        // Не валим UI в "Нет связи", если у нас просто нет свежего health-signal.
+        connected = true;
+      }
+
+      res.json({
+        success: true,
+        data: {
+          connected,
+          latestCheckStatus: latestCheck?.status || null,
+          lastCheckedAt: latestCheck?.checked_at || null,
+          lastSuccessfulSignalAt: monitorStatus.lastSuccessfulSignalAt,
+          lastError: latestCheck?.status === 'failure'
+            ? (latestCheck.error_message || monitorStatus.activeIncident?.error_message || null)
+            : null,
+          connections,
+        },
+      });
+    } catch (error) {
+      console.error('Sigur get connection status error:', error);
+      res.status(500).json({ success: false, error: 'Ошибка получения статуса подключения Sigur' });
     }
   },
 
@@ -293,7 +834,10 @@ export const sigurController = {
       }
 
       const connection = (req.query.connection as 'external' | 'internal') || undefined;
-      const data = await sigurService.getAccessPoints(connection);
+      const accessPointObjectMeta = await loadAccessPointObjectMetaMap();
+      const data = (await sigurService.getAccessPointOptionsCached(connection))
+        .map(point => toAccessPointOption(point as unknown as Record<string, unknown>, accessPointObjectMeta))
+        .filter((point): point is IEnrichedAccessPointOption => !!point);
 
       res.json({ success: true, data, count: data.length });
     } catch (error) {
@@ -604,6 +1148,7 @@ export const sigurController = {
       }
 
       const connection = (req.query.connection as 'external' | 'internal') || undefined;
+      const refresh = req.query.refresh === '1' || req.query.refresh === 'true';
       const { data: employee, error: employeeError } = await supabase
         .from('employees')
         .select('id, sigur_employee_id')
@@ -616,38 +1161,196 @@ export const sigurController = {
         return;
       }
 
-      const accessPointsRaw = await sigurService.getAccessPoints(connection) as Record<string, unknown>[];
-      const accessPoints = accessPointsRaw
-        .map(point => toAccessPointOption(point))
-        .filter((point): point is { id: number | null; name: string } => !!point)
-        .filter(point => point.id != null)
-        .sort((left, right) => left.name.localeCompare(right.name, 'ru'));
+      const includeOptions = req.query.includeOptions === 'true';
+      const accessPointObjectMeta = await loadAccessPointObjectMetaMap();
 
       if (!employee.sigur_employee_id) {
         res.json({
           success: true,
           data: {
             linked: false,
-            accessPoints,
+            accessPoints: [],
             bindings: [],
           },
         });
         return;
       }
 
-      const bindings = await getEmployeeAccessPointBindings(employee.sigur_employee_id, connection);
+      const [bindings, accessPoints] = await Promise.all([
+        getEmployeeAccessPointBindings(employee.sigur_employee_id, connection, refresh),
+        includeOptions
+          ? sigurService.getAccessPointOptionsCached(connection)
+            .then(options => options
+              .map(point => toAccessPointOption(point as unknown as Record<string, unknown>, accessPointObjectMeta))
+              .filter((point): point is IEnrichedAccessPointOption => !!point))
+          : Promise.resolve([]),
+      ]);
 
       res.json({
         success: true,
         data: {
           linked: true,
           accessPoints,
-          bindings,
+          bindings: bindings.map(binding => enrichAccessPointBinding(binding, accessPointObjectMeta)),
         },
       });
     } catch (error) {
       console.error('Sigur get employee access points error:', error);
       res.status(500).json({ success: false, error: 'Ошибка получения точек доступа сотрудника из Sigur' });
+    }
+  },
+
+  async getEmployeeProfile(req: AuthenticatedRequest, res: Response): Promise<void> {
+    try {
+      const employeeId = Number(req.params.id);
+      if (!Number.isInteger(employeeId) || !(await canAccessEmployeeInScope(req, employeeId))) {
+        res.status(403).json({ success: false, error: 'Нет доступа к сотруднику' });
+        return;
+      }
+
+      if (!(await ensureSigurConfigured(res))) {
+        return;
+      }
+
+      const connection = (req.query.connection as 'external' | 'internal') || undefined;
+      const refresh = req.query.refresh === '1' || req.query.refresh === 'true';
+      const cacheKey = buildEmployeeProfileCacheKey(employeeId, connection);
+
+      if (!refresh) {
+        const cached = employeeProfileCache.get(cacheKey);
+        if (cached) {
+          res.json({ success: true, data: cached.data });
+          return;
+        }
+
+        const inFlight = employeeProfileInFlight.get(cacheKey);
+        if (inFlight) {
+          const data = await inFlight;
+          res.json({ success: true, data });
+          return;
+        }
+      }
+
+      if (refresh) {
+        const data = await buildEmployeeProfileData(employeeId, connection, true)
+        .then(data => {
+          employeeProfileCache.set(cacheKey, { data });
+          return data;
+        });
+        res.json({ success: true, data });
+        return;
+      }
+
+      const loadPromise = buildEmployeeProfileData(employeeId, connection, false)
+        .then(data => {
+          employeeProfileCache.set(cacheKey, { data });
+          return data;
+        })
+        .finally(() => {
+          employeeProfileInFlight.delete(cacheKey);
+        });
+
+      employeeProfileInFlight.set(cacheKey, loadPromise);
+      const data = await loadPromise;
+      res.json({ success: true, data });
+    } catch (error) {
+      if ((error as Error & { status?: number }).status === 404) {
+        res.status(404).json({ success: false, error: 'Сотрудник не найден' });
+        return;
+      }
+      console.error('Sigur get employee profile error:', error);
+      res.status(500).json({ success: false, error: 'Ошибка получения профиля сотрудника из Sigur' });
+    }
+  },
+
+  async updateEmployeeCardExpiration(req: AuthenticatedRequest, res: Response): Promise<void> {
+    try {
+      const employeeId = Number(req.params.id);
+      const cardId = Number(req.params.cardId);
+      if (
+        !Number.isInteger(employeeId)
+        || !Number.isInteger(cardId)
+        || !(await canAccessEmployeeInScope(req, employeeId))
+      ) {
+        res.status(403).json({ success: false, error: 'Нет доступа к сотруднику' });
+        return;
+      }
+
+      if (!(await ensureSigurConfigured(res))) {
+        return;
+      }
+
+      const { expirationDate } = req.body as { expirationDate?: unknown };
+      if (typeof expirationDate !== 'string' || !expirationDate.trim()) {
+        res.status(400).json({ success: false, error: 'expirationDate обязателен' });
+        return;
+      }
+
+      const parsedExpirationDate = new Date(expirationDate);
+      if (Number.isNaN(parsedExpirationDate.getTime())) {
+        res.status(400).json({ success: false, error: 'Некорректная дата срока действия' });
+        return;
+      }
+
+      const connection = (req.body.connection as 'external' | 'internal') || undefined;
+      const { data: employee, error: employeeError } = await supabase
+        .from('employees')
+        .select('id, sigur_employee_id')
+        .eq('id', employeeId)
+        .maybeSingle();
+
+      if (employeeError) throw employeeError;
+      if (!employee) {
+        res.status(404).json({ success: false, error: 'Сотрудник не найден' });
+        return;
+      }
+      if (!employee.sigur_employee_id) {
+        res.status(400).json({ success: false, error: 'Сотрудник не связан с Sigur' });
+        return;
+      }
+
+      await sigurService.updateEmployeeCardBindingExpiration(
+        employee.sigur_employee_id,
+        cardId,
+        parsedExpirationDate.toISOString(),
+        connection,
+      );
+
+      const cardsRaw = await sigurService.getCardBindings(
+        { employeeId: employee.sigur_employee_id },
+        connection,
+      ) as Record<string, unknown>[];
+
+      const card = cardsRaw
+        .map(rawCard => toCardSummary(rawCard))
+        .filter((rawCard): rawCard is NonNullable<ReturnType<typeof toCardSummary>> => !!rawCard)
+        .find(rawCard => rawCard.cardId === cardId) || null;
+
+      await auditService.logFromRequest(req, req.user.id, 'UPDATE_EMPLOYEE', {
+        entityType: 'sigur_card_binding',
+        entityId: `${employeeId}:${cardId}`,
+        details: {
+          employeeId,
+          sigurEmployeeId: employee.sigur_employee_id,
+          cardId,
+          expirationDate: parsedExpirationDate.toISOString(),
+        },
+      });
+
+      invalidateEmployeeProfileCache(employeeId);
+
+      res.json({
+        success: true,
+        data: card || {
+          cardId,
+          cardNumber: null,
+          status: null,
+          expirationDate: parsedExpirationDate.toISOString(),
+        },
+      });
+    } catch (error) {
+      console.error('Sigur update employee card expiration error:', error);
+      res.status(500).json({ success: false, error: 'Ошибка обновления срока действия пропуска' });
     }
   },
 
@@ -691,6 +1394,8 @@ export const sigurController = {
         accessPointIds as number[],
         connection,
       );
+      const accessPointObjectMeta = await loadAccessPointObjectMetaMap();
+      const enrichedBindings = result.bindings.map(binding => enrichAccessPointBinding(binding, accessPointObjectMeta));
 
       await auditService.logFromRequest(req, req.user.id, 'UPDATE_EMPLOYEE', {
         entityType: 'employee',
@@ -701,8 +1406,15 @@ export const sigurController = {
           removedIds: result.removedIds,
         },
       });
+      invalidateEmployeeProfileCache(employeeId);
 
-      res.json({ success: true, data: result });
+      res.json({
+        success: true,
+        data: {
+          ...result,
+          bindings: enrichedBindings,
+        },
+      });
     } catch (error) {
       console.error('Sigur save employee access points error:', error);
       res.status(500).json({ success: false, error: 'Ошибка сохранения точек доступа сотрудника в Sigur' });

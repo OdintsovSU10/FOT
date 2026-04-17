@@ -11,9 +11,11 @@ interface UserFromApi {
   full_name: string | null;
   department_id: string | null;
   department_name: string | null;
+  additional_department_ids: string[];
+  managed_department_ids: string[];
   position_type: EmployeePositionType;
   imported_position: string | null;
-  employee_id: string | null;
+  employee_id: number | null;
   supervisor_id: string | null;
   chat_inbound_mode: ChatInboundMode;
   is_approved: boolean;
@@ -31,6 +33,43 @@ interface PendingUserFromApi {
   created_at: string;
 }
 
+export interface EmployeeDepartmentAssignmentFromApi {
+  employee_id: number;
+  full_name: string;
+  department_id: string | null;
+  additional_department_ids: string[];
+  managed_department_ids: string[];
+}
+
+export interface ManagerDepartmentImportBrigadePreview {
+  brigade_name: string;
+  row_number: number;
+  status: 'matched' | 'unmatched' | 'ambiguous';
+  department_id: string | null;
+  department_name: string | null;
+  candidates?: Array<{ id: string; name: string | null }>;
+}
+
+export interface ManagerDepartmentImportGroupPreview {
+  group_key: string;
+  manager_name: string;
+  section_name: string | null;
+  saved_employee_id: number | null;
+  brigade_count: number;
+  resolved_department_ids: string[];
+  brigades: ManagerDepartmentImportBrigadePreview[];
+}
+
+export interface ManagerDepartmentImportPreview {
+  stats: {
+    total_groups: number;
+    total_links: number;
+    resolved_links: number;
+    unresolved_links: number;
+  };
+  groups: ManagerDepartmentImportGroupPreview[];
+}
+
 export const adminService = {
   // User management
   async getPendingUsers(): Promise<PendingUserFromApi[]> {
@@ -40,6 +79,11 @@ export const adminService = {
 
   async getAllUsers(): Promise<UserFromApi[]> {
     const response = await apiClient.get<ApiResponse<UserFromApi[]>>('/admin/users');
+    return response.data || [];
+  },
+
+  async getEmployeeDepartmentAssignments(): Promise<EmployeeDepartmentAssignmentFromApi[]> {
+    const response = await apiClient.get<ApiResponse<EmployeeDepartmentAssignmentFromApi[]>>('/admin/employees/department-access');
     return response.data || [];
   },
 
@@ -77,6 +121,56 @@ export const adminService = {
 
   async updateEmployeeDepartment(userId: string, departmentId: string): Promise<void> {
     await apiClient.patch(`/admin/users/${userId}/department`, { department_id: departmentId });
+  },
+
+  async updateUserDepartmentAccess(userId: string, departmentIds: string[]): Promise<{ additional_department_ids: string[]; managed_department_ids: string[] }> {
+    const response = await apiClient.put<ApiResponse<{ additional_department_ids: string[]; managed_department_ids: string[] }>>(
+      `/admin/users/${userId}/department-access`,
+      { department_ids: departmentIds },
+    );
+    return response.data;
+  },
+
+  async updateEmployeeDepartmentAccess(employeeId: number, departmentIds: string[]): Promise<{ additional_department_ids: string[]; managed_department_ids: string[] }> {
+    const response = await apiClient.put<ApiResponse<{ additional_department_ids: string[]; managed_department_ids: string[] }>>(
+      `/admin/employees/${employeeId}/department-access`,
+      { department_ids: departmentIds },
+    );
+    return response.data;
+  },
+
+  async previewDepartmentAccessImport(file: File): Promise<ManagerDepartmentImportPreview> {
+    const formData = new FormData();
+    formData.append('file', file);
+    const response = await apiClient.post<ApiResponse<ManagerDepartmentImportPreview>>(
+      '/admin/users/department-access-import/preview',
+      formData,
+    );
+    return response.data;
+  },
+
+  async applyDepartmentAccessImport(payload: {
+    assignments: Array<{
+      employee_id: number;
+      department_ids: string[];
+      source_groups: string[];
+    }>;
+    group_assignments: Array<{
+      section_name: string | null;
+      manager_name: string;
+      employee_id: number;
+    }>;
+    brigade_aliases: Array<{
+      section_name: string | null;
+      brigade_name: string;
+      department_id: string;
+    }>;
+  }): Promise<{ applied_users: number; applied_links: number }> {
+    const response = await apiClient.post<ApiResponse<{ applied_users: number; applied_links: number }>>(
+      '/admin/users/department-access-import/apply',
+      payload,
+    );
+    return response.data;
   },
 
   // 2FA management

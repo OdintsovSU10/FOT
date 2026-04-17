@@ -4,6 +4,7 @@ import { employeeCache } from './employee-cache.service.js';
 import { invalidateStructureCache } from './employee-mapper.service.js';
 import { settingsService } from './settings.service.js';
 import { sigurService } from './sigur.service.js';
+import { createCache } from '../utils/cache.js';
 import {
   normalizeDepartment,
   normalizeEmployee,
@@ -16,6 +17,7 @@ interface ILinkedEmployeeRow {
   sigur_employee_id: number | null;
   org_department_id: string | null;
   position_id: string | null;
+  tab_number: string | null;
   full_name: string | null;
   last_name: string | null;
   first_name: string | null;
@@ -29,11 +31,19 @@ interface IAccessPointBinding {
   accessPointId: number;
 }
 
+const EMPLOYEE_ACCESS_POINT_BINDINGS_CACHE_TTL_MS = 5 * 60 * 1000;
+const employeeAccessPointBindingsCache = createCache<{ bindings: Array<{ accessPointId: number; accessPointName: string | null }> }>({
+  max: 1000,
+  ttlMs: EMPLOYEE_ACCESS_POINT_BINDINGS_CACHE_TTL_MS,
+});
+const employeeAccessPointBindingsInFlight = new Map<string, Promise<Array<{ accessPointId: number; accessPointName: string | null }>>>();
+
 const LINKED_EMPLOYEE_COLUMNS = [
   'id',
   'sigur_employee_id',
   'org_department_id',
   'position_id',
+  'tab_number',
   'full_name',
   'last_name',
   'first_name',
@@ -43,6 +53,10 @@ const LINKED_EMPLOYEE_COLUMNS = [
 ].join(', ');
 
 const normalizeName = (value: string | null | undefined): string => (value || '').trim().toLowerCase();
+const buildEmployeeAccessPointBindingsCacheKey = (
+  employeeId: number,
+  connection?: ConnectionType,
+): string => `${employeeId}:${connection || 'default'}`;
 
 async function getRootDepartmentId(): Promise<string | null> {
   const { data: namedRoot } = await supabase
@@ -187,6 +201,7 @@ export async function syncLinkedEmployeeFromSigur(
   fullName: string;
   orgDepartmentId: string | null;
   positionId: string | null;
+  tabNumber: string | null;
   sigurEmployeeId: number;
 }> {
   const employee = await getLinkedEmployeeRow(employeeId);
@@ -199,6 +214,7 @@ export async function syncLinkedEmployeeFromSigur(
   );
 
   const fullName = (remoteEmployee.name || employee.full_name || '').trim();
+  const tabNumber = remoteEmployee.tabId ? remoteEmployee.tabId.trim() : null;
   const fio = parseFIO(fullName);
   const orgDepartmentId = await ensureLocalSigurDepartment(remoteEmployee.departmentId || null, connection);
   const positionId = await ensureLocalSigurPosition(remoteEmployee.positionId || null, remoteEmployee.position || '', connection);
@@ -210,6 +226,7 @@ export async function syncLinkedEmployeeFromSigur(
     middle_name: fio.middleName || null,
     org_department_id: orgDepartmentId,
     position_id: positionId,
+    tab_number: tabNumber,
     updated_at: new Date().toISOString(),
   };
 
@@ -230,6 +247,7 @@ export async function syncLinkedEmployeeFromSigur(
     fullName,
     orgDepartmentId,
     positionId,
+    tabNumber,
     sigurEmployeeId: employee.sigur_employee_id,
   };
 }
@@ -324,23 +342,55 @@ function normalizeBinding(raw: Record<string, unknown>): IAccessPointBinding | n
 export async function getEmployeeAccessPointBindings(
   employeeId: number,
   connection?: ConnectionType,
+  refresh = false,
 ): Promise<Array<{ accessPointId: number; accessPointName: string | null }>> {
-  const [bindings, accessPointMap] = await Promise.all([
-    sigurService.getEmployeeAccessPointBindings(connection),
-    sigurService.getAccessPointMapCached(connection),
-  ]);
+  const cacheKey = buildEmployeeAccessPointBindingsCacheKey(employeeId, connection);
 
-  return bindings
-    .map(binding => normalizeBinding(binding))
-    .filter((binding): binding is IAccessPointBinding => !!binding && binding.employeeId === employeeId)
-    .map(binding => ({
-      accessPointId: binding.accessPointId,
-      accessPointName: accessPointMap.get(binding.accessPointId) || null,
-    }))
-    .sort((left, right) => {
-      const byName = (left.accessPointName || '').localeCompare(right.accessPointName || '', 'ru');
-      return byName !== 0 ? byName : left.accessPointId - right.accessPointId;
+  if (!refresh) {
+    const cached = employeeAccessPointBindingsCache.get(cacheKey);
+    if (cached) {
+      return cached.bindings;
+    }
+  }
+
+  const inFlight = employeeAccessPointBindingsInFlight.get(cacheKey);
+  if (inFlight) {
+    return inFlight;
+  }
+
+  const loadPromise = Promise.all([
+    sigurService.getEmployeeAccessPointBindings({ employeeId }, connection),
+    sigurService.getAccessPointMapCached(connection),
+  ])
+    .then(([bindings, accessPointMap]) => bindings
+      .map(binding => normalizeBinding(binding))
+      .filter((binding): binding is IAccessPointBinding => !!binding && binding.employeeId === employeeId)
+      .map(binding => ({
+        accessPointId: binding.accessPointId,
+        accessPointName: accessPointMap.get(binding.accessPointId) || null,
+      }))
+      .sort((left, right) => {
+        const byName = (left.accessPointName || '').localeCompare(right.accessPointName || '', 'ru');
+        return byName !== 0 ? byName : left.accessPointId - right.accessPointId;
+      }))
+    .then(bindings => {
+      employeeAccessPointBindingsCache.set(cacheKey, { bindings });
+      return bindings;
+    })
+    .finally(() => {
+      employeeAccessPointBindingsInFlight.delete(cacheKey);
     });
+
+  employeeAccessPointBindingsInFlight.set(cacheKey, loadPromise);
+  return loadPromise;
+}
+
+export function invalidateEmployeeAccessPointBindingsCache(employeeId: number): void {
+  for (const connectionKey of ['default', 'internal', 'external']) {
+    const key = `${employeeId}:${connectionKey}`;
+    employeeAccessPointBindingsCache.delete(key);
+    employeeAccessPointBindingsInFlight.delete(key);
+  }
 }
 
 export async function replaceEmployeeAccessPointBindings(
@@ -367,7 +417,8 @@ export async function replaceEmployeeAccessPointBindings(
     await sigurService.createEmployeeAccessPointBindings([employeeId], addedIds, connection);
   }
 
-  const bindings = await getEmployeeAccessPointBindings(employeeId, connection);
+  invalidateEmployeeAccessPointBindingsCache(employeeId);
+  const bindings = await getEmployeeAccessPointBindings(employeeId, connection, true);
 
   return {
     addedIds,

@@ -57,6 +57,21 @@ export interface TimesheetTeamManagementCandidate {
   department_name: string | null;
 }
 
+export interface ManagedDepartmentTimesheetSummary {
+  department_id: string;
+  department_name: string;
+  employee_count: number;
+  norm_hours: number;
+  actual_hours: number;
+  deviations: { late: number; absent: number; sick: number };
+  approval_by_half: {
+    H1: 'draft' | 'submitted' | 'approved' | 'rejected' | 'returned' | null;
+    H2: 'draft' | 'submitted' | 'approved' | 'rejected' | 'returned' | null;
+    FULL: 'draft' | 'submitted' | 'approved' | 'rejected' | 'returned' | null;
+  };
+  is_primary: boolean;
+}
+
 export interface TimesheetStats {
   employeeCount: number;
   workingDays: number;

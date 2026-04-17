@@ -142,7 +142,7 @@ export const EventsSyncSection: FC<IEventsSyncSectionProps> = ({
         Синхронизация событий в базу
       </h2>
       <div className="sigur-sync-summary-note" style={{ marginBottom: '0.75rem' }}>
-        Этот блок загружает только события за выбранный период.
+        Этот блок загружает в портал только события за выбранный период и только для отделов, участвующих в портальной синхронизации.
       </div>
       <div className="sigur-sync-summary">
         <span className="sigur-sync-summary-pill">{syncFilterSummary}</span>

@@ -15,6 +15,115 @@ router.use(authenticate);
 
 // GET /api/sigur/connection-settings — текущие параметры подключения и архивного отдела
 router.get('/connection-settings', requirePageAccess('/skud-settings', 'view'), sigurController.getConnectionSettings);
+router.get('/connection-status', requirePageAccess('/skud-settings', 'view'), sigurController.getConnectionStatus);
+
+// === Live admin эндпоинты ===
+
+router.get('/admin/departments', requirePageAccess('/skud-settings', 'view'), sigurAdminController.listDepartments);
+router.get('/admin/departments/tree', requirePageAccess('/skud-settings', 'view'), sigurAdminController.listDepartmentsTree);
+router.get('/admin/departments/counts', requirePageAccess('/skud-settings', 'view'), sigurAdminController.listDepartmentCounts);
+router.get('/admin/positions', requirePageAccess('/skud-settings', 'view'), sigurAdminController.listPositions);
+router.get('/admin/employees', requirePageAccess('/skud-settings', 'view'), sigurAdminController.listEmployees);
+router.get('/admin/employees/card-statuses', requirePageAccess('/skud-settings', 'view'), sigurAdminController.getEmployeeCardStatuses);
+router.get('/admin/employees/:sigurEmployeeId/profile', requirePageAccess('/skud-settings', 'view'), sigurAdminController.getEmployeeProfile);
+
+router.post(
+  '/admin/departments',
+  requirePageAccess('/skud-settings', 'edit'),
+  requireCritical2FA,
+  sigurAdminController.createDepartment,
+);
+router.post(
+  '/admin/departments/batch-move',
+  requirePageAccess('/skud-settings', 'edit'),
+  requireCritical2FA,
+  sigurAdminController.batchMoveDepartments,
+);
+router.put(
+  '/admin/departments/:sigurDepartmentId',
+  requirePageAccess('/skud-settings', 'edit'),
+  requireCritical2FA,
+  sigurAdminController.updateDepartment,
+);
+router.delete(
+  '/admin/departments/:sigurDepartmentId',
+  requirePageAccess('/skud-settings', 'edit'),
+  requireCritical2FA,
+  sigurAdminController.deleteDepartment,
+);
+router.delete(
+  '/admin/departments/:sigurDepartmentId/recursive',
+  requirePageAccess('/skud-settings', 'edit'),
+  requireCritical2FA,
+  sigurAdminController.deleteDepartmentRecursive,
+);
+router.post(
+  '/admin/positions',
+  requirePageAccess('/skud-settings', 'edit'),
+  requireCritical2FA,
+  sigurAdminController.createPosition,
+);
+
+router.post(
+  '/admin/employees',
+  requirePageAccess('/skud-settings', 'edit'),
+  requireCritical2FA,
+  sigurAdminController.createEmployee,
+);
+router.put(
+  '/admin/employees/:sigurEmployeeId',
+  requirePageAccess('/skud-settings', 'edit'),
+  requireCritical2FA,
+  sigurAdminController.updateEmployee,
+);
+router.delete(
+  '/admin/employees/:sigurEmployeeId',
+  requirePageAccess('/skud-settings', 'edit'),
+  requireCritical2FA,
+  sigurAdminController.deleteEmployee,
+);
+router.post(
+  '/admin/employees/:sigurEmployeeId/block',
+  requirePageAccess('/skud-settings', 'edit'),
+  requireCritical2FA,
+  sigurAdminController.blockEmployee,
+);
+router.post(
+  '/admin/employees/:sigurEmployeeId/unblock',
+  requirePageAccess('/skud-settings', 'edit'),
+  requireCritical2FA,
+  sigurAdminController.unblockEmployee,
+);
+router.post(
+  '/admin/employees/:sigurEmployeeId/move',
+  requirePageAccess('/skud-settings', 'edit'),
+  requireCritical2FA,
+  sigurAdminController.moveEmployee,
+);
+router.post(
+  '/admin/employees/batch-move',
+  requirePageAccess('/skud-settings', 'edit'),
+  requireCritical2FA,
+  sigurAdminController.batchMoveEmployees,
+);
+router.put(
+  '/admin/employees/:sigurEmployeeId/access-points',
+  requirePageAccess('/skud-settings', 'edit'),
+  requireCritical2FA,
+  sigurAdminController.saveEmployeeAccessPoints,
+);
+router.put(
+  '/admin/employees/:sigurEmployeeId/access-rules',
+  requirePageAccess('/skud-settings', 'edit'),
+  requireCritical2FA,
+  sigurAdminController.saveEmployeeAccessRules,
+);
+router.put(
+  '/admin/employees/:sigurEmployeeId/cards/:cardId/expiration',
+  requirePageAccess('/skud-settings', 'edit'),
+  requireCritical2FA,
+  sigurAdminController.updateEmployeeCardExpiration,
+);
 
 // === Monitor эндпоинты (admin+) ===
 
@@ -61,6 +170,13 @@ router.get('/preview', requirePageAccess('/skud-settings', 'view'), sigurControl
 
 // GET /api/sigur/employees/:id/access-points — прямые точки доступа сотрудника
 router.get(
+  '/employees/:id/profile',
+  requireAnyPageAccess(['/employee', '/employee/history', '/employees', '/staff-control', '/skud-settings'], 'view'),
+  sigurController.getEmployeeProfile,
+);
+
+// GET /api/sigur/employees/:id/access-points — прямые точки доступа сотрудника
+router.get(
   '/employees/:id/access-points',
   requireAnyPageAccess(['/employee', '/employee/history', '/employees', '/staff-control', '/skud-settings'], 'view'),
   sigurController.getEmployeeAccessPoints,
@@ -103,6 +219,14 @@ router.post(
   requirePageAccess('/skud-settings', 'edit'),
   requireCritical2FA,
   sigurController.ensureArchiveDepartment,
+);
+
+// PUT /api/sigur/employees/:id/access-points — сохранить прямые точки доступа сотрудника
+router.put(
+  '/employees/:id/cards/:cardId/expiration',
+  requireAnyPageAccess(['/employees', '/staff-control', '/skud-settings'], 'edit'),
+  requireCritical2FA,
+  sigurController.updateEmployeeCardExpiration,
 );
 
 // PUT /api/sigur/employees/:id/access-points — сохранить прямые точки доступа сотрудника
