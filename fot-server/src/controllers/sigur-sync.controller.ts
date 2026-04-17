@@ -51,12 +51,20 @@ function isManualSyncConflict(error: unknown): error is ManualSyncInProgressErro
   return error instanceof ManualSyncInProgressError;
 }
 
-function sendManualSyncConflict(res: Response): void {
+function sendManualSyncConflict(res: Response, error: ManualSyncInProgressError): void {
   res.status(409).json({
     success: false,
-    error: 'Ручная синхронизация уже выполняется. Дождитесь завершения текущего запуска.',
+    error: error.message,
     code: 'SYNC_IN_PROGRESS',
   });
+}
+
+async function safeReleasePresencePollingLock(context: string): Promise<void> {
+  try {
+    await releasePresencePollingLock();
+  } catch (error) {
+    console.error(`[${context}] releasePresencePollingLock error:`, error);
+  }
 }
 
 export const sigurSyncController = {
@@ -106,7 +114,7 @@ export const sigurSyncController = {
       res.end();
     } catch (error) {
       if (isManualSyncConflict(error)) {
-        sendManualSyncConflict(res);
+        sendManualSyncConflict(res, error);
         return;
       }
 
@@ -123,7 +131,7 @@ export const sigurSyncController = {
       }
     } finally {
       if (lockAcquired) {
-        await releasePresencePollingLock();
+        await safeReleasePresencePollingLock('sigur.sync');
       }
     }
   },
@@ -141,7 +149,7 @@ export const sigurSyncController = {
       res.json({ success: true, data: result });
     } catch (error) {
       if (isManualSyncConflict(error)) {
-        sendManualSyncConflict(res);
+        sendManualSyncConflict(res, error);
         return;
       }
 
@@ -149,7 +157,7 @@ export const sigurSyncController = {
       res.status(500).json({ success: false, error: 'Ошибка импорта сотрудников из Sigur' });
     } finally {
       if (lockAcquired) {
-        await releasePresencePollingLock();
+        await safeReleasePresencePollingLock('sigur.syncEmployees');
       }
     }
   },
@@ -168,7 +176,7 @@ export const sigurSyncController = {
       res.json({ success: true, data: result });
     } catch (error) {
       if (isManualSyncConflict(error)) {
-        sendManualSyncConflict(res);
+        sendManualSyncConflict(res, error);
         return;
       }
 
@@ -176,7 +184,7 @@ export const sigurSyncController = {
       res.status(500).json({ success: false, error: 'Ошибка импорта отделов из Sigur' });
     } finally {
       if (lockAcquired) {
-        await releasePresencePollingLock();
+        await safeReleasePresencePollingLock('sigur.syncDepartments');
       }
     }
   },
@@ -195,7 +203,7 @@ export const sigurSyncController = {
       res.json({ success: true, data: result });
     } catch (error) {
       if (isManualSyncConflict(error)) {
-        sendManualSyncConflict(res);
+        sendManualSyncConflict(res, error);
         return;
       }
 
@@ -203,7 +211,7 @@ export const sigurSyncController = {
       res.status(500).json({ success: false, error: 'Ошибка импорта должностей из Sigur' });
     } finally {
       if (lockAcquired) {
-        await releasePresencePollingLock();
+        await safeReleasePresencePollingLock('sigur.syncPositions');
       }
     }
   },
@@ -251,7 +259,7 @@ export const sigurSyncController = {
       res.json({ success: true, data: { deleted: totalDeleted, errors } });
     } catch (error) {
       if (isManualSyncConflict(error)) {
-        sendManualSyncConflict(res);
+        sendManualSyncConflict(res, error);
         return;
       }
 
@@ -259,7 +267,7 @@ export const sigurSyncController = {
       res.status(500).json({ success: false, error: 'Ошибка удаления событий' });
     } finally {
       if (lockAcquired) {
-        await releasePresencePollingLock();
+        await safeReleasePresencePollingLock('sigur.clearEvents');
       }
     }
   },
@@ -286,6 +294,11 @@ export const sigurSyncController = {
       res.setHeader('Cache-Control', 'no-cache');
       res.setHeader('Connection', 'keep-alive');
       res.flushHeaders();
+
+      const keepAliveTimer = setInterval(() => {
+        res.write(': keepalive\n\n');
+      }, 15_000);
+      res.on('close', () => clearInterval(keepAliveTimer));
 
       const sendProgress = createSseSender(res);
       const connection = (req.body.connection as ConnectionType) || undefined;
@@ -370,10 +383,11 @@ export const sigurSyncController = {
         failedSteps,
         completedSteps: stepDefinitions.length - failedSteps.length,
       });
+      clearInterval(keepAliveTimer);
       res.end();
     } catch (error) {
       if (isManualSyncConflict(error)) {
-        sendManualSyncConflict(res);
+        sendManualSyncConflict(res, error);
         return;
       }
 
@@ -390,7 +404,7 @@ export const sigurSyncController = {
       }
     } finally {
       if (lockAcquired) {
-        await releasePresencePollingLock();
+        await safeReleasePresencePollingLock('sigur.syncAll');
       }
     }
   },

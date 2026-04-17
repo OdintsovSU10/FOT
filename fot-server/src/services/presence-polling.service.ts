@@ -1,5 +1,6 @@
 import { sigurService } from './sigur.service.js';
 import { supabase } from '../config/database.js';
+import { env } from '../config/env.js';
 import { mapSigurEvent } from '../utils/sigur.mapper.js';
 import { computeDedupHash } from '../utils/dedup.utils.js';
 import { buildMoscowEventTimestamp } from '../utils/date.utils.js';
@@ -24,20 +25,31 @@ import {
   tryAcquireSigurRuntimeLease,
 } from './sigur-runtime-state.service.js';
 import type { ConnectionType } from './sigur.service.js';
+import { getIo } from '../socket/io-instance.js';
 
-const POLL_INTERVAL = 60_000;
+const DEFAULT_POLL_INTERVAL_MS = 15_000;
+const MIN_POLL_INTERVAL_MS = 15_000;
 const EMPLOYEE_CACHE_TTL = 10 * 60_000;
 const BATCH_SIZE = 500;
 export const POLL_OVERLAP_MS = 2 * 60_000;
 const POLL_MAX_WINDOW_MS = 10 * 60_000;
+const SIGUR_EXCLUSIVE_SYNC_STATE_KEY = 'sigur_exclusive_sync';
+const SIGUR_STRUCTURE_SYNC_STATE_KEY = 'sigur_structure_sync';
+const EXCLUSIVE_SYNC_ACQUIRE_TIMEOUT_MS = 45_000;
+const STRUCTURE_SYNC_WAIT_TIMEOUT_MS = 10 * 60_000;
+const EXCLUSIVE_SYNC_ACQUIRE_RETRY_MS = 1_000;
 
 let pollingTimer: ReturnType<typeof setInterval> | null = null;
 let startupTimeout: ReturnType<typeof setTimeout> | null = null;
 let manualSyncLocks = 0;
 let pollInFlight: Promise<void> | null = null;
 let manualSyncLeaseHeartbeatStop: (() => void) | null = null;
+let exclusiveSyncLeaseHeartbeatStop: (() => void) | null = null;
+let structureSyncLeaseHeartbeatStop: (() => void) | null = null;
 
 const POLLING_LEASE_OWNER = getSigurRuntimeOwner(SIGUR_POLLING_STATE_KEY);
+const EXCLUSIVE_SYNC_LEASE_OWNER = getSigurRuntimeOwner(SIGUR_EXCLUSIVE_SYNC_STATE_KEY);
+const STRUCTURE_SYNC_LEASE_OWNER = getSigurRuntimeOwner(SIGUR_STRUCTURE_SYNC_STATE_KEY);
 const MANUAL_SYNC_LEASE_OWNER = `${POLLING_LEASE_OWNER}:manual`;
 
 export class ManualSyncInProgressError extends Error {
@@ -74,6 +86,14 @@ interface PollingWindow {
   endDate: string;
   checkpointSource: PollCheckpointSource;
   windowTruncated: boolean;
+}
+
+export function resolvePresencePollIntervalMs(): number {
+  const parsed = Number.parseInt(env.SIGUR_PRESENCE_POLL_INTERVAL_MS, 10);
+  if (!Number.isFinite(parsed)) {
+    return DEFAULT_POLL_INTERVAL_MS;
+  }
+  return Math.max(MIN_POLL_INTERVAL_MS, parsed);
 }
 
 function pad(n: number): string {
@@ -209,6 +229,49 @@ export async function resolvePollingWindow(now = new Date()): Promise<PollingWin
   };
 }
 
+function isActiveRuntimeLease(leaseExpiresAt: string | null | undefined): boolean {
+  if (!leaseExpiresAt) return false;
+  const expiresAtMs = Date.parse(leaseExpiresAt);
+  if (Number.isNaN(expiresAtMs)) return false;
+  return expiresAtMs > Date.now();
+}
+
+async function hasExclusiveSyncLease(): Promise<boolean> {
+  const state = await getSigurRuntimeState(SIGUR_EXCLUSIVE_SYNC_STATE_KEY);
+  return !!state?.lease_owner && isActiveRuntimeLease(state.lease_expires_at);
+}
+
+async function hasStructureSyncLease(): Promise<boolean> {
+  const state = await getSigurRuntimeState(SIGUR_STRUCTURE_SYNC_STATE_KEY);
+  return !!state?.lease_owner && isActiveRuntimeLease(state.lease_expires_at);
+}
+
+async function waitForStructureSyncLeaseRelease(): Promise<void> {
+  const deadlineAt = Date.now() + STRUCTURE_SYNC_WAIT_TIMEOUT_MS;
+
+  while (await hasStructureSyncLease()) {
+    if (Date.now() >= deadlineAt) {
+      throw new ManualSyncInProgressError(
+        'Фоновая синхронизация структуры не завершилась вовремя. Попробуйте повторить через пару минут.',
+      );
+    }
+
+    await wait(EXCLUSIVE_SYNC_ACQUIRE_RETRY_MS);
+  }
+}
+
+function wait(ms: number): Promise<void> {
+  return new Promise(resolve => {
+    setTimeout(resolve, ms);
+  });
+}
+
+function restartPresencePollingInBackground(reason: string): void {
+  void startPresencePolling().catch(error => {
+    console.error(`[presence-polling] restart failed after ${reason}:`, (error as Error).message);
+  });
+}
+
 export function resetPresencePollingStateForTests(): void {
   if (startupTimeout) {
     clearTimeout(startupTimeout);
@@ -225,6 +288,14 @@ export function resetPresencePollingStateForTests(): void {
   if (manualSyncLeaseHeartbeatStop) {
     manualSyncLeaseHeartbeatStop();
     manualSyncLeaseHeartbeatStop = null;
+  }
+  if (exclusiveSyncLeaseHeartbeatStop) {
+    exclusiveSyncLeaseHeartbeatStop();
+    exclusiveSyncLeaseHeartbeatStop = null;
+  }
+  if (structureSyncLeaseHeartbeatStop) {
+    structureSyncLeaseHeartbeatStop();
+    structureSyncLeaseHeartbeatStop = null;
   }
   employeeCache = null;
 }
@@ -352,15 +423,22 @@ export async function pollEventsOnce(now = new Date()): Promise<void> {
       }
     }
 
+    const presenceChanged = totalInserted > 0 || summariesToUpdate.size > 0;
+    const cycleFinishedAt = new Date();
+
     // После успешного цикла сбрасываем кэши presence/dashboard, чтобы пользователи
     // увидели актуальные входы/выходы. Без этого данные отстают до TTL.
-    if (totalInserted > 0 || summariesToUpdate.size > 0) {
+    if (presenceChanged) {
       invalidatePresenceCache();
       invalidateDashboardCache();
+      try {
+        getIo()?.emit('presence_updated', { at: cycleFinishedAt.toISOString() });
+      } catch (socketError) {
+        console.error('[presence-polling] socket emit error:', (socketError as Error).message);
+      }
     }
 
     const monitorCheckedAt = new Date();
-    const cycleFinishedAt = new Date();
     const cycleMeta = {
       connectionType,
       checkpointSource: window.checkpointSource,
@@ -467,6 +545,12 @@ async function runPollCycle(): Promise<void> {
   if (pollInFlight) {
     return pollInFlight;
   }
+  if (await hasExclusiveSyncLease()) {
+    return;
+  }
+  if (pollInFlight) {
+    return pollInFlight;
+  }
 
   pollInFlight = (async () => {
     let leaseAcquired = false;
@@ -550,14 +634,15 @@ export async function startPresencePolling(): Promise<void> {
     console.log(`[presence-polling] start skipped, locked by manual sync (${manualSyncLocks})`);
     return;
   }
-  console.log('[presence-polling] started (interval: 60s)');
+  const pollIntervalMs = resolvePresencePollIntervalMs();
+  console.log(`[presence-polling] started (interval: ${Math.round(pollIntervalMs / 1000)}s)`);
   startupTimeout = setTimeout(() => {
     startupTimeout = null;
     void runPollCycle();
   }, 10_000);
   pollingTimer = setInterval(() => {
     void runPollCycle();
-  }, POLL_INTERVAL);
+  }, pollIntervalMs);
 }
 
 export function stopPresencePolling(): void {
@@ -580,25 +665,68 @@ export async function acquirePresencePollingLock(): Promise<void> {
   manualSyncLocks = 1;
 
   try {
+    const lockedAt = new Date().toISOString();
+    const exclusiveLease = await tryAcquireSigurRuntimeLease({
+      key: SIGUR_EXCLUSIVE_SYNC_STATE_KEY,
+      owner: EXCLUSIVE_SYNC_LEASE_OWNER,
+      ttlSeconds: SIGUR_POLLING_LEASE_TTL_SECONDS,
+      meta: {
+        leaseMode: 'exclusive_sync',
+        manualSyncLockedAt: lockedAt,
+        leaderOwner: EXCLUSIVE_SYNC_LEASE_OWNER,
+      },
+    });
+
+    if (!exclusiveLease.acquired) {
+      throw new ManualSyncInProgressError();
+    }
+
+    exclusiveSyncLeaseHeartbeatStop = startSigurRuntimeLeaseHeartbeat({
+      key: SIGUR_EXCLUSIVE_SYNC_STATE_KEY,
+      owner: EXCLUSIVE_SYNC_LEASE_OWNER,
+      ttlSeconds: SIGUR_POLLING_LEASE_TTL_SECONDS,
+      getMeta: () => ({
+        leaseMode: 'exclusive_sync',
+        manualSyncLockedAt: lockedAt,
+        leaderOwner: EXCLUSIVE_SYNC_LEASE_OWNER,
+      }),
+      onError: error => {
+        console.error('[presence-polling] exclusive sync lease heartbeat error:', error.message);
+      },
+    });
+
     stopPresencePolling();
     if (pollInFlight) {
       await pollInFlight;
     }
+    await waitForStructureSyncLeaseRelease();
 
-    const lockedAt = new Date().toISOString();
-    const lease = await tryAcquireSigurRuntimeLease({
-      key: SIGUR_POLLING_STATE_KEY,
-      owner: MANUAL_SYNC_LEASE_OWNER,
-      ttlSeconds: SIGUR_POLLING_LEASE_TTL_SECONDS,
-      meta: {
-        leaseMode: 'manual_sync',
-        manualSyncLockedAt: lockedAt,
-        leaderOwner: MANUAL_SYNC_LEASE_OWNER,
-      },
-    });
+    const deadlineAt = Date.now() + EXCLUSIVE_SYNC_ACQUIRE_TIMEOUT_MS;
+    let pollingLeaseAcquired = false;
+    while (!pollingLeaseAcquired) {
+      const lease = await tryAcquireSigurRuntimeLease({
+        key: SIGUR_POLLING_STATE_KEY,
+        owner: MANUAL_SYNC_LEASE_OWNER,
+        ttlSeconds: SIGUR_POLLING_LEASE_TTL_SECONDS,
+        meta: {
+          leaseMode: 'manual_sync',
+          manualSyncLockedAt: lockedAt,
+          leaderOwner: MANUAL_SYNC_LEASE_OWNER,
+        },
+      });
 
-    if (!lease.acquired) {
-      throw new ManualSyncInProgressError('Фоновая синхронизация Sigur уже выполняется. Дождитесь завершения текущего запуска.');
+      if (lease.acquired) {
+        pollingLeaseAcquired = true;
+        break;
+      }
+
+      if (Date.now() >= deadlineAt) {
+        throw new ManualSyncInProgressError(
+          'Фоновая синхронизация Sigur не освободила lock вовремя. Попробуйте повторить через минуту.',
+        );
+      }
+
+      await wait(EXCLUSIVE_SYNC_ACQUIRE_RETRY_MS);
     }
 
     manualSyncLeaseHeartbeatStop = startSigurRuntimeLeaseHeartbeat({
@@ -615,10 +743,90 @@ export async function acquirePresencePollingLock(): Promise<void> {
       },
     });
   } catch (error) {
+    if (exclusiveSyncLeaseHeartbeatStop) {
+      exclusiveSyncLeaseHeartbeatStop();
+      exclusiveSyncLeaseHeartbeatStop = null;
+    }
+    await mergeSigurRuntimeState({
+      key: SIGUR_EXCLUSIVE_SYNC_STATE_KEY,
+      owner: EXCLUSIVE_SYNC_LEASE_OWNER,
+      meta: {
+        manualSyncLockedAt: null,
+        lastManualSyncReleasedAt: new Date().toISOString(),
+      },
+    }).catch(runtimeError => {
+      console.error('[presence-polling] exclusive sync release hook error:', (runtimeError as Error).message);
+    });
+    await releaseSigurRuntimeLease({
+      key: SIGUR_EXCLUSIVE_SYNC_STATE_KEY,
+      owner: EXCLUSIVE_SYNC_LEASE_OWNER,
+    }).catch(releaseError => {
+      console.error('[presence-polling] exclusive sync lease release error:', (releaseError as Error).message);
+    });
     manualSyncLocks = 0;
-    void startPresencePolling();
+    restartPresencePollingInBackground('acquire lock failure');
     throw error;
   }
+}
+
+export async function acquireStructureSyncSchedulerLock(): Promise<void> {
+  if (manualSyncLocks > 0 || (await hasExclusiveSyncLease())) {
+    throw new ManualSyncInProgressError();
+  }
+
+  const leaseStartedAt = new Date().toISOString();
+  const lease = await tryAcquireSigurRuntimeLease({
+    key: SIGUR_STRUCTURE_SYNC_STATE_KEY,
+    owner: STRUCTURE_SYNC_LEASE_OWNER,
+    ttlSeconds: SIGUR_POLLING_LEASE_TTL_SECONDS,
+    meta: {
+      leaseMode: 'background_structure_sync',
+      startedAt: leaseStartedAt,
+      leaderOwner: STRUCTURE_SYNC_LEASE_OWNER,
+    },
+  });
+
+  if (!lease.acquired) {
+    throw new ManualSyncInProgressError('Синхронизация структуры уже выполняется.');
+  }
+
+  structureSyncLeaseHeartbeatStop = startSigurRuntimeLeaseHeartbeat({
+    key: SIGUR_STRUCTURE_SYNC_STATE_KEY,
+    owner: STRUCTURE_SYNC_LEASE_OWNER,
+    ttlSeconds: SIGUR_POLLING_LEASE_TTL_SECONDS,
+    getMeta: () => ({
+      leaseMode: 'background_structure_sync',
+      startedAt: leaseStartedAt,
+      leaderOwner: STRUCTURE_SYNC_LEASE_OWNER,
+    }),
+    onError: error => {
+      console.error('[presence-polling] structure sync lease heartbeat error:', error.message);
+    },
+  });
+}
+
+export async function releaseStructureSyncSchedulerLock(): Promise<void> {
+  if (structureSyncLeaseHeartbeatStop) {
+    structureSyncLeaseHeartbeatStop();
+    structureSyncLeaseHeartbeatStop = null;
+  }
+
+  await mergeSigurRuntimeState({
+    key: SIGUR_STRUCTURE_SYNC_STATE_KEY,
+    owner: STRUCTURE_SYNC_LEASE_OWNER,
+    meta: {
+      startedAt: null,
+      lastReleasedAt: new Date().toISOString(),
+    },
+  }).catch(error => {
+    console.error('[presence-polling] structure sync release hook error:', (error as Error).message);
+  });
+  await releaseSigurRuntimeLease({
+    key: SIGUR_STRUCTURE_SYNC_STATE_KEY,
+    owner: STRUCTURE_SYNC_LEASE_OWNER,
+  }).catch(error => {
+    console.error('[presence-polling] structure sync lease release error:', (error as Error).message);
+  });
 }
 
 export async function releasePresencePollingLock(): Promise<void> {
@@ -629,6 +837,10 @@ export async function releasePresencePollingLock(): Promise<void> {
   if (manualSyncLeaseHeartbeatStop) {
     manualSyncLeaseHeartbeatStop();
     manualSyncLeaseHeartbeatStop = null;
+  }
+  if (exclusiveSyncLeaseHeartbeatStop) {
+    exclusiveSyncLeaseHeartbeatStop();
+    exclusiveSyncLeaseHeartbeatStop = null;
   }
 
   await mergeSigurRuntimeState({
@@ -647,9 +859,25 @@ export async function releasePresencePollingLock(): Promise<void> {
   }).catch(error => {
     console.error('[presence-polling] manual sync lease release error:', (error as Error).message);
   });
+  await mergeSigurRuntimeState({
+    key: SIGUR_EXCLUSIVE_SYNC_STATE_KEY,
+    owner: EXCLUSIVE_SYNC_LEASE_OWNER,
+    meta: {
+      manualSyncLockedAt: null,
+      lastManualSyncReleasedAt: new Date().toISOString(),
+    },
+  }).catch(error => {
+    console.error('[presence-polling] exclusive sync release hook error:', (error as Error).message);
+  });
+  await releaseSigurRuntimeLease({
+    key: SIGUR_EXCLUSIVE_SYNC_STATE_KEY,
+    owner: EXCLUSIVE_SYNC_LEASE_OWNER,
+  }).catch(error => {
+    console.error('[presence-polling] exclusive sync lease release error:', (error as Error).message);
+  });
 
   manualSyncLocks = 0;
   if (manualSyncLocks === 0) {
-    void startPresencePolling();
+    restartPresencePollingInBackground('manual sync release');
   }
 }

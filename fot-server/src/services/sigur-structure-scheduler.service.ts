@@ -1,7 +1,7 @@
 import { sigurService } from './sigur.service.js';
 import {
-  acquirePresencePollingLock,
-  releasePresencePollingLock,
+  acquireStructureSyncSchedulerLock,
+  releaseStructureSyncSchedulerLock,
   ManualSyncInProgressError,
 } from './presence-polling.service.js';
 import {
@@ -26,7 +26,7 @@ async function runStructureSyncCycle(): Promise<void> {
   syncInFlight = (async () => {
     let lockAcquired = false;
     try {
-      await acquirePresencePollingLock();
+      await acquireStructureSyncSchedulerLock();
       lockAcquired = true;
 
       const connectionType = await sigurService.getBackgroundConnectionType();
@@ -45,12 +45,12 @@ async function runStructureSyncCycle(): Promise<void> {
       console.log(`[structure-scheduler] hourly sync done connection=${connectionType}`);
     } catch (err) {
       if (err instanceof ManualSyncInProgressError) {
-        console.log('[structure-scheduler] skipped: manual sync in progress');
+        console.log('[structure-scheduler] skipped: manual or concurrent sync in progress');
       } else {
         console.error('[structure-scheduler] error:', (err as Error).message);
       }
     } finally {
-      if (lockAcquired) await releasePresencePollingLock();
+      if (lockAcquired) await releaseStructureSyncSchedulerLock();
       syncInFlight = null;
     }
   })();

@@ -27,6 +27,17 @@ interface IConnectionDraft {
   password: string;
 }
 
+function hasSavedExternalCredentials(settings: SigurConnectionSettings | null): boolean {
+  if (!settings) return false;
+
+  return Boolean(
+    settings.external.url
+    && settings.external.username
+    && settings.external.hasPassword
+    && settings.external.source !== 'unset',
+  );
+}
+
 const SOURCE_LABELS: Record<SigurConnectionSettings['internal']['source'], string> = {
   system_settings: 'Сохранённые настройки',
   env: '.env',
@@ -58,7 +69,7 @@ export const ConnectionSettingsTab: FC<IConnectionSettingsTabProps> = ({
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [archiveBusy, setArchiveBusy] = useState(false);
   const [savedFlash, setSavedFlash] = useState(false);
-  const [showConnectionForm, setShowConnectionForm] = useState(true);
+  const [showConnectionForm, setShowConnectionForm] = useState<boolean | null>(null);
   const [draft, setDraft] = useState<IConnectionDraft>({ url: '', username: '', password: '' });
 
   // Закрытие dropdown по клику вне
@@ -100,17 +111,12 @@ export const ConnectionSettingsTab: FC<IConnectionSettingsTabProps> = ({
           username: settings.external.username || '',
           password: '',
         });
-        const hasSavedCredentials = Boolean(
-          settings.external.url
-          && settings.external.username
-          && settings.external.hasPassword
-          && settings.external.source !== 'unset',
-        );
-        setShowConnectionForm(!hasSavedCredentials);
+        setShowConnectionForm(!hasSavedExternalCredentials(settings));
       })
       .catch(err => {
         if (cancelled) return;
         setError(err instanceof Error ? err.message : 'Не удалось загрузить настройки подключения Sigur');
+        setShowConnectionForm(true);
       })
       .finally(() => {
         if (!cancelled) setSettingsLoading(false);
@@ -120,12 +126,6 @@ export const ConnectionSettingsTab: FC<IConnectionSettingsTabProps> = ({
       cancelled = true;
     };
   }, [setError]);
-
-  useEffect(() => {
-    if (connected === false) {
-      setShowConnectionForm(true);
-    }
-  }, [connected]);
 
   // Загрузка отделов из whitelist синхронизации
   useEffect(() => {
@@ -184,7 +184,7 @@ export const ConnectionSettingsTab: FC<IConnectionSettingsTabProps> = ({
     });
     setSavedFlash(false);
     setError('');
-    setShowConnectionForm(false);
+    setShowConnectionForm(!hasSavedExternalCredentials(connectionSettings));
   };
 
   const handleSaveConnectionSettings = async () => {
@@ -209,16 +209,11 @@ export const ConnectionSettingsTab: FC<IConnectionSettingsTabProps> = ({
       setDraft({ url: nextSettings.external.url || '', username: nextSettings.external.username || '', password: '' });
       setSavedFlash(true);
       window.setTimeout(() => setSavedFlash(false), 2500);
-      const isConnected = await checkConnection();
-      const hasSavedCredentials = Boolean(
-        nextSettings.external.url
-        && nextSettings.external.username
-        && nextSettings.external.hasPassword
-        && nextSettings.external.source !== 'unset',
-      );
-      if (isConnected && hasSavedCredentials) {
+      const hasSavedCredentials = hasSavedExternalCredentials(nextSettings);
+      if (hasSavedCredentials) {
         setShowConnectionForm(false);
       }
+      void checkConnection();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Не удалось сохранить настройки подключения Sigur');
     } finally {
@@ -259,6 +254,8 @@ export const ConnectionSettingsTab: FC<IConnectionSettingsTabProps> = ({
 
   const effectiveConnections = connectionSettings?.connections ?? availableConnections;
   const externalConfig = connectionSettings?.external;
+  const isConnectionFormVisible = showConnectionForm === true;
+  const canShowCompactConnectionView = showConnectionForm === false;
 
   return (
     <>
@@ -269,7 +266,7 @@ export const ConnectionSettingsTab: FC<IConnectionSettingsTabProps> = ({
             {connected ? <Wifi size={18} /> : <WifiOff size={18} />}
             Подключение к Sigur
           </h2>
-          {!showConnectionForm && canEdit && (
+          {canShowCompactConnectionView && canEdit && (
             <button
               className="sigur-btn"
               onClick={() => setShowConnectionForm(true)}
@@ -293,7 +290,7 @@ export const ConnectionSettingsTab: FC<IConnectionSettingsTabProps> = ({
           </button>
         </div>
 
-        {showConnectionForm && (
+        {isConnectionFormVisible && (
           <div className="sigur-conn-config-grid">
             <div className="sigur-conn-config-card">
               <div className="sigur-conn-config-head">
@@ -353,7 +350,7 @@ export const ConnectionSettingsTab: FC<IConnectionSettingsTabProps> = ({
           </div>
         )}
 
-        {showConnectionForm && (
+        {isConnectionFormVisible && (
           <div className="sigur-conn-actions">
             <button
               className="sigur-btn"

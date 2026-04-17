@@ -15,9 +15,25 @@ type QueryResponse = {
   error?: { message: string } | null;
 };
 
+type RuntimeStateRow = {
+  key: string;
+  checkpoint_at: string | null;
+  lease_owner: string | null;
+  lease_expires_at: string | null;
+  heartbeat_at: string | null;
+  meta: Record<string, unknown>;
+  updated_at: string;
+};
+
 const mockedState = vi.hoisted(() => ({
   queryLog: [] as QueryRecord[],
+  envMock: {
+    interval: '15000',
+  },
   queryResolver: (() => ({ data: [], error: null })) as (query: QueryRecord) => QueryResponse | Promise<QueryResponse>,
+  ioMock: {
+    emit: vi.fn(),
+  },
   supabaseMock: {
     from: vi.fn(),
     rpc: vi.fn(async () => ({ data: null, error: null })),
@@ -34,30 +50,44 @@ const mockedState = vi.hoisted(() => ({
     recordSigurMonitorFailure: vi.fn(async () => undefined),
   },
   runtimeStateMock: {
-    pollingState: null as null | {
+    statesByKey: {} as Record<string, RuntimeStateRow | null>,
+    getSigurRuntimeState: vi.fn(async (key: string) => mockedState.runtimeStateMock.statesByKey[key] || null),
+    tryAcquireSigurRuntimeLease: vi.fn(async (params: {
       key: string;
-      checkpoint_at: string | null;
-      lease_owner: string | null;
-      lease_expires_at: string | null;
-      heartbeat_at: string | null;
-      meta: Record<string, unknown>;
-      updated_at: string;
-    },
-    getSigurRuntimeState: vi.fn(async () => mockedState.runtimeStateMock.pollingState),
-    tryAcquireSigurRuntimeLease: vi.fn(async () => ({ acquired: true, row: mockedState.runtimeStateMock.pollingState })),
+      owner: string;
+      ttlSeconds: number;
+      meta?: Record<string, unknown>;
+    }) => {
+      const nowIso = new Date().toISOString();
+      const current = mockedState.runtimeStateMock.statesByKey[params.key];
+      const nextState: RuntimeStateRow = {
+        key: params.key,
+        checkpoint_at: current?.checkpoint_at || null,
+        lease_owner: params.owner,
+        lease_expires_at: new Date(Date.now() + (params.ttlSeconds * 1000)).toISOString(),
+        heartbeat_at: nowIso,
+        meta: {
+          ...(current?.meta || {}),
+          ...(params.meta || {}),
+        },
+        updated_at: nowIso,
+      };
+      mockedState.runtimeStateMock.statesByKey[params.key] = nextState;
+      return { acquired: true, row: nextState };
+    }),
     mergeSigurRuntimeState: vi.fn(async (params: {
       key: string;
       checkpointAt?: Date | null;
       meta?: Record<string, unknown>;
       owner?: string | null;
     }) => {
-      const current = mockedState.runtimeStateMock.pollingState;
+      const current = mockedState.runtimeStateMock.statesByKey[params.key];
       const currentCheckpointMs = current?.checkpoint_at ? Date.parse(current.checkpoint_at) : Number.NEGATIVE_INFINITY;
       const nextCheckpointMs = params.checkpointAt ? params.checkpointAt.getTime() : currentCheckpointMs;
       const checkpoint_at = Number.isFinite(Math.max(currentCheckpointMs, nextCheckpointMs))
         ? new Date(Math.max(currentCheckpointMs, nextCheckpointMs)).toISOString()
         : null;
-      mockedState.runtimeStateMock.pollingState = {
+      const nextState: RuntimeStateRow = {
         key: params.key,
         checkpoint_at,
         lease_owner: current?.lease_owner || null,
@@ -69,9 +99,23 @@ const mockedState = vi.hoisted(() => ({
         },
         updated_at: new Date('2026-03-27T10:00:00.000Z').toISOString(),
       };
-      return mockedState.runtimeStateMock.pollingState;
+      mockedState.runtimeStateMock.statesByKey[params.key] = nextState;
+      return nextState;
     }),
-    releaseSigurRuntimeLease: vi.fn(async () => true),
+    releaseSigurRuntimeLease: vi.fn(async (params: { key: string; owner: string }) => {
+      const current = mockedState.runtimeStateMock.statesByKey[params.key];
+      if (!current || current.lease_owner !== params.owner) {
+        return false;
+      }
+      mockedState.runtimeStateMock.statesByKey[params.key] = {
+        ...current,
+        lease_owner: null,
+        lease_expires_at: null,
+        heartbeat_at: null,
+        updated_at: new Date('2026-03-27T10:00:00.000Z').toISOString(),
+      };
+      return true;
+    }),
     startSigurRuntimeLeaseHeartbeat: vi.fn(() => vi.fn()),
   },
 }));
@@ -126,8 +170,20 @@ vi.mock('../config/database.js', () => ({
   supabase: mockedState.supabaseMock,
 }));
 
+vi.mock('../config/env.js', () => ({
+  env: {
+    get SIGUR_PRESENCE_POLL_INTERVAL_MS() {
+      return mockedState.envMock.interval;
+    },
+  },
+}));
+
 vi.mock('./sigur.service.js', () => ({
   sigurService: mockedState.sigurServiceMock,
+}));
+
+vi.mock('../socket/io-instance.js', () => ({
+  getIo: () => mockedState.ioMock,
 }));
 
 vi.mock('./skud-backfill.service.js', () => ({
@@ -153,9 +209,14 @@ vi.mock('./sigur-runtime-state.service.js', () => ({
 }));
 
 import {
+  acquirePresencePollingLock,
+  acquireStructureSyncSchedulerLock,
   POLL_OVERLAP_MS,
   pollEventsOnce,
+  releasePresencePollingLock,
+  releaseStructureSyncSchedulerLock,
   resetPresencePollingStateForTests,
+  resolvePresencePollIntervalMs,
 } from './presence-polling.service.js';
 
 function findOperation(query: QueryRecord, method: string, firstArg?: unknown): QueryOperation | undefined {
@@ -194,6 +255,8 @@ function makeEvent(params: {
 describe('presence-polling.service', () => {
   beforeEach(() => {
     mockedState.queryLog.length = 0;
+    mockedState.envMock.interval = '15000';
+    mockedState.ioMock.emit.mockClear();
     mockedState.queryResolver = () => ({ data: [], error: null });
     mockedState.supabaseMock.from.mockClear();
     mockedState.supabaseMock.from.mockImplementation((table: string) => createBuilder(table));
@@ -207,13 +270,23 @@ describe('presence-polling.service', () => {
     mockedState.sigurMonitorMock.markPresencePollingCycleFinished.mockClear();
     mockedState.sigurMonitorMock.recordSigurMonitorSuccess.mockClear();
     mockedState.sigurMonitorMock.recordSigurMonitorFailure.mockClear();
-    mockedState.runtimeStateMock.pollingState = null;
+    mockedState.runtimeStateMock.statesByKey = {};
     mockedState.runtimeStateMock.getSigurRuntimeState.mockClear();
     mockedState.runtimeStateMock.tryAcquireSigurRuntimeLease.mockClear();
     mockedState.runtimeStateMock.mergeSigurRuntimeState.mockClear();
     mockedState.runtimeStateMock.releaseSigurRuntimeLease.mockClear();
     mockedState.runtimeStateMock.startSigurRuntimeLeaseHeartbeat.mockClear();
     resetPresencePollingStateForTests();
+  });
+
+  it('uses 15s as the default poll interval and clamps lower values', () => {
+    expect(resolvePresencePollIntervalMs()).toBe(15_000);
+
+    mockedState.envMock.interval = '5000';
+    expect(resolvePresencePollIntervalMs()).toBe(15_000);
+
+    mockedState.envMock.interval = '20000';
+    expect(resolvePresencePollIntervalMs()).toBe(20_000);
   });
 
   it('requests missed events from the last stored event on cold start', async () => {
@@ -255,6 +328,10 @@ describe('presence-polling.service', () => {
       source: 'presence_polling',
       connectionType: 'external',
     }));
+    expect(mockedState.ioMock.emit).toHaveBeenCalledTimes(1);
+    expect(mockedState.ioMock.emit).toHaveBeenCalledWith('presence_updated', {
+      at: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/),
+    });
   });
 
   it('keeps recovering from the previous day but caps the catch-up window length', async () => {
@@ -333,6 +410,7 @@ describe('presence-polling.service', () => {
       checkpointAt: expect.any(Date),
       owner: 'owner:sigur_presence_polling',
     }));
+    expect(mockedState.ioMock.emit).not.toHaveBeenCalled();
   });
 
   it('does not advance the checkpoint when persisting events fails', async () => {
@@ -373,6 +451,8 @@ describe('presence-polling.service', () => {
         lastError: 'Failed to persist Sigur events: temporary insert failure',
       }),
     }));
+    expect(mockedState.ioMock.emit).not.toHaveBeenCalled();
+    mockedState.ioMock.emit.mockClear();
 
     await pollEventsOnce(secondNow);
 
@@ -394,6 +474,7 @@ describe('presence-polling.service', () => {
       source: 'presence_polling',
       errorMessage: 'Failed to persist Sigur events: temporary insert failure',
     }));
+    expect(mockedState.ioMock.emit).toHaveBeenCalledTimes(1);
   });
 
   it('falls back to the start of the current day when the database has no events', async () => {
@@ -527,5 +608,61 @@ describe('presence-polling.service', () => {
       connectionType: 'external',
       errorMessage: 'connect ETIMEDOUT external-host:9500',
     }));
+  });
+
+  it('uses a dedicated lease for the background structure scheduler', async () => {
+    await acquireStructureSyncSchedulerLock();
+    await releaseStructureSyncSchedulerLock();
+
+    expect(mockedState.runtimeStateMock.tryAcquireSigurRuntimeLease).toHaveBeenCalledWith(expect.objectContaining({
+      key: 'sigur_structure_sync',
+      owner: 'owner:sigur_structure_sync',
+    }));
+    expect(mockedState.runtimeStateMock.releaseSigurRuntimeLease).toHaveBeenCalledWith({
+      key: 'sigur_structure_sync',
+      owner: 'owner:sigur_structure_sync',
+    });
+  });
+
+  it('waits for the background structure lease before starting a manual sync', async () => {
+    vi.useFakeTimers();
+
+    try {
+      const activeStructureLease: RuntimeStateRow = {
+        key: 'sigur_structure_sync',
+        checkpoint_at: null,
+        lease_owner: 'owner:background-structure',
+        lease_expires_at: new Date(Date.now() + 120_000).toISOString(),
+        heartbeat_at: new Date().toISOString(),
+        meta: { leaseMode: 'background_structure_sync' },
+        updated_at: new Date().toISOString(),
+      };
+      let structureChecks = 0;
+
+      mockedState.runtimeStateMock.getSigurRuntimeState.mockImplementation(async (key: string) => {
+        if (key === 'sigur_structure_sync') {
+          structureChecks += 1;
+          return structureChecks < 3 ? activeStructureLease : null;
+        }
+        return mockedState.runtimeStateMock.statesByKey[key] || null;
+      });
+
+      const lockPromise = acquirePresencePollingLock();
+      await vi.advanceTimersByTimeAsync(2_100);
+      await lockPromise;
+
+      expect(structureChecks).toBe(3);
+      expect(mockedState.runtimeStateMock.tryAcquireSigurRuntimeLease).toHaveBeenNthCalledWith(1, expect.objectContaining({
+        key: 'sigur_exclusive_sync',
+      }));
+      expect(mockedState.runtimeStateMock.tryAcquireSigurRuntimeLease).toHaveBeenNthCalledWith(2, expect.objectContaining({
+        key: 'sigur_presence_polling',
+      }));
+
+      await releasePresencePollingLock();
+    } finally {
+      resetPresencePollingStateForTests();
+      vi.useRealTimers();
+    }
   });
 });
